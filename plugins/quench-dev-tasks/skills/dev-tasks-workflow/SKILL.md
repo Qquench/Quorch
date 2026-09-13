@@ -1,6 +1,6 @@
 ---
 name: dev-tasks-workflow
-description: 指导如何在开发中遵循 Quench 任务状态机生命周期流转。涵盖会话启动协议、六大核心字段编写规范与任务粒度拆分原则。当需要查看任务进度、领取执行任务、完成交付或流转状态时使用。
+description: Guides how to adhere to the Quench DevTasks state machine lifecycle in development. Covers session startup protocols, six core field specifications, and task granularity guidelines. Use when inspecting task progress, checking out tasks, completing deliveries, or transitioning states. (指导如何在开发中遵循 Quench 任务状态机生命周期流转。涵盖会话启动协议、六大核心字段编写规范与任务粒度拆分原则。当需要查看任务进度、领取执行任务、完成交付或流转状态时使用。)
 ---
 
 # Quench 开发任务工作流指南 (Dev-Tasks Workflow)

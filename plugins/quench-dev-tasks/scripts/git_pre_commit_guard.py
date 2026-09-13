@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
-"""Quench Git Pre-commit Guard — 零依赖独立守卫脚本。
+"""Quench Git Pre-commit Guard — Zero-dependency standalone pre-commit guard script.
+Only uses Python standard library without third-party dependencies.
+Acts as final physical defense before commit in tools without PreToolUse hooks
+(such as Cursor, Windsurf, Claude Code, bare Git CLI) to block code changes outside
+the active task's affected files whitelist.
+
+[中文说明] Quench Git Pre-commit Guard — 零依赖独立守卫脚本。
 仅使用 Python 标准库，无任何第三方依赖。
 在不支持 PreToolUse Hook 的开发工具（如 Cursor、Windsurf、Claude Code、裸 Git CLI）中
 作为提交前最后物理防线，阻断超出当前任务【涉及文件】范围的代码变更。
@@ -151,10 +157,10 @@ def find_active_task(dev_tasks_dir: str) -> Optional[Tuple[str, str, List[str]]]
             status_text = header_match.group(2).strip()
             task_title = header_match.group(3).strip()
 
-            if "执行中" in status_text or "🔨" in status_text:
-                # 提取【涉及文件】
+            if "执行中" in status_text or "🔨" in status_text or "in progress" in status_text.lower():
+                # 提取【涉及文件】/ [Affected Files]
                 allowed_files: List[str] = []
-                files_match = re.search(r"####\s+【涉及文件】\s*```(.*?)```", block, re.DOTALL)
+                files_match = re.search(r"####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```", block, re.DOTALL | re.IGNORECASE)
                 if files_match:
                     raw_block = files_match.group(1).strip()
                     for line in raw_block.splitlines():

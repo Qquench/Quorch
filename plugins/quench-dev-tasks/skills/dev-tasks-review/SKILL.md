@@ -1,6 +1,6 @@
 ---
 name: dev-tasks-review
-description: 指导高阶架构审查模型 (Reviewer) 或架构规划者如何进行代码审查、编写架构演进任务单、评定缺陷与弹性质量分级。当用户要求审查架构、评估重构方案或由执行模型升级为深度审查时使用。
+description: Guides senior architecture reviewer models (Reviewer) or architecture planners in code review, drafting architectural evolution DevTasks, and grading defect & resilience quality. Use when reviewing architecture, assessing refactoring plans, or escalating from executor models. (指导高阶架构审查模型或架构规划者进行代码审查、编写架构演进任务单、评定缺陷与弹性质量分级。当用户要求审查架构、评估重构方案或由执行模型升级为深度审查时使用。)
 ---
 
 # Quench 架构与任务审查指南 (Dev-Tasks Review)

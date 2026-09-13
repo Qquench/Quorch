@@ -587,8 +587,8 @@ def main():
 
             task_id_pattern = re.escape(active_task.id)
             pattern = re.compile(
-                rf"###\s+(?:任务|Task)\s+{task_id_pattern}\s+.*?####\s+【涉及文件】\s*```(.*?)```",
-                re.DOTALL,
+                rf"###\s+(?:任务|Task)\s+{task_id_pattern}\s+.*?####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```",
+                re.DOTALL | re.IGNORECASE,
             )
             m = pattern.search(content)
 
@@ -619,25 +619,26 @@ def main():
                         break
 
             if is_in_allowed_scope:
-                emit_decision("allow", f"命中执行中任务范围 (Task {active_task.id})")
+                emit_decision("allow", f"Matched active task scope / 命中执行中任务范围 (Task {active_task.id})")
                 return
 
             # 任务外文件，先检查 Layer 1 静态白名单与 Layer 2 会话旁路（含会话锁核验）
             if is_whitelist_matched(config, target_file, workspace_root):
-                emit_decision("allow", "命中静态白名单配置放行")
+                emit_decision("allow", "Matched static whitelist / 命中静态白名单配置放行")
                 return
 
             if is_session_bypass_matched(workspace_root, target_file, conversation_id, logger=logger):
-                emit_decision("allow", "命中动态会话旁路放行")
+                emit_decision("allow", "Matched session bypass / 命中动态会话旁路放行")
                 return
 
             # 触发任务越界拦截提示
             reason = (
-                f"【范围外修改拦截】当前执行中的任务（Task {active_task.id}: {active_task.title}）"
-                f"规划的文件列表中未包含此文件。\n\n"
-                f"📁 目标文件: {target_file}\n"
-                f"💡 模型给出的修改理由: {desc}\n\n"
-                f"若确属规划遗漏请点击【允许】，若属非预期变动请点击【拒绝】。"
+                f"[Out-of-Scope File Modification Warning / 范围外修改拦截]\n"
+                f"Active task (Task {active_task.id}: {active_task.title}) does not include this file in its declared scope.\n"
+                f"当前执行中的任务（Task {active_task.id}: {active_task.title}）规划的文件列表中未包含此文件。\n\n"
+                f"📁 Target / 目标文件: {target_file}\n"
+                f"💡 Agent Justification / 模型给出的修改理由: {desc}\n\n"
+                f"Click [Allow] if this was a planning omission; click [Reject] if unexpected. / 若确属规划遗漏请点击【允许】，若属非预期变动请点击【拒绝】。"
             )
             emit_decision("ask", reason)
             return
@@ -647,23 +648,24 @@ def main():
         # -------------------------------------------------------------
         # 第一层：检查静态白名单（配置文件）
         if is_whitelist_matched(config, target_file, workspace_root):
-            emit_decision("allow", "命中静态白名单配置放行")
+            emit_decision("allow", "Matched static whitelist / 命中静态白名单配置放行")
             return
 
         # 第二层：检查动态会话旁路（.agents/.quench_bypass.json，含会话锁核验）
         if is_session_bypass_matched(workspace_root, target_file, conversation_id, logger=logger):
-            emit_decision("allow", "命中动态会话旁路放行")
+            emit_decision("allow", "Matched session bypass / 命中动态会话旁路放行")
             return
 
         # 第三层：交互式弹窗向用户确认（Ask Modal）
         reason = (
-            f"【未纳管代码修改确认】\n"
+            f"【未纳管代码修改确认 / Unmanaged Code Modification Confirmation】\n"
+            f"No Quench task is currently in '🔨 In Progress' state, and the target file did not match any fast-track whitelist or session bypass rule.\n"
             f"当前工作区未处于任何 Quench 任务的“🔨 执行中”状态，且目标文件未命中快速通道白名单或会话旁路规则。\n\n"
-            f"📁 目标文件: {target_file}\n"
-            f"💡 模型修改理由: {desc}\n\n"
-            f"请进行决策：\n"
-            f"• 点击【允许】：仅对本次修改单次放行（临时微调）；\n"
-            f"• 点击【拒绝】：拦截本次修改。如需批量微调，可对 Agent 发送“开启样式快速通道”或领单正式任务。"
+            f"📁 Target / 目标文件: {target_file}\n"
+            f"💡 Model Justification / 模型修改理由: {desc}\n\n"
+            f"Decision Options / 请进行决策：\n"
+            f"• Click [Allow] / 点击【允许】：Allow single edit for this tool call / 仅对本次修改单次放行；\n"
+            f"• Click [Reject] / 点击【拒绝】：Block modification. To bypass temporarily, instruct Agent to enable fast-track bypass or checkout a task / 拦截本次修改。"
         )
         emit_decision("ask", reason)
 

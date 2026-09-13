@@ -37,55 +37,62 @@ VALID_TRANSITIONS: Dict[str, List[str]] = {
 
 
 class StateMachineError(Exception):
-    """状态机基础异常"""
+    """Base exception for Quench state machine. / 状态机基础异常。"""
     pass
 
 
 class TaskNotFoundError(StateMachineError):
-    """任务 ID 未找到"""
+    """Task ID not found in file. / 任务 ID 未找到。"""
     pass
 
 
 class InvalidTransitionError(StateMachineError):
-    """非法状态流转异常"""
+    """Invalid state transition error. / 非法状态流转异常。"""
     pass
 
 
 @dataclass
 class TaskItem:
-    id: str              # 如 "1.1" 或 "1"
-    title: str           # 标题文本
-    status: str          # 状态字符串，如 "⬜ 待确认"
-    line_number: int     # 行号 (0-indexed)
-    raw_line: str        # 原始行内容
+    id: str              # e.g. "1.1" or "1"
+    title: str           # Task title / 标题文本
+    status: str          # Canonical status string / 状态字符串，如 "⬜ 待确认"
+    line_number: int     # Line number (0-indexed) / 行号
+    raw_line: str        # Raw line text / 原始行内容
 
 
 EMOJI_STATUS_OPTIONS = [
-    r"⬜\s*待确认",
-    r"✅\s*已确认",
-    r"🔨\s*执行中",
-    r"✔️\s*已完成",
-    r"✔\s*已完成",
-    r"⏭️\s*跳过",
-    r"⏭\s*跳过",
-    r"🔄\s*需返工",
+    r"⬜\s*(?:待确认|Pending)",
+    r"✅\s*(?:已确认|Confirmed)",
+    r"🔨\s*(?:执行中|In[-_ ]?Progress)",
+    r"✔️\s*(?:已完成|Completed)",
+    r"✔\s*(?:已完成|Completed)",
+    r"⏭️\s*(?:跳过|Skipped)",
+    r"⏭\s*(?:跳过|Skipped)",
+    r"🔄\s*(?:需返工|Rework)",
     r"待确认",
     r"已确认",
     r"执行中",
     r"已完成",
     r"跳过",
     r"需返工",
+    r"Pending",
+    r"Confirmed",
+    r"In[-_ ]?Progress",
+    r"Completed",
+    r"Skipped",
+    r"Rework",
 ]
 
 STATUS_REGEX_PART = "|".join(EMOJI_STATUS_OPTIONS)
 
 TASK_HEADER_PATTERN = re.compile(
-    rf"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\s*[:—\-]?\s*({STATUS_REGEX_PART})\s*[:—\-]?\s*(.*)$"
+    rf"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\s*[:—\-]?\s*({STATUS_REGEX_PART})\s*[:—\-]?\s*(.*)$",
+    re.IGNORECASE,
 )
 
 
 def _normalize_status(status_str: str) -> str:
-    """将可能缺少 emoji 或带有前后空格的状态标准化"""
+    """Normalize status string (supports emoji, whitespace variants, English and Chinese). / 标准化任务状态字符串（支持中英双语与各类空格Emoji变体）。"""
     s = status_str.strip()
     for standard in ALL_STATUSES:
         if standard in s or standard.replace(" ", "") in s.replace(" ", ""):
@@ -93,13 +100,29 @@ def _normalize_status(status_str: str) -> str:
         key = standard.split(" ")[-1]
         if key in s:
             return standard
+
+    # English aliases mapping
+    s_lower = s.lower()
+    if "pending" in s_lower:
+        return STATUS_PENDING
+    if "confirmed" in s_lower:
+        return STATUS_CONFIRMED
+    if "progress" in s_lower:
+        return STATUS_IN_PROGRESS
+    if "completed" in s_lower or "done" in s_lower:
+        return STATUS_COMPLETED
+    if "skipped" in s_lower or "skip" in s_lower:
+        return STATUS_SKIPPED
+    if "rework" in s_lower:
+        return STATUS_REWORK
+
     return s
 
 
 def parse_task_file(filepath: str) -> List[TaskItem]:
-    """解析 Markdown 任务文件，提取所有任务条目及其当前状态"""
+    """Parse Markdown task file, extracting all task items and their current statuses. / 解析 Markdown 任务文件，提取所有任务条目及其当前状态。"""
     if not os.path.isfile(filepath):
-        raise FileNotFoundError(f"任务文件不存在: {filepath}")
+        raise FileNotFoundError(f"Task file not found / 任务文件不存在: {filepath}")
 
     tasks: List[TaskItem] = []
     with open(filepath, "r", encoding="utf-8") as f:
@@ -128,17 +151,17 @@ def parse_task_file(filepath: str) -> List[TaskItem]:
 def transition_task(
     filepath: str, task_id: str, new_status: str, timeout: float = 5.0
 ) -> TaskItem:
-    """原子化状态转换：读取→校验合法性→替换写回。带 filelock 排他锁。"""
+    """Atomically transition task status with filelock: read -> validate -> replace -> write back. / 原子化状态转换：读取→校验合法性→替换写回。带 filelock 排他锁。"""
     norm_new = _normalize_status(new_status)
     if norm_new not in ALL_STATUSES:
-        raise InvalidTransitionError(f"未知目标状态 '{new_status}'，合法状态: {ALL_STATUSES}")
+        raise InvalidTransitionError(f"Unknown target status '{new_status}', valid: {ALL_STATUSES} / 未知目标状态 '{new_status}'，合法状态: {ALL_STATUSES}")
 
     lock_path = filepath + ".lock"
     lock = filelock.FileLock(lock_path, timeout=timeout)
 
     with lock:
         if not os.path.isfile(filepath):
-            raise FileNotFoundError(f"持有锁后发现任务文件不存在: {filepath}")
+            raise FileNotFoundError(f"Task file disappeared after acquiring lock / 持有锁后发现任务文件不存在: {filepath}")
 
         with open(filepath, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -163,7 +186,7 @@ def transition_task(
                 break
 
         if not target_item:
-            raise TaskNotFoundError(f"未在文件 {filepath} 中找到任务 ID '{task_id}'")
+            raise TaskNotFoundError(f"Task ID '{task_id}' not found in file {filepath} / 未在文件 {filepath} 中找到任务 ID '{task_id}'")
 
         cur_status = target_item.status
         if cur_status == norm_new:
@@ -172,8 +195,8 @@ def transition_task(
         allowed = VALID_TRANSITIONS.get(cur_status, [])
         if norm_new not in allowed:
             raise InvalidTransitionError(
-                f"任务 {task_id} 当前状态为 '{cur_status}'，不允许流转至 '{norm_new}'。"
-                f"合法路径: {allowed}"
+                f"Task {task_id} current status '{cur_status}' cannot transition to '{norm_new}'. Allowed: {allowed} / "
+                f"任务 {task_id} 当前状态为 '{cur_status}'，不允许流转至 '{norm_new}'。合法路径: {allowed}"
             )
 
         old_line = lines[target_idx]
@@ -207,7 +230,7 @@ def transition_task(
 
 
 def get_status_summary(filepath: str) -> Dict[str, int]:
-    """返回文件内各状态的统计字典"""
+    """Return dictionary of task counts per status. / 返回文件内各状态的统计分布字典。"""
     tasks = parse_task_file(filepath)
     summary: Dict[str, int] = {s: 0 for s in ALL_STATUSES}
     for t in tasks:

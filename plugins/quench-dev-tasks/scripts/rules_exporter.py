@@ -21,31 +21,32 @@ if sys.version_info >= (3, 7):
     except Exception:
         pass
 
-DEFAULT_FALLBACK_RULES = """# Quench DevTasks 核心常驻开发纪律 (Cursor Agent Guidelines)
+DEFAULT_FALLBACK_RULES = """# Quench DevTasks Core Developer Discipline / 核心常驻开发纪律 (Cursor Agent Guidelines)
 
-作为在接入 Quench 治理体系项目中工作的 AI 编程助手，你必须严格执行以下核心纪律约束：
+As an AI coding assistant operating within a Quench-governed project, you MUST strictly adhere to the following core disciplines:
+（作为在接入 Quench 治理体系项目中工作的 AI 编程助手，你必须严格执行以下核心纪律约束：）
 
-## 1. 任务状态与领单纪律
-- **严禁擅自修改生产代码**：在未检出任务（状态未处于 `🔨 执行中`）前，严禁修改任何生产源代码。
-- **通过 MCP 工具流转状态**：必须通过 `quench-dev-tasks` 提供的 MCP Tools (dev_tasks_status, dev_tasks_checkout, dev_tasks_complete, dev_tasks_archive) 流转状态，严禁直接文本替换修改任务状态 Emoji。
-- **单任务串行执行**：全局同一时刻仅允许一个任务处于 `🔨 执行中`。
+## 1. Task Status & Checkout Discipline / 任务状态与领单纪律
+- **No Unmanaged Code Modification / 严禁擅自修改生产代码**：Do NOT modify any production source code before checking out a task (status MUST be `🔨 执行中`). （在未检出任务，状态未处于 `🔨 执行中` 前，严禁修改任何生产源代码。）
+- **State Transition via MCP Tools / 通过 MCP 工具流转状态**：MUST transition task states through MCP tools (dev_tasks_status, dev_tasks_checkout, dev_tasks_complete, dev_tasks_archive). Direct manual text replacement of task status emojis is prohibited. （必须通过 MCP 工具流转状态，严禁直接文本替换修改任务状态 Emoji。）
+- **Single Active Task Serial Execution / 单任务串行执行**：Only ONE task is permitted to be in `🔨 执行中` state globally at any given moment. （全局同一时刻仅允许一个任务处于 `🔨 执行中`。）
 
-## 2. 代码施工与涉及文件白名单
-- **严格遵循【涉及文件】白名单**：修改代码时，严格受限于当前任务单中【涉及文件】清单。若发现需要修改范围外文件，必须先停止并向开发者提示扩充任务单白名单。
-- **改动业务逻辑必加单测**：凡是修改核心业务逻辑、算法或接口行为，必须在测试目录追加单测断言，并在【DoD 验证命令】中验证通过，杜绝隐蔽回归。
-- **保留架构设计与注释**：不得擅自删除既有代码架构注释与类型注解。
+## 2. Implementation Scope & Affected Files Whitelist / 代码施工与涉及文件白名单
+- **Strict Adherence to Whitelist / 严格遵循【涉及文件】白名单**：All code changes are strictly restricted to the files listed under 【涉及文件】/ [Affected Files]. If additional files need modification, halt and prompt the developer to update the task whitelist first. （修改代码时，严格受限于当前任务单中【涉及文件】清单。若发现需要修改范围外文件，必须先停止并向开发者提示扩充任务单白名单。）
+- **Mandatory Test Assertions / 改动业务逻辑必加单测**：Modifications to core logic, algorithms, or API contracts MUST include unit test assertions in the test directory, validated via 【DoD 验证命令】/ [DoD Commands]. （凡是修改核心业务逻辑、算法或接口行为，必须在测试目录追加单测断言，并在【DoD 验证命令】中验证通过，杜绝隐蔽回归。）
+- **Preserve Architecture & Comments / 保留架构设计与注释**：Preserve existing architecture comments and type annotations. （不得擅自删除既有代码架构注释与类型注解。）
 
-## 3. Git Commit 物理硬防线配合
-- 本项目已启用 Git Pre-commit 守卫。若未检出任务或提交了任务单范围外的代码修改，git commit 将被物理拦截阻断。
+## 3. Physical Pre-Commit Guard / Git Commit 物理硬防线配合
+- Pre-commit guard is enabled. Git commits modifying files outside the active task scope or without an active task will be physically blocked. （本项目已启用 Git Pre-commit 守卫。若未检出任务或提交了任务单范围外的代码修改，git commit 将被物理拦截阻断。）
 """
 
 
 class RulesExporter:
-    """提取 Quench 常驻纪律并渲染为 Cursor 规范配置。"""
+    """Extract Quench resident discipline and render as Cursor rules. / 提取 Quench 常驻纪律并渲染为 Cursor 规范配置。"""
 
     @staticmethod
     def resolve_discipline_path(discipline_path: str | None = None) -> str:
-        """解析 discipline_path 绝对路径，支持缺省定位与相对路径移植。"""
+        """Resolve absolute discipline_path with fallback support. / 解析 discipline_path 绝对路径，支持缺省定位与相对路径移植。"""
         if discipline_path:
             norm = os.path.abspath(discipline_path)
             if os.path.isfile(norm):
