@@ -1,40 +1,40 @@
-# Quench Dev-Orchestrator 开发任务管理
+# Quench Dev-Orchestrator Task Management
 
-> 本目录遵循 **Quench 双模型协同开发任务管理工作流（架构审查 Reviewer + 敏捷执行 Runner）**。
-> 所有开发规则（状态标记、六大核心字段规范、会话启动协议、架构审查行为、DoD 验收标准）参见内置规范：
-> - 核心工作流：[`plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md`](../../plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)
-> - 审查模型指引：[`plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`](../../plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md)
-> - 编码与测试标准：[`plugins/quench-dev-tasks/rules/coding-standards.md`](../../plugins/quench-dev-tasks/rules/coding-standards.md)
+[English](README.md) | [简体中文](README_zh.md)
 
----
-
-## 本项目技术栈与验收规范
-
-| 属性 | 规范要求 |
-|------|---------|
-| **技术栈** | Python (FastMCP) + Antigravity Plugin & Lifecycle Hooks API |
-| **单测套件** | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; .\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests -v` |
-| **设计规范** | [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md) |
-| **DoD 验收标准** | 全量单元测试 100% 通过（83+ 项）、零机器绝对路径硬编码、跨平台 UTF-8 编码兼容 |
+> This directory follows the **Quench Dual-Model DevTask Management Workflow (Architect Reviewer + Agile Runner)**.  
+> All development conventions (status markers, the six core fields, session initiation protocols, architectural review guidelines, DoD verification standards) are defined in the built-in specifications:
+> - Core Workflow: [`plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md`](../../plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)
+> - Reviewer Model Guidelines: [`plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`](../../plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md)
+> - Coding & Testing Standards: [`plugins/quench-dev-tasks/rules/coding-standards.md`](../../plugins/quench-dev-tasks/rules/coding-standards.md)
 
 ---
 
-## 当前活跃任务单 (Active Dev Task)
+## Technical Stack & Acceptance Criteria
 
-> 当前暂无进行中任务单（所有阶段性开发任务均已闭环并移入归档区）。  
-> 新任务可通过调用 `dev_tasks_propose` 或在 `docs/roadmap/` 阶段路线图指引下创建。
+| Attribute | Requirement |
+| :--- | :--- |
+| **Tech Stack** | Python (FastMCP) + Antigravity Plugin & Cursor Adapter Layer + CLI Tools |
+| **Test Suite** | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; pytest plugins/quench-dev-tasks/server/tests -v` |
+| **Architecture Spec** | [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md) |
+| **DoD Standards** | Full unit test suite passes 100% (105+ tests), zero hardcoded local machine paths, cross-platform UTF-8 encoding |
 
 ---
 
-## 归档记录 (Archive History)
+## Active DevTask
 
-| 归档任务单 | 核心交付内容 | 任务数 | 闭环状态 |
+> Currently there is no task in progress (all stage tasks have been completed and moved to the archive).  
+> New tasks can be initiated via `dev_tasks_propose` or guided by stage roadmaps under `docs/roadmap/`.
+
+---
+
+## Archive History
+
+| Archived DevTask | Key Deliverables | Tasks | Status |
 | :--- | :--- | :---: | :---: |
-| [`archive/2026-09-13_stage2_antigravity_community_ready.md`](./archive/2026-09-13_stage2_antigravity_community_ready.md) | Antigravity 社区开源就绪（动态渲染/自愈脚手架/门面资产） | 4 | ✔️ 100% 闭环 |
-| [`archive/2026-09-13_fix_external_hooks_and_diagnostics.md`](./archive/2026-09-13_fix_external_hooks_and_diagnostics.md) | 外部项目 Hook 闭环生成与 Windows cmd 引号保护 | 2 | ✔️ 100% 闭环 |
-| [`archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`](./archive/2026-09-13_stage1_scaffolding_observability_and_migration.md) | 可观测性日志/配置平滑升级/模板中立化 | 3 | ✔️ 100% 闭环 |
-| [`archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md) | 治理引擎深化（旁路锁+双轨边界）与开源跨工具适配 | 4 | ✔️ 100% 闭环 |
-| [`archive/2026-09-11_plugin_development.md`](./archive/2026-09-11_plugin_development.md) | quench-dev-tasks 插件全量核心机制开发（Phase 1 ~ Phase 3） | 11 | ✔️ 100% 闭环 |
-
-
-
+| [`archive/2026-09-13_stage3_cross_tool_cursor_adaptation.md`](./archive/2026-09-13_stage3_cross_tool_cursor_adaptation.md) | Cross-tool Cursor adaptation & Quench CLI suite (MDC exporter, chained Git hooks) | 3 | ✔️ 100% Closed |
+| [`archive/2026-09-13_stage2_antigravity_community_ready.md`](./archive/2026-09-13_stage2_antigravity_community_ready.md) | Antigravity community release ready (dynamic config, self-healing installer, portal assets) | 4 | ✔️ 100% Closed |
+| [`archive/2026-09-13_fix_external_hooks_and_diagnostics.md`](./archive/2026-09-13_fix_external_hooks_and_diagnostics.md) | External project Hook rendering fix & Windows cmd quote protection | 2 | ✔️ 100% Closed |
+| [`archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`](./archive/2026-09-13_stage1_scaffolding_observability_and_migration.md) | Observable logging, smooth config migration, template neutralization | 3 | ✔️ 100% Closed |
+| [`archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md) | Deep governance engine (session bypass lock + dual-track boundaries) & cross-tool adaptation | 4 | ✔️ 100% Closed |
+| [`archive/2026-09-11_plugin_development.md`](./archive/2026-09-11_plugin_development.md) | Full core mechanism development for quench-dev-tasks plugin (Phase 1 ~ 3) | 11 | ✔️ 100% Closed |

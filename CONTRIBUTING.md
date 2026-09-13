@@ -1,5 +1,7 @@
 # Contributing to Quench Dev-Orchestrator (`quorch`)
 
+[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING_zh.md)
+
 Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We welcome bug fixes, feature enhancements, documentation improvements, and architectural suggestions.
 
 ---
@@ -7,9 +9,9 @@ Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We w
 ## 🏗️ Development Environment Setup
 
 ### Prerequisites
-- **Python**: Version 3.8 or higher (Python 3.10+ recommended).
+- **Python**: Version 3.11 or higher.
 - **Git**: Installed and available in your system path.
-- **FastMCP**: `>=2.0` (installed automatically via `install.py`).
+- **FastMCP**: `>=2.0` (installed automatically via `install.py` or `requirements.txt`).
 
 ### Local Bootstrap Steps
 1. Fork and clone the repository:
@@ -54,7 +56,7 @@ All non-trivial changes should be planned using standard DevTasks containing the
 - **DoD Verification Commands** (`【DoD 验证命令】`): Concrete test commands that must be executed and pass.
 
 ### 2. Test-Driven Development (TDD)
-- **Zero Regression**: All existing 70+ tests must continue to pass 100%.
+- **Zero Regression**: All existing 105+ tests must continue to pass 100%.
 - **Assertion Coverage**: Any bug fix or new feature must include accompanying unit test assertions in `plugins/quench-dev-tasks/server/tests/`.
 - **Zero Local Hardcoded Paths**: Never commit personal absolute file paths (such as `C:\Users\...` or `D:\Work\...`). Always resolve paths dynamically using `os.path.dirname(os.path.abspath(__file__))`.
 

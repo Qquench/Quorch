@@ -1,52 +1,57 @@
 # ==============================================================================
-# Quench 项目特异化配置清单 (Quench Project Stack Manifest)
-# 供 quench-dev-tasks Plugin 读取，实现项目特定边界、测试套件与目录映射的解耦。
+# Quench Project Stack Manifest (Quench 项目特异化配置清单)
+# Read by the quench-dev-tasks plugin to decouple project boundaries and tests.
+# 供 quench-dev-tasks 插件读取，实现项目特定边界、测试套件与目录映射的解耦。
 # ==============================================================================
 
-# 配置架构版本（系统自动管理）
+# Configuration schema version (managed automatically / 配置架构版本)
 schema_version: "1.0"
 
-# 项目名称（必填）
+# Project name (Required / 项目名称)
 project_name: "__PROJECT_NAME__"
 
+# Task management directory (Relative to project root, default: docs/dev_tasks)
 # 任务管理目录（相对于项目根目录，默认: docs/dev_tasks）
 dev_tasks_dir: "docs/dev_tasks"
 
+# Closed task archive directory (Relative to project root, default: docs/dev_tasks/archive)
 # 已闭环任务归档目录（相对于项目根目录，默认: docs/dev_tasks/archive）
 archive_dir: "docs/dev_tasks/archive"
 
+# Changelog path (Relative to project root, default: CHANGELOG.md)
 # 变更记录日志路径（相对于项目根目录，默认: CHANGELOG.md）
 changelog_path: "CHANGELOG.md"
 
-# 系统架构设计手册路径（可选，供高阶架构审查时优先阅读建立上下文）
+# Architecture design document path (Optional / 架构设计文档路径)
 # architecture_doc: "docs/architecture/system_design.md"
 
-# 测试套件目录（可选，供 DoD 断言物理审计使用，默认: tests）
+# Test suite directory (Optional / 测试套件目录)
 # test_dir: "tests"
 
-# 默认安全回归测试命令（可选）
+# Default regression test runner command (Optional / 默认回归测试命令)
 # test_runner: "pytest tests -v"
 
 # ==============================================================================
-# 项目通用工程规范与边界约束（自动注入给架构审查与日常执行提示词）
+# Project Engineering Constraints & Guidelines (项目工程规范与边界约束)
+# Injected into agent prompts during architectural review and task execution.
 # 支持根据项目所属技术栈定制，参考示例：
 # ------------------------------------------------------------------------------
-# [示例 A: Web 全栈开发 (FastAPI / Spring Boot + React / Vue)]
-# - "所有 API 接口与请求响应数据结构变更，必须同步更新契约与前端客户端"
-# - "核心业务逻辑变更必须在 tests/ 目录中配套自动化单测与断言"
-# - "敏感凭据、私钥或 Token 严禁硬编码，必须通过环境变量或安全配置中心读取"
+# [Example A: Web Full-Stack Development / Web 全栈开发 (FastAPI / Spring Boot + React / Vue)]
+# - "All API schema updates must be synchronized with frontend clients"
+# - "Core business logic changes must be covered by automated unit tests in tests/"
+# - "Secrets, tokens, and private keys must never be hardcoded"
 #
-# [示例 B: 云原生微服务与分布式系统 (Go / Rust / gRPC)]
-# - "gRPC Protobuf 契约变更必须保证向后兼容性，严禁破坏既有字段编号"
-# - "并发共享状态访问必须保证线程安全，杜绝竞态与连接池泄露"
+# [Example B: Cloud-Native Microservices & Distributed Systems / 云原生微服务 (Go / Rust / gRPC)]
+# - "gRPC Protobuf contract updates must be backward-compatible"
+# - "Concurrent state access must be thread-safe with zero connection leaks"
 #
-# [示例 C: CLI 命令行工具与系统运维 (Python / Click / Cobra)]
-# - "CLI 命令输出在跨平台终端（Windows/Linux/macOS）下必须保持 UTF-8 兼容"
-# - "破坏性参数（如清理、覆盖）必须提供确认提示或安全保护机制"
+# [Example C: CLI Tools & Systems Engineering / CLI 命令行工具 (Python / Click / Cobra)]
+# - "CLI commands must be cross-platform and UTF-8 safe across Windows, Linux, and macOS"
+# - "Destructive options must require explicit confirmation"
 #
-# [示例 D: 嵌入式与物联网 (C/C++ / IoT)]
-# - "通信报文解析必须增加边界截断防御，严禁指针与数组越界"
-# - "所有硬件通信交互必须具备超时与容错重试机制"
+# [Example D: Embedded & IoT / 嵌入式与物联网 (C/C++ / IoT)]
+# - "Packet parsers must enforce boundary defense against buffer overflows"
+# - "All hardware communication must feature timeout and retry mechanisms"
 # ------------------------------------------------------------------------------
 constraints:
   - "所有核心业务与算法逻辑变更，必须伴随自动化测试验证，确保测试套件全部通过"
@@ -54,24 +59,27 @@ constraints:
   - "严禁将生产凭据、密钥或私有 Token 硬编码在代码仓库中"
 
 # ==============================================================================
-# 第一层：快速通道静态白名单规则（Fast-Track Rules）
+# Tier 1: Fast-Track Static Whitelist Rules (第一层：快速通道静态白名单规则)
+# List of glob patterns exempt from task state-machine checks.
 # 允许免除任务状态机管控、直接修改的文件匹配模式（Glob）列表。
+# ⚠️ Principle: Keep minimal. Starts empty, add patterns incrementally as needed.
 # ⚠️ 维护原则：宁少勿多。默认为空单，由项目根据实际需求逐步添加。
 # ==============================================================================
 fast_track_rules:
   allow_untracked_patterns: []
 
 # ==============================================================================
-# 代码审计管控边界 (Governance Scope Boundaries - 可选)
+# Governance Scope Boundaries (代码审计管控边界 - Optional / 可选)
+# By default, the dual-track heuristic engine automatically distinguishes production code from documents.
 # 默认为空即可，内核会自动通过启发式双轨引擎智能识别生产代码与放行文档。
 # 若需显式定义法定边界，可取消注释并配置：
 # ==============================================================================
 # governance_scope:
-#   # 🔴 生产受管范围（强触发任务状态机）
+#   # 🔴 Managed production scope (Triggers state machine enforcement / 生产受管范围)
 #   managed_paths:
 #     - "src/**"
 #     - "package.json"
-#   # 🟢 自由放行范围（文档、规划、设计素材，免除任务流程）
+#   # 🟢 Unmanaged documentation & design assets (Exempt from task flow / 自由放行范围)
 #   unmanaged_paths:
 #     - "docs/**"
 #     - "*.md"
