@@ -22,6 +22,6 @@
 若您需要查阅当前阶段正在施工或即将推进的工程开发任务，请前往：
 👉 **[docs/roadmap/](../docs/roadmap/README.md)**
 
-- 🌐 [阶段二：Antigravity 社区通用开箱即用与开源准备](../docs/roadmap/stage2_antigravity_community_ready.md)
-- ⚡ [阶段三：以 Cursor 为切入点的跨开发工具适配](../docs/roadmap/stage3_cross_tool_cursor_adaptation.md)
+- ⚡ [已归档阶段三：以 Cursor 为切入点的跨开发工具适配与 CLI 工具集](../docs/roadmap/archive/stage3_cross_tool_cursor_adaptation.md)
+- 🌐 [已归档阶段二：Antigravity 社区通用开箱即用与开源准备](../docs/roadmap/archive/stage2_antigravity_community_ready.md)
 - 📦 [已归档阶段一：个人无缝跨项目治理与实战闭环](../docs/roadmap/archive/stage1_personal_seamless_multiproject.md)

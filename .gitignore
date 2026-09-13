@@ -13,8 +13,10 @@ ENV/
 env.bak/
 venv.bak/
 
-# Testing & Coverage
+# Testing, Coverage & Linters
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 .coverage.*
 htmlcov/
@@ -25,6 +27,7 @@ coverage.xml
 
 # Quench Runtime & Session Locks
 *.lock
+*.log
 .agents/.quench_bypass.json
 .agents/.quench_hook.log*
 .agents/.quench_path_backup.json
@@ -33,14 +36,21 @@ coverage.xml
 plugins/quench-dev-tasks/mcp_config.json
 plugins/quench-dev-tasks/hooks.json
 .agents/hooks.json
+.cursor/mcp.json
 
 # IDE & OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
 *.swp
 *.swo
+*~
+*.tmp
+*.temp
+*.bak
 
 # Build & Distribution
 build/
@@ -70,5 +80,3 @@ share/python-wheels/
 *.private.*
 notes/
 scratch/
-
-

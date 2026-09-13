@@ -1,7 +1,7 @@
 # Quench-DevTasks MCP 服务架构与详细设计规范 (DevTasks Orchestrator Spec)
 
-> **版本**：v1.1.0 (Implemented & Verified)  
-> **实施状态**：✔️ 全功能已落地并完成 80+ 项自动化单测验证（见 `plugins/quench-dev-tasks/`）  
+> **版本**：v1.3.0 (Implemented & Verified)  
+> **实施状态**：✔️ 全功能已落地并完成 105+ 项自动化单测验证（覆盖 Antigravity、Cursor 跨工具适配与统一 CLI 控制台）  
 > **归属规范**：`dev_tasks_mcp_specification.md`  
 > **设计渊源与规范**：[DevTasks Workflow 规范](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
 > **定位**：面向工程仓库的通用开发任务治理与双模型智能调度 MCP 服务。
@@ -202,17 +202,20 @@ MCP 对外暴露 7 个原子化强类型工具：
 
 ## 七、 落地实现与工程交付注册表 (Implementation Registry)
 
-本规范所定义的全部架构设计与工具链已于 **2026-09-11** 完整落地于 `plugins/quench-dev-tasks/`，并通过自动化测试验证（12/12 passed）。
+本规范所定义的全部架构设计与工具链已持续迭代至 **2026-09-13**，完整落地于 `plugins/quench-dev-tasks/`，并通过自动化测试验证（105/105 passed）。
 
 | 规范设计章节 | 实际交付文件/模块 | 核心机制与职责 |
 | :--- | :--- | :--- |
 | **§2.1 审查守则** | `rules/dev-tasks-discipline.md`<br>`skills/dev-tasks-review/` | 常驻约束只提任务不碰源码、三级质量弹性分级规范 |
 | **§2.2 状态机** | `server/state_machine.py` | 严格状态枚举单向迁移、`FileLock` 跨进程文件排他锁、Unicode Emoji 兼容正则 |
 | **§2.3 六大字段** | `server/schema_validator.py` | 强制六大段落完整性校验、代码块格式提取、粒度超限告警 |
-| **§2.4 物理守卫** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py` | `PreToolUse` 钩子拦截范围外修改并弹出带理由确认框；`PreInvocation` 注入任务提醒 |
-| **§4.0 项目解耦** | `server/project_config.py`<br>`templates/quench_stack.yaml` | 通过 `.agents/quench_stack.yaml` 读取项目专属配置，核心完全解耦 |
-| **§5.0 7 大工具** | `server/server.py` | 暴露 `status` / `propose` / `confirm` / `checkout` / `complete` / `escalate` / `archive` |
+| **§2.4 物理守卫** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py`<br>`scripts/git_pre_commit_guard.py` | `PreToolUse` 钩子拦截范围外修改并弹出带理由确认框；`PreInvocation` 注入任务提醒；Git Pre-commit Guard 物理兜底拦截 |
+| **§4.0 项目解耦** | `server/project_config.py`<br>`templates/quench_stack.yaml` | 通过 `.agents/quench_stack.yaml` 读取项目专属配置，核心完全解耦，支持版本迁移 |
+| **§5.0 8 大工具** | `server/server.py` | 暴露 `status` / `propose` / `confirm` / `checkout` / `complete` / `escalate` / `archive` / `set_bypass` |
 | **§1.2 外置大脑** | `agents/reviewer/agent.md` | 定义架构审查与任务规划专家 Subagent 角色 |
-| **一键接入** | `scripts/init_project.py` | 支持 `python init_project.py <path> [--name <name>]`，一键生成接入清单 |
-| **测试矩阵** | `server/tests/` (12 项单测) | 覆盖状态机、校验器、工具链、Hooks 守卫及初始化脚手架，100% 通过 |
+| **跨工具适配层** | `server/adapters/` | 单核多适配器架构，支持 Antigravity、Cursor 及通用 CLI 适配器与环境探测 |
+| **规则导出器** | `scripts/rules_exporter.py` | 将纪律手册精炼导出为 `.cursorrules` 与 `.cursor/rules/quench-dev-tasks.mdc` |
+| **统一终端 CLI** | `server/cli.py` | 提供 `quench status/check/init/archive` 纯命令行入口点，ANSI 彩色自适应 |
+| **一键接入脚手架** | `scripts/init_project.py`<br>`scripts/install.py` | 支持 `--ide {antigravity,cursor,all}` 与 `--install-git-hook` 自动化部署与预检 |
+| **测试矩阵** | `server/tests/` (105 项单测) | 覆盖状态机、校验器、工具链、适配器、CLI、Hooks 守卫及导出脚手架，100% 通过 |
 
