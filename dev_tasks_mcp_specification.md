@@ -63,27 +63,27 @@ roles:
 
 ### 2.2 The Six-Core-Field Structured Contract
 
-Every DevTask must adhere to the structured six core fields:
+Every DevTask must adhere to the structured six core fields. The schema validator natively validates canonical English headers (while retaining backwards compatibility for localized aliases):
 
-#### 1. `[Affected Files]` (`#### [Affected Files]` / `#### 【涉及文件】`)
+#### 1. `[Affected Files]` (`#### [Affected Files]`)
 - **Format**: File paths prefixed with operation tags: `[MODIFY]`, `[NEW]`, `[DELETE]`, `[RENAME]`.
 - **Granularity Guard**: If a single task touches more than 3 core files, a `TaskGranularityWarning` is issued suggesting decomposition.
 
-#### 2. `[Root Cause & Target]` (`#### [Root Cause & Target]` / `#### 【缺陷根因与修改目标】`)
+#### 2. `[Root Cause & Target]` (`#### [Root Cause & Target]`)
 - **Format**: 1–2 concise sentences stating the underlying root cause and the expected engineering outcome.
 
-#### 3. `[Type Contracts]` (`#### [Type Contracts]` / `#### 【目标签名与类型契约】`)
+#### 3. `[Type Contracts]` (`#### [Type Contracts]`)
 - **Principle**: Include only changed or introduced signatures; avoid duplicating entire classes.
 - **Strict Typing**: Explicit interfaces, Pydantic schemas, or function signatures to eliminate implicit typing ambiguity.
 
-#### 4. `[Step-by-Step Instructions]` (`#### [Step-by-Step Instructions]` / `#### 【分步改造指引】`)
+#### 4. `[Step-by-Step Instructions]` (`#### [Step-by-Step Instructions]`)
 - **Principle**: 3–5 numbered steps with sequential instructions.
 - **Skeleton vs. Implementation**: Steps provide action verbs with key pseudo-code/skeletons, preventing over-specification.
 
-#### 5. `[Defensive & Edge Checks]` (`#### [Defensive & Edge Checks]` / `#### 【防御与边缘校验】`)
+#### 5. `[Defensive & Edge Checks]` (`#### [Defensive & Edge Checks]`)
 - **Format**: Bulleted list detailing null checks, boundary overflows, concurrency locks, and fallback handling.
 
-#### 6. `[DoD Verification Commands]` (`#### [DoD Verification Commands]` / `#### 【DoD 验证命令】`)
+#### 6. `[DoD Verification Commands]` (`#### [DoD Verification Commands]`)
 - **Principle**: Verifiable terminal test commands that must be executed and pass 100%.
 - **Mandatory Assertion Rule**: Any alteration to business logic or interfaces must include accompanying unit test assertions.
 
