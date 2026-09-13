@@ -16,6 +16,8 @@
    - [2.5 GitHub 社区门面资产准备](#25-github-社区门面资产准备)
 3. [自动化安装脚本设计草案 (`install.py`)](#3-自动化安装脚本设计草案-installpy)
 4. [发布前纯净环境走查流程 (Pre-Flight Checklist)](#4-发布前纯净环境走查流程-pre-flight-checklist)
+5. [开源许可证选型与法务合规备忘 (License Strategy: MPL-2.0)](#5-开源许可证选型与法务合规备忘-license-strategy-mpl-20)
+6. [国际化与语言策略备忘 (Language & Internationalization Strategy)](#6-国际化与语言策略备忘-language--internationalization-strategy)
 
 ---
 
@@ -222,3 +224,37 @@ if __name__ == "__main__":
    - **MIT / Apache 2.0**：传播阻力为 0，但防不住直接把状态机与 Hook 改名打包成闭源付费插件转卖；
    - **AGPL-3.0**：“网络调用即传染”触发大厂与中大型企业法务审计红线，阻碍开发者日常引用；
    - **MPL-2.0**：**文件级弱传染（File-level Copyleft）**。谁修改核心文件谁必须开源回馈；而外部 import、通过 MCP 协议（Stdio/SSE）调用、或作为子进程运行，绝对不传染下游业务代码，兼具专利反击与严密免责条款。
+
+---
+
+## 6. 国际化与语言策略备忘 (Language & Internationalization Strategy)
+
+在面向国际开源生态发布时，本套件应遵循 **“English-First 门面 + 运行时防乱码 + 渐进式双语”** 的分层策略，切忌一刀切全盘重写：
+
+### 6.1 门面层（GitHub 首页）：English-First
+* **定位**：海外开发者（占全球技术生态与社交媒体流量核心）若打开纯中文 README，极易在一秒内关闭离开。
+* **落地规范**：
+  - 根目录 `README.md` 设为纯英文，顶部提供清晰的语言切换导航：`[English] | [简体中文](README_zh.md)`；
+  - 保留 `README_zh.md` 完整中文文档，兼顾中文开发者阅读；
+  - `CONTRIBUTING.md`、Issue 模版、PR 模版采用标准英文。
+
+### 6.2 运行时与控制台交互（Runtime Output）：纯英文优先
+* **定位**：跨平台终端乱码免疫与统一体验。
+* **落地规范**：
+  - `git_pre_commit_guard.py`（Git 拦截警告）、`init_project.py` 等 CLI 工具的控制台打印统一采用标准英文；
+  - 彻底杜绝 Windows CMD（默认 CP936/GBK 编码）下的汉字乱码问题；
+  - Hook 返回的 `reason` 字段模版支持英文优先或中英双语紧凑格式。
+
+### 6.3 Agent 技能与规则层（Prompt & Skills）：英文技术优势
+* **定位**：大模型内在机制与 Token 经济学。
+* **落地规范**：
+  - 现代主流大模型（Claude 3.7 / Sonnet、GPT-4o、Gemini 2.0、DeepSeek R1）在英文 System Prompt 下的指令遵循度（Instruction Following）普遍高于中文；
+  - **Token 压缩比优势**：英文分词天然更紧凑，静态规则使用英文编写相比中文能**节省约 20% ~ 30% 上下文 Token 开销**；
+  - 在正式开源前，提供英文版的 `skills/dev-tasks-workflow` 与 `dev-tasks-review`。
+
+### 6.4 业务任务单与历史记录（Workspace Tasks）：自由母语
+* **定位**：开发认知效率高于微小差价。
+* **落地规范**：
+  - 历史归档任务单（`docs/dev_tasks/archive/`）属于真实研发工单记录，保留中文原生记录，无需刻意翻译；
+  - 状态机内核天然支持双语标签别名（`completed` / `✔️ 已完成`，`in_progress` / `🔨 执行中`）；
+  - 开源发布时仅需在任务单模版目录提供 `template_en.md` 与 `template_zh.md`。
