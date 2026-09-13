@@ -201,9 +201,9 @@ python scripts/install.py --preflight
    cd D:\Work\Quench\quorch
    python scripts/install.py
    ```
-4. **同步刷新老项目 JJW_MES 插件路径**（防止插件失联）：
+4. **同步刷新外部下游业务项目插件路径**（防止插件失联）：
    ```powershell
-   python D:\Work\Quench\quorch\plugins\quench-dev-tasks\scripts\init_project.py "D:\Work\JJW_MES"
+   python plugins/quench-dev-tasks/scripts/init_project.py "<path_to_project>"
    ```
 5. **验证 Git Remote**：若 GitHub/GitLab 仓库名同步更名为 `quorch`，需执行：
    ```powershell

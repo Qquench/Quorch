@@ -1,17 +1,17 @@
 # Quench-DevTasks MCP 服务架构与详细设计规范 (DevTasks Orchestrator Spec)
 
 > **版本**：v1.1.0 (Implemented & Verified)  
-> **实施状态**：✔️ 全功能已落地并完成 12 项自动化单测验证（见 `plugins/quench-dev-tasks/`）  
-> **归属路径**：`D:\Work\Quench\MCP\dev_tasks_mcp_specification.md`  
-> **设计渊源与原型规范**：[d:\Work\JJW_MES\docs\dev_tasks\README.md](file:///d:/Work/JJW_MES/docs/dev_tasks/README.md)  
-> **定位**：面向 Quench 旗下所有工程仓库（JJW_MES 及后续衍生项目）的通用开发任务治理与双模型智能调度 MCP 服务。
+> **实施状态**：✔️ 全功能已落地并完成 80+ 项自动化单测验证（见 `plugins/quench-dev-tasks/`）  
+> **归属规范**：`dev_tasks_mcp_specification.md`  
+> **设计渊源与规范**：[DevTasks Workflow 规范](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
+> **定位**：面向工程仓库的通用开发任务治理与双模型智能调度 MCP 服务。
 
 ---
 
 ## 一、 原型溯源与核心设计哲学
 
 ### 1.1 对标原型协议溯源
-本 MCP 服务完全继承并机械化实现了 [docs/dev_tasks/README.md](file:///d:/Work/JJW_MES/docs/dev_tasks/README.md) 中确立的 **“双模型分工审查工作流”**，将其从依赖大模型自觉遵守的“纯文档软约定”，全面升级为带有硬性拦截、物理状态机、分级质量评分的**代码级外部守护进程（MCP Server）**。
+本 MCP 服务完全继承并机械化实现了 [DevTasks Workflow 规范](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md) 中确立的 **“双模型分工审查工作流”**，将其从依赖大模型自觉遵守的“纯文档软约定”，全面升级为带有硬性拦截、物理状态机、分级质量评分的**代码级外部守护进程（MCP Server）**。
 
 ### 1.2 核心分工基调：Flash 常驻主控 + Opus 按需外置大脑
 - **Flash 作为常驻主控与日常执行器（Everyday Co-pilot & Executor）**：
@@ -28,7 +28,7 @@
 MCP 服务本身为独立 Python 进程（基于 FastMCP / JSON-RPC），**完全不硬编码任何具体模型名称**。通过配置层进行逻辑角色别名映射：
 
 ```yaml
-# D:\Work\Quench\MCP\config.yaml
+# config.yaml (角色别名映射示例)
 version: "1.1"
 active_profile: "latest_standard"
 
@@ -145,13 +145,13 @@ stateDiagram-v2
 ## 四、 项目特有技术栈速查与环境边界 (原 README §9)
 
 为了使该 MCP 能够在跨项目复用时准确感知各项目的特定陷阱，MCP 引入 **项目环境感知机制（Project Stack Manifest）**：
-* 在各项目根目录放置轻量 `.quench_stack.json`，或由 MCP 自动探测；
-* 针对当前 JJW_MES 项目，MCP 自动注入以下技术栈速查：
+* 在各项目根目录 `.agents/quench_stack.yaml` 声明技术栈与专属规则，由 MCP 自动加载；
+* 针对具体业务项目（例如嵌入式工控或 Web 全栈项目），MCP 自动注入技术栈速查示例：
   - **后端**：Python 3.11 + FastAPI + SQLAlchemy，ORM 必须使用 `SessionLocal()`，路由必须位于 `backend/routers/`；
   - **前端**：Vue 3 + Vite + Element Plus，SPA 构建产物由后端静态托管；
   - **边缘通信**：MQTT (paho-mqtt) Broker 端口 `11883`，Modbus TCP 双寄存器安全互锁；
   - **离线安全**：SQLite (WAL mode)，看门狗指数退避与滑动窗口熔断；
-  - **环境约束**：严禁调用系统级 Python 3.14，强制使用 `backend\venv`。
+  - **环境约束**：严禁调用系统级全局 Python，强制使用项目局部虚拟环境。
 
 ---
 

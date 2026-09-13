@@ -113,7 +113,7 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
 3. 添加 `resolve_path(config, field_name)` 辅助函数，将相对路径拼接为绝对路径
 
-4. 创建 `templates/quench_stack.yaml` 模板文件，包含所有字段及注释说明。以 JJW_MES 为实例值填写
+4. 创建 `templates/quench_stack.yaml` 模板文件，包含所有字段及注释说明。以示例工程为实例值填写
 
 #### 【防御与边缘校验】
 
@@ -126,8 +126,8 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
 ```bash
 cd $PLUGIN\server
-python -c "from project_config import load_project_config; c = load_project_config(r'd:\Work\JJW_MES'); print(c)"
-# 前置条件：需先在 JJW_MES 创建 .agents/quench_stack.yaml（从 templates/ 复制并填写）
+python -c "from project_config import load_project_config; c = load_project_config(r'D:\path\to\target_project'); print(c)"
+# 前置条件：需先在目标项目创建 .agents/quench_stack.yaml（从 templates/ 复制并填写）
 ```
 
 ---
@@ -569,7 +569,7 @@ python -m pytest tests/test_server_escalate_archive.py tests/test_changelog_writ
 python -c "import json; json.load(open(r'$PLUGIN\hooks.json'))"
 
 # 模拟 file_scope_guard 输入
-echo '{"toolCall":{"name":"replace_file_content","args":{"TargetFile":"D:\\\\Work\\\\JJW_MES\\\\backend\\\\main.py"}},"workspacePaths":["D:\\\\Work\\\\JJW_MES"]}' | python $PLUGIN\server\hooks\file_scope_guard.py
+echo '{"toolCall":{"name":"replace_file_content","args":{"TargetFile":"D:\\\\path\\\\to\\\\target_project\\\\backend\\\\main.py"}},"workspacePaths":["D:\\\\path\\\\to\\\\target_project"]}' | python $PLUGIN\server\hooks\file_scope_guard.py
 ```
 
 ---

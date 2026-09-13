@@ -59,3 +59,16 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Developer Private Notes & Scratchpad
+*.local.*
+*.private.*
+notes/
+scratch/
+
+

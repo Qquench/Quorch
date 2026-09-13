@@ -61,17 +61,17 @@
   - [x] 支持可选参数 `--global`：将插件注册引导注入用户全局配置 `~/.gemini/config/`，或 `--project <path>` 注入特定项目。
 
 > [!IMPORTANT]
-> ### ⚠️ 关键实战联动备忘：完成路径自适应后的文件夹更名与 JJW_MES 恢复指引
+> ### ⚠️ 关键实战联动备忘：完成路径自适应后的文件夹更名与下游项目更新指引
 > 在本阶段（Epic 2.1 与 Epic 2.2）实现 `install.py` 动态渲染与路径自适应之后，必须立即执行以下闭环联动：
 > 0. **⚠️ Pre-flight 预检**（架构审查新增）：执行 `python scripts/install.py --preflight` 确认无进程占用目录、路径长度安全、旧配置已备份；
-> 1. **执行文件夹重命名**：将当前根目录 `D:\Work\Quench\MCP` 重命名为简短仓库名：`D:\Work\Quench\quorch`（即 **Qu**ench Dev **Orch**estrator 缩写，项目内部全称保持 `quench-dev-orchestrator`）；
+> 1. **执行文件夹重命名**：将旧根目录重命名为简短规范仓库名：`quorch`（即 **Qu**ench Dev **Orch**estrator 缩写，项目内部全称保持 `quench-dev-orchestrator`）；
 > 2. **新目录下执行自愈安装**：在 `quorch` 目录下直接执行 `python scripts/install.py`，瞬间完成动态配置渲染与自检；
-> 3. **★ 同步更新老项目 JJW_MES（防止插件失联）**：
->    在终端中前往 `D:\Work\JJW_MES` 根目录，执行：
+> 3. **★ 同步更新下游既有项目（防止插件失联）**：
+>    在终端中前往目标项目根目录，执行：
 >    ```powershell
->    python D:\Work\Quench\quorch\plugins\quench-dev-tasks\scripts\init_project.py "D:\Work\JJW_MES"
+>    python <path_to_quorch>\plugins\quench-dev-tasks\scripts\init_project.py "<path_to_project>"
 >    ```
->    重新刷新 `JJW_MES\.agents\plugins.json` 中的插件路径，确保现有业务项目平滑过度、完全无缝！
+>    重新刷新目标项目 `.agents/plugins.json` 与 `.agents/hooks.json` 中的插件路径，确保现有业务项目平滑过渡、完全无缝！
 
 ### Epic 2.3: 项目配置模板去特定化与模型解耦
 - **背景**：消除私有工业特异性，让通用软件工程师能够直观理解。

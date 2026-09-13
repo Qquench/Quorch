@@ -44,7 +44,7 @@
 ## [2026-09-13] 2026-09-13_fix_external_hooks_and_diagnostics.md
 
 - **fix(scaffolding)**: 修复外部项目 hooks.json 缺失导致 FileGuard 失效、体检假阳性与 Windows cmd.exe /c 引号剥离导致 Hook 闪退
-  - **外部项目 Hook 闭环生成**：在 `init_project.py` 中增加 `_render_hooks_json()`，为所有接入的外部业务项目（如 JJW_MES）在本地 `.agents/hooks.json` 生成独立的生命周期 Hook 物理文件，支持 `--force` 幂等自愈覆盖；
+  - **外部项目 Hook 闭环生成**：在 `init_project.py` 中增加 `_render_hooks_json()`，为所有接入的外部业务项目在本地 `.agents/hooks.json` 生成独立的生命周期 Hook 物理文件，支持 `--force` 幂等自愈覆盖；
   - **健康体检升级 (diagnose_environment)**：增加 `has_hooks_json` 与 `hooks_json_valid` 诊断维度，全面覆盖文件缺失、JSON损坏、解释器或脚本路径不可达分支，杜绝体检假阳性；
   - **Windows cmd.exe /c 引号剥离保护**：针对 Windows 下 `cmd /c` 剥离首尾引号导致命令解析崩溃的系统性缺陷，在 `hooks.json.template` 及渲染器中对 Windows 平台命令自动包裹双引号保护 (`""{{PYTHON}}" "{{SCRIPT}}""`)；
   - **全量测试与安装器适配**：在 `scripts/install.py --project` 一键接入流程中联动注入 `--force`，并在 `test_init_project.py` 中新增 5 个专项测试用例。
@@ -177,7 +177,7 @@
   - **Opus 审查 Subagent 与一键初始化脚本 (Task 3.3)**：
     - 编写 `agents/opus_reviewer/agent.md`：定义外置大脑高级架构师角色，仅产出任务单、绝不碰源码；
     - 编写 `scripts/init_project.py`：支持 `python init_project.py <path> [--name <name>]`，一键为任意新项目生成 `.agents/plugins.json`、`.agents/quench_stack.yaml` 及 `docs/dev_tasks/` 目录；
-    - 验证初始化幂等性，已成功为当前主项目 `JJW_MES` 完成注册接入。
+    - 验证初始化幂等性，已成功为外部业务项目完成注册接入验证。
 
 - **测试与验证保障 (Verification & DoD)**：
   - 建立 `server/tests/` 完整测试矩阵，共 12 项端到端单元测试：

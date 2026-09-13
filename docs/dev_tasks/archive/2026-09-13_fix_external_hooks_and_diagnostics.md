@@ -26,7 +26,7 @@
 #### 【缺陷根因与修改目标】
 
 根因：
-1. **外部项目 Hook 注册穿透失效**：Antigravity IDE 仅从工作区根目录 (`<workspace>/.agents/hooks.json`) 加载生命周期 Hook，不会从 `plugins.json` 引用的外部插件目录穿透加载。而 `init_project.py` 从未生成目标项目的 `.agents/hooks.json`，导致外部业务项目（如 JJW_MES）无物理 Hook 文件，FileGuard 完全失效。
+1. **外部项目 Hook 注册穿透失效**：Antigravity IDE 仅从工作区根目录 (`<workspace>/.agents/hooks.json`) 加载生命周期 Hook，不会从 `plugins.json` 引用的外部插件目录穿透加载。而 `init_project.py` 从未生成目标项目的 `.agents/hooks.json`，导致外部业务项目无物理 Hook 文件，FileGuard 完全失效。
 2. **体检诊断存在盲区**：`diagnose_environment()` 返回字典不含 `has_hooks_json` / `hooks_json_valid` 字段，在 Hook 完全缺失的情况下依然汇报"完全就绪"，形成假阳性体检报告。
 3. **Windows cmd.exe /c 引号剥离（Quote Stripping）**：`hooks.json.template` 渲染后的命令格式为 `"\"<python>\" \"<script>\""` ——在 JSON 层面这是一个以 `"` 开头、以 `"` 结尾的字符串值。当 Antigravity 在 Windows 下通过 `cmd.exe /c <command>` 执行此字符串时，`cmd.exe` 会自动剥除整行首尾配对的双引号，导致参数解析崩溃（如 `python.exe" "script.py` → 闪退），Hook 静默失效。
 

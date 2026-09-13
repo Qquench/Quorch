@@ -110,16 +110,16 @@ pytest plugins/quench-dev-tasks/server/tests/test_hooks.py -v
 [NEW]    plugins/quench-dev-tasks/server/tests/test_config_migration.py
 ```
 
-> **审查修订说明**：原任务单遗漏了 `templates/quench_stack.yaml`。`init_project.py` 并非内嵌模板——它从 `templates/quench_stack.yaml` 读取文件内容后复制到目标项目（L96-108）。当前模板硬编码了 JJW_MES 工控项目的私有约束（离线车间网络、双寄存器握手、`ipc_client` 目录等），违反了 Quench 工具项目中立的核心定位。在引入 `schema_version` 前必须先完成模板清洗，否则新初始化的项目将同时携带错误的 v1.0 Schema 和私有约束。
+> **审查修订说明**：原任务单遗漏了 `templates/quench_stack.yaml`。`init_project.py` 并非内嵌模板——它从 `templates/quench_stack.yaml` 读取文件内容后复制到目标项目（L96-108）。早期模板硬编码了特定工控项目的私有约束（离线车间网络、双寄存器握手、`ipc_client` 目录等），违反了 Quench 工具项目中立的核心定位。在引入 `schema_version` 前必须先完成模板清洗，否则新初始化的项目将同时携带错误的 v1.0 Schema 和私有约束。
 
 #### 【缺陷根因与修改目标】
 
 根因：
 1. `quench_stack.yaml` 经历了 `governance_scope`、`fast_track_rules` 等多轮功能升级，但缺少版本标识机制。早期接入的项目缺少这些新配置块，若直接使用可能无法享受新特性；若强制用户重新生成，会导致开发者自定义的项目字段被冲掉。
-2. **模板文件项目中立性缺失**：`templates/quench_stack.yaml` 硬编码了 `project_name: "JJW_MES"`、工控专有约束（`离线车间局域网`、`双寄存器握手`、`SQLite WAL`）、以及 JJW_MES 特有目录结构（`backend/**`、`ipc_client/**`），导致任何新项目初始化后都会被注入不相关的私有内容。
+2. **模板文件项目中立性缺失**：早期 `templates/quench_stack.yaml` 硬编码了工控专有约束（`离线车间局域网`、`双寄存器握手`、`SQLite WAL`）以及特有目录结构（`backend/**`、`ipc_client/**`），导致新项目初始化后会被注入不相关的私有内容。
 
 目标：
-1. **模板项目中立化清洗**：将 `templates/quench_stack.yaml` 中所有 JJW_MES 私有内容替换为通用范例，确保工具对任何技术栈项目保持中立；
+1. **模板项目中立化清洗**：将 `templates/quench_stack.yaml` 中所有早期工控业务私有内容替换为通用范例，确保工具对任何技术栈项目保持中立；
 2. 在配置模型与模板中正式引入 `schema_version: "1.0"` 规范；
 3. 在 `load_project_config` 中增加无感自动升级机制：读取旧版无版本号配置时，采用**文本级补丁插入**方式自动在文件末尾追加缺失字段，**不做 YAML round-trip 序列化**，确保零注释破坏；
 4. 保证迁移过程幂等、原子，不破坏现有注释与自定义业务扩展字段。
@@ -154,7 +154,7 @@ def migrate_config_if_needed(yaml_path: str, data: dict) -> Tuple[dict, bool]:
 
 #### 【分步改造指引】
 
-1. **模板项目中立化清洗**（前置步骤）：直接编辑 `templates/quench_stack.yaml`，将 JJW_MES 私有内容替换为通用版本：
+1. **模板项目中立化清洗**（前置步骤）：直接编辑 `templates/quench_stack.yaml`，将早期私有内容替换为通用版本：
    - `project_name` 改为占位符 `"__PROJECT_NAME__"`（`init_project.py` 已有正则替换逻辑）；
    - 移除全部工控约束（`离线车间`、`双寄存器`、`SQLite WAL`、`ipc_client` 等），替换为三条普适性工程原则（改逻辑必加测试、接口向后兼容、凭据不硬编码）；
    - `architecture_doc`、`test_dir`、`test_runner` 改为注释状态（可选配置）；
@@ -167,7 +167,7 @@ def migrate_config_if_needed(yaml_path: str, data: dict) -> Tuple[dict, bool]:
 6. **单元测试编写**：在 `test_config_migration.py` 中：
    - 构造 v0（无版本号、缺字段）YAML，验证加载后自动补齐并正确写盘，且已有的自定义字段完整保留；
    - **注释保留断言**：构造含行内注释的 YAML 文件，迁移后断言注释仍存在于文件中；
-   - **模板中立性断言**：验证 `templates/quench_stack.yaml` 不包含 `JJW_MES`、`离线车间`、`双寄存器`、`ipc_client` 等私有关键词。
+   - **模板中立性断言**：验证 `templates/quench_stack.yaml` 不包含任何特定业务的私有关键词（如工控握手、离线车间等）。
 
 #### 【防御与边缘校验】
 
