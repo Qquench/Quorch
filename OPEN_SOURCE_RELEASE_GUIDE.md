@@ -22,13 +22,13 @@
 ## 1. 开源价值主张与社区定位
 
 Google Antigravity IDE 拥有极强的 Agent 编程能力，但社区开发者在实际工程实践中普遍面临四大痛点：
-1. **高阶模型（Opus/Pro）成本过高，敏捷模型（Flash）容易失控**：如果全流程用高阶模型，Token 配额消耗极大；全流程用轻量模型，在复杂架构规划和重构时容易产生返工。
+1. **高阶推理模型成本过高，敏捷模型容易失控**：如果全流程用高阶模型，Token 配额消耗极大；全流程用轻量模型，在复杂架构规划和重构时容易产生返工。
 2. **AI 越界修改（Scope Creep）与幻觉改动**：模型经常“热心”地顺手修改了未包含在需求中的其他文件，导致难以排查的回归缺陷。
 3. **缺乏严格的任务生命周期管理**：很多开发在聊天窗口中随性进行，没有可审计的任务状态流转，容易漏项、并发冲突或难以回滚。
 4. **交付物缺乏可验证性 (DoD)**：模型常常口头回复“已完成”，但缺乏真实的物理测试命令与断言审计。
 
 ### 本插件的核心竞争力
-- **Flash 敏捷执行 + Opus 深度审查**：双模型解耦互补，大幅降低高阶模型用量（90% 日常开发由 Flash 完成，仅在复杂冲突或关键架构节点一键 `dev_tasks_escalate` 呼叫 Opus）。
+- **敏捷执行 (Runner) + 架构审查 (Reviewer) 双模型解耦互补**：大幅降低高阶模型用量（90% 日常开发由轻量模型完成，仅在复杂冲突或关键架构节点一键 `dev_tasks_escalate` 升级委派给用户自选的高阶架构审查模型）。
 - **PreToolUse 物理拦截层**：真正基于 Hooks 拦截范围外修改，且**弹出带模型自述理由的人机协同确认框**。
 - **单核互斥状态机 + 跨进程文件锁**：确保任务单项推进，多 Subagent 协作安全。
 - **六大字段标准化规范**：缺陷根因、类型契约、分步改造、防御边界与 DoD 自动化命令强校验。
@@ -87,7 +87,7 @@ Google Antigravity IDE 拥有极强的 Agent 编程能力，但社区开发者�
 * **推荐仓库名称**：
   - `quench-dev-orchestrator`（正式确定：兼顾双模型调度、任务治理与工程质感，精准表达编排调度中枢定位）
 * **简介（One-liner Description）**：
-  > "Dual-model orchestration & task governance engine for AI IDEs (Antigravity, Cursor, Windsurf) — Flash for agile execution, Opus for strategic architecture."
+  > "Dual-model orchestration & task governance engine for AI IDEs (Antigravity, Cursor, Windsurf) — Agile runner for execution, Frontier reasoning model for strategic architecture."
 
 ### 2.5 GitHub 社区门面资产准备
 在开放在 GitHub 之前，补齐以下社区标准件：

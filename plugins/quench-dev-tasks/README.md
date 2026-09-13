@@ -1,15 +1,15 @@
 # 🧊 quench-dev-tasks
 
 > **Dual-Model Orchestration & Task Governance Plugin for Google Antigravity IDE**  
-> 专为 Google Antigravity 设计的双模型协同与精细化任务治理插件（Flash 敏捷执行 + Opus 深度规划）。
+> 专为 Google Antigravity 设计的双模型协同与精细化任务治理插件（日常敏捷执行 + 自选高阶架构审查）。
 
 ---
 
 ## 🌟 核心特性 (Features)
 
-1. **Flash + Opus 双模型解耦协作**：
-   - **Flash 主控看板**：日常敏捷推进、领单执行与微小缺陷修复，节省高阶模型配额。
-   - **Opus 外置大脑**：遇到重大分歧、深层架构重构或执行遇阻时，一键升级委派 Opus 审查并生成标准任务单。
+1. **日常执行 (Runner) + 架构审查 (Reviewer) 双模型解耦协作**：
+   - **日常执行器 (Runner)**：日常敏捷推进、领单执行与微小缺陷修复，节省高阶推理模型配额。
+   - **架构审查器 (Reviewer)**：遇到重大分歧、深层架构重构或执行遇阻时，由用户自选的高阶推理模型（如 Claude 3.7 / Opus、GPT-4.5 / o3、Gemini Pro、DeepSeek R1 等）进行审查诊断并生成标准任务单。
 2. **状态机强约束**：
    - 包含 `⬜ 待确认` ➔ `✅ 已确认` ➔ `🔨 执行中` ➔ `✔️ 已完成`（支持 `🔄 需返工` 与 `⏭️ 跳过`）的单向严密状态流转。
    - **单核执行原则**：全局限制同一时间仅允许一个任务处于 `🔨 执行中`。
@@ -41,7 +41,7 @@ quench-dev-tasks/
 │   ├── dev-tasks-workflow/
 │   └── dev-tasks-review/
 ├── agents/                     # 专业子代理
-│   └── opus_reviewer/
+│   └── reviewer/
 ├── server/                     # FastMCP 服务端实现
 │   ├── server.py               # 8 个核心治理工具
 │   ├── state_machine.py        # 任务状态机引擎 + 文件锁
@@ -91,7 +91,7 @@ python scripts/init_project.py /path/to/your/project --name "YourProject"
 | `dev_tasks_confirm` | 确认任务单（支持 `confirm`, `rework`, `skip` 等多向流转） |
 | `dev_tasks_checkout` | 领取任务进行开发（进入 `🔨 执行中`，单核互斥锁 + 批次完工感应） |
 | `dev_tasks_complete` | 标记任务完成（进入 `✔️ 已完成`，强制要求 DoD 验证通过） |
-| `dev_tasks_escalate` | 将陷入困境的任务升级委派给 Opus 深度审查 |
+| `dev_tasks_escalate` | 将陷入困境的任务升级委派给高阶架构模型深度审查 |
 | `dev_tasks_archive` | 将已全量闭环的任务文件归档并自动同步至 CHANGELOG.md |
 | `dev_tasks_set_bypass`| 用户授权的快速会话旁路工具（样式/文档等临时免检，防 Agent 私自滥用） |
 

@@ -1,13 +1,13 @@
 # Quench MCP 任务治理引擎深化与跨开发工具适配架构审查任务单
 
 > **审查与执行模型须知**
-> - 本任务单用于对近期在 Quench MCP 中落地的一系列重大架构特性（三层旁路治理体系、物理会话锁、双轨生产代码边界划分引擎、开源跨工具适配体系）进行**工程留痕与 Opus 深度架构审查**。
+> - 本任务单用于对近期在 Quench MCP 中落地的一系列重大架构特性（三层旁路治理体系、物理会话锁、双轨生产代码边界划分引擎、开源跨工具适配体系）进行**工程留痕与深度架构审查**。
 > - **设计参考文档**：
 >   - [dev_tasks_mcp_specification.md](file:///D:/Work/Quench/MCP/dev_tasks_mcp_specification.md)
 >   - [rules/dev-tasks-discipline.md](file:///D:/Work/Quench/MCP/plugins/quench-dev-tasks/rules/dev-tasks-discipline.md)
 >   - [OPEN_SOURCE_RELEASE_GUIDE.md](file:///D:/Work/Quench/MCP/OPEN_SOURCE_RELEASE_GUIDE.md)
-> - **审查指引**：Opus 审查模型需针对当前实现的严密性、边界抗脆弱性、防滥用闭环以及开源生态中向 Cursor / Claude Code / Windsurf / Git Hooks 移植的可行性出具诊断意见。
-> - 所有任务当前处于 `⬜ 待确认` 状态，待 Opus 审查修订或确认通过后方可检出执行。
+> - **审查指引**：架构审查模型（由用户自选的高阶推理模型）需针对当前实现的严密性、边界抗脆弱性、防滥用闭环以及开源生态中向 Cursor / Claude Code / Windsurf / Git Hooks 移植的可行性出具诊断意见。
+> - 所有任务当前处于 `⬜ 待确认` 状态，待审查修订或确认通过后方可检出执行。
 
 ---
 
@@ -79,7 +79,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_file_scope_guard.py -k "sessio
 
 #### 【缺陷根因与修改目标】
 
-根因：当前已实现“显式清单（`quench_stack.yaml`）+ 启发式文件后缀兜底”的双轨判定。但启发式识别规则中，对微前端 monorepo、嵌套测试目录（如 `__tests__`、`frontend/e2e`）、以及配置文件（`.env.example`、`docker-compose.override.yml`）的识别粒度尚需 Opus 评估是否需要细化，以防在无显式配置的第三方仓库中产生误拦或漏管。
+根因：当前已实现“显式清单（`quench_stack.yaml`）+ 启发式文件后缀兜底”的双轨判定。但启发式识别规则中，对微前端 monorepo、嵌套测试目录（如 `__tests__`、`frontend/e2e`）、以及配置文件（`.env.example`、`docker-compose.override.yml`）的识别粒度尚需架构审查评估是否需要细化，以防在无显式配置的第三方仓库中产生误拦或漏管。
 目标：优化 `QuenchStackConfig.is_path_governed` 的匹配算法与默认规则集，支持多层级 Glob 通配与更丰富的工程资产分类，使任意第三方新项目在零配置情况下也能智能获得合理的安全边界。
 
 #### 【目标签名与类型契约】

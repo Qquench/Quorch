@@ -1,6 +1,6 @@
 # Quench MCP 开发任务管理
 
-> 本目录遵循与 [JJW_MES docs/dev_tasks/](file:///d:/Work/JJW_MES/docs/dev_tasks/README.md) 相同的 **Opus → Flash 双模型开发任务管理工作流**。
+> 本目录遵循与 [JJW_MES docs/dev_tasks/](file:///d:/Work/JJW_MES/docs/dev_tasks/README.md) 相同的 **双模型协同开发任务管理工作流（架构审查 Reviewer + 敏捷执行 Runner）**。
 > 所有规则（状态标记 §4、会话启动协议 §5、审查行为 §7、交付规则 §8）以原 README 为权威来源，此处不重复。
 
 ## 差异点
@@ -18,7 +18,7 @@
 
 | 任务单 | 核心目标 | 任务数 | 状态 | 审查重点 |
 | :--- | :--- | :---: | :---: | :--- |
-| [`2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./2026-09-11_governance_engine_and_cross_tool_adaptation.md) | 治理引擎深化（旁路锁+双轨边界）与开源跨工具适配 | 3 | ⬜ 待 Opus 审查确认 | 安全防御加固、边界算法完备性、开源跨平台解耦 |
+| [`2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./2026-09-11_governance_engine_and_cross_tool_adaptation.md) | 治理引擎深化（旁路锁+双轨边界）与开源跨工具适配 | 3 | ⬜ 待架构审查确认 | 安全防御加固、边界算法完备性、开源跨平台解耦 |
 
 ---
 

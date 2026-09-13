@@ -9,7 +9,7 @@
 - 📄 **[dev_tasks_mcp_specification.md](file:///D:/Work/Quench/MCP/dev_tasks_mcp_specification.md)**:
   架构设计与详细规范说明书（设计参考，非直接执行文件）
 - 📋 **[docs/dev_tasks/](file:///D:/Work/Quench/MCP/docs/dev_tasks/)**:
-  开发任务单目录（Opus → Flash 工作流）
+  开发任务单目录（双模型协作工作流）
 - 📝 **[CHANGELOG.md](file:///D:/Work/Quench/MCP/CHANGELOG.md)**:
   版本更新日志与已完成架构演进历史归档
 - 🌐 **[OPEN_SOURCE_RELEASE_GUIDE.md](file:///D:/Work/Quench/MCP/OPEN_SOURCE_RELEASE_GUIDE.md)**:
@@ -44,7 +44,7 @@ D:\Work\Quench\MCP\
         │   ├── dev-tasks-workflow\SKILL.md
         │   └── dev-tasks-review\SKILL.md
         ├── agents\                        # Subagent 定义
-        │   └── opus_reviewer\agent.md
+        │   └── reviewer\agent.md
         ├── scripts\                       # 辅助脚本
         │   └── init_project.py            # 新项目初始化
         ├── templates\                     # 配置模板

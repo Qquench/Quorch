@@ -384,7 +384,7 @@ def dev_tasks_propose(
 def dev_tasks_confirm(
     workspace_root: str, task_file: str, task_ids: List[str], action: str = "confirm"
 ) -> Dict[str, Any]:
-    """推进或调整任务状态。action: 'confirm' (已确认待施工) | 'rework' (需返工/待Opus重修) | 'skip' (跳过) | 'revoke' (撤回为待确认)"""
+    """推进或调整任务状态。action: 'confirm' (已确认待施工) | 'rework' (需返工/待审查模型重修) | 'skip' (跳过) | 'revoke' (撤回为待确认)"""
     target_path = _resolve_task_file_path(workspace_root, task_file)
     action_map = {
         "confirm": STATUS_CONFIRMED,
@@ -449,7 +449,7 @@ def dev_tasks_checkout(
                 if str(t.id).strip() == target_tid:
                     if t.status == STATUS_REWORK:
                         return {
-                            "error": f"任务 {target_tid} 当前处于 '🔄 需返工' 状态，必须先由 Opus 架构修订并确认后方可领单。",
+                            "error": f"任务 {target_tid} 当前处于 '🔄 需返工' 状态，必须先由高阶架构审查模型修订并确认后方可领单。",
                             "task_id": t.id,
                             "status": t.status,
                             "handoff_recommended": True,
@@ -532,7 +532,7 @@ def dev_tasks_checkout(
             "handoff_recommended": True,
             "instruction": (
                 "【当前已确认批次已全部完工 / 存在需返工或待终审任务】\n"
-                "1. 若存在需返工或待终审任务：请输出【Quench 任务交接卡】，引导用户在新会话召唤 Opus 进行审查修订；\n"
+                "1. 若存在需返工或待终审任务：请输出【Quench 任务交接卡】，引导用户在新会话切换至自选的高阶架构审查模型进行审查修订；\n"
                 "2. 若属于多任务分批施工：请向用户汇报当前批次施工完毕，等待用户确认下一批任务后再行领单。"
             ),
             "message": f"当前批次已无 '✅ 已确认' 任务。(待终审: {len(pending_tasks)} 项, 需返工: {len(rework_tasks)} 项)",
@@ -607,7 +607,7 @@ def dev_tasks_escalate(
     reason: str,
     context_files: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Flash 遇到疑难卡点或复杂重构时，申请唤醒 Opus 专家模型进行架构深析。"""
+    """执行器遇到疑难卡点或复杂重构时，申请升级至高阶架构审查模型进行架构深析。"""
     target_path = _resolve_task_file_path(workspace_root, task_file)
     context_snippets = []
     if context_files:
@@ -629,11 +629,11 @@ def dev_tasks_escalate(
         "task_file": target_path,
         "reason": reason,
         "context_files_loaded": len(context_snippets),
-        "suggested_subagent": "opus_reviewer",
+        "suggested_subagent": "reviewer",
         "handoff_required": True,
-        "instruction": "【触发 Opus 交接】请立即停止后续代码修改！向用户输出【Quench 任务交接卡】，等待用户在新会话中由 Opus 完成审查修订并切回确认后，再恢复执行。",
+        "instruction": "【触发架构审查交接】请立即停止后续代码修改！向用户输出【Quench 任务交接卡】，等待用户在新会话中由高阶架构审查模型完成审查修订并确认后，再恢复执行。",
         "prompt_hint": (
-            f"请唤起 Opus 专家对任务 {task_id} 进行深度审查。\n"
+            f"请切换至高阶架构审查模型对任务 {task_id} 进行深度审查。\n"
             f"升级原因：{reason}\n"
             f"重点参考文件：{[c['file'] for c in context_snippets]}"
         ),

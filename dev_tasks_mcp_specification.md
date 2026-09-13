@@ -212,7 +212,7 @@ MCP 对外暴露 7 个原子化强类型工具：
 | **§2.4 物理守卫** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py` | `PreToolUse` 钩子拦截范围外修改并弹出带理由确认框；`PreInvocation` 注入任务提醒 |
 | **§4.0 项目解耦** | `server/project_config.py`<br>`templates/quench_stack.yaml` | 通过 `.agents/quench_stack.yaml` 读取项目专属配置，核心完全解耦 |
 | **§5.0 7 大工具** | `server/server.py` | 暴露 `status` / `propose` / `confirm` / `checkout` / `complete` / `escalate` / `archive` |
-| **§1.2 外置大脑** | `agents/opus_reviewer/agent.md` | 定义 Opus 深度审查与任务规划专家 Subagent 角色 |
+| **§1.2 外置大脑** | `agents/reviewer/agent.md` | 定义架构审查与任务规划专家 Subagent 角色 |
 | **一键接入** | `scripts/init_project.py` | 支持 `python init_project.py <path> [--name <name>]`，一键生成接入清单 |
 | **测试矩阵** | `server/tests/` (12 项单测) | 覆盖状态机、校验器、工具链、Hooks 守卫及初始化脚手架，100% 通过 |
 

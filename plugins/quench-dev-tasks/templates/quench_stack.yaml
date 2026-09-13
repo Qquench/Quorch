@@ -15,7 +15,7 @@ archive_dir: "docs/dev_tasks/archive"
 # 变更记录日志路径（相对于项目根目录，默认: CHANGELOG.md）
 changelog_path: "CHANGELOG.md"
 
-# 系统架构设计手册路径（供 Opus 审查时优先阅读建立上下文）
+# 系统架构设计手册路径（供高阶架构审查时优先阅读建立上下文）
 architecture_doc: "docs/architecture/internal_system_design.md"
 
 # 测试套件目录（供 DoD 断言物理审计使用）
@@ -24,7 +24,7 @@ test_dir: "backend/tests"
 # 默认安全回归测试命令
 test_runner: "python scripts/run_safe_tests.py"
 
-# 项目专有边界与环境约束（自动注入给 Opus 审查和 Flash 执行提示词）
+# 项目专有边界与环境约束（自动注入给架构审查与日常执行提示词）
 constraints:
   - "本项目为离线车间局域网工控系统，严禁引入公网高安全认证（如公网 OAuth、复杂防刷）"
   - "Python 环境约束：强制使用内置虚拟环境 backend\\venv，严禁调用全局 Python"

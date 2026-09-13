@@ -89,9 +89,9 @@ def test_full_tool_workflow(mock_workspace):
     assert chk["status"] == "🔨 执行中"
 
     # 6. 模拟 escalate
-    esc = dev_tasks_escalate(ws, "2026-09-11_feature_test.md", "1.1", "死锁难题需Opus深度审视")
+    esc = dev_tasks_escalate(ws, "2026-09-11_feature_test.md", "1.1", "死锁难题需架构模型深度审视")
     assert esc["status"] == "escalated"
-    assert "opus_reviewer" in esc["suggested_subagent"]
+    assert "reviewer" in esc["suggested_subagent"]
 
     # 7. 完成任务 complete
     comp = dev_tasks_complete(ws, "2026-09-11_feature_test.md", "1.1", dod_output="All tests passed")
@@ -131,7 +131,7 @@ def test_batch_and_rework_workflow(mock_workspace):
         },
         {
             "id": "2",
-            "title": "需要Opus返工的任务",
+            "title": "需要架构审查返工的任务",
             "affected_files": ["[MODIFY] b.py"],
             "root_cause_and_goal": "需要深度架构梳理。",
             "type_contracts": "无",
