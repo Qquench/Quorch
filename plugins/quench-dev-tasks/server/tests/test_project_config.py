@@ -1,0 +1,182 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+import os
+import tempfile
+import pytest
+from pathlib import Path
+from unittest.mock import patch
+
+from project_config import (
+    QuenchStackConfig,
+    load_project_config,
+    DEFAULT_UNMANAGED_EXTENSIONS,
+    CRITICAL_CODE_MANIFEST_PATTERNS,
+)
+
+
+@pytest.fixture
+def temp_workspace():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+
+def test_unmanaged_extensions_and_critical_manifests():
+    """验证扩充后的未受管后缀与高危清单 Glob 规则"""
+    assert ".sample" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".example" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".bak" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".log" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".csv" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".tsv" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".parquet" in DEFAULT_UNMANAGED_EXTENSIONS
+    assert ".lock" in DEFAULT_UNMANAGED_EXTENSIONS
+
+    # 验证 Glob 模式存在
+    assert "dockerfile*" in CRITICAL_CODE_MANIFEST_PATTERNS
+    assert "docker-compose*.yml" in CRITICAL_CODE_MANIFEST_PATTERNS
+    assert "tsconfig*.json" in CRITICAL_CODE_MANIFEST_PATTERNS
+    assert ".env" in CRITICAL_CODE_MANIFEST_PATTERNS
+
+
+def test_is_path_governed_heuristics_manifest_variants(temp_workspace):
+    """测试构建清单变体及 glob 模式识别"""
+    cfg = QuenchStackConfig(workspace_root=str(temp_workspace), project_name="test_proj")
+
+    # 构建清单变体受管
+    assert cfg.is_path_governed("docker-compose.override.yml") is True
+    assert cfg.is_path_governed("docker-compose.prod.yaml") is True
+    assert cfg.is_path_governed("Dockerfile.dev") is True
+    assert cfg.is_path_governed("tsconfig.build.json") is True
+    assert cfg.is_path_governed("tsconfig.node.json") is True
+    assert cfg.is_path_governed("package.json") is True
+    assert cfg.is_path_governed("yarn.lock") is True
+    assert cfg.is_path_governed("Cargo.lock") is True
+    assert cfg.is_path_governed(".env") is True
+
+    # 未受管后缀放行
+    assert cfg.is_path_governed(".env.example") is False
+    assert cfg.is_path_governed("config.sample") is False
+    assert cfg.is_path_governed("output.log") is False
+    assert cfg.is_path_governed("data/dataset.csv") is False
+    assert cfg.is_path_governed("data/features.parquet") is False
+    assert cfg.is_path_governed("backup.bak") is False
+    # 非已知 manifest 的普通 lock 文件放行
+    assert cfg.is_path_governed("process.lock") is False
+
+
+def test_is_path_governed_multi_language_false_positive_rate(temp_workspace):
+    """验证多语言典型工程结构判定准确率，确保文档资产假阳性率（误报为代码）<= 5%"""
+    cfg = QuenchStackConfig(workspace_root=str(temp_workspace), project_name="multi_lang")
+
+    test_cases = [
+        # Python Web
+        ("src/app/main.py", True),
+        ("src/app/models.py", True),
+        ("requirements.txt", True),
+        ("pyproject.toml", True),
+        ("docs/index.md", False),
+        ("docs/architecture.drawio", False),
+        ("docs/api.txt", False),
+        (".github/workflows/ci.yml", False),
+        # Vue / React
+        ("src/components/Button.tsx", True),
+        ("src/views/Home.vue", True),
+        ("package.json", True),
+        ("pnpm-lock.yaml", True),
+        ("tsconfig.json", True),
+        ("tsconfig.app.json", True),
+        ("public/favicon.ico", False),
+        ("README.md", False),
+        ("notes/meeting.txt", False),
+        # Go
+        ("cmd/server/main.go", True),
+        ("pkg/router/router.go", True),
+        ("go.mod", True),
+        ("go.sum", True),
+        ("doc/guide.md", False),
+        ("sample_data/users.json", False),  # 命中 sample_data/ 目录
+        # Rust
+        ("src/main.rs", True),
+        ("src/lib.rs", True),
+        ("Cargo.toml", True),
+        ("Cargo.lock", True),
+        ("manuals/setup.rst", False),
+        ("samples/demo.rs", False),  # 命中 samples/ 目录
+        # Java Maven
+        ("src/main/java/com/example/App.java", True),
+        ("src/main/resources/application.properties", True),
+        ("pom.xml", True),
+        ("roadmap/v2.md", False),
+        ("future_roadmap/plan.adoc", False),
+    ]
+
+    total_doc_assets = 0
+    misclassified_doc_assets = 0
+
+    for path, expected_governed in test_cases:
+        actual_governed = cfg.is_path_governed(path)
+        assert actual_governed == expected_governed, f"判定不符: {path} 预期 {expected_governed}, 实际 {actual_governed}"
+        if not expected_governed:
+            total_doc_assets += 1
+            if actual_governed:
+                misclassified_doc_assets += 1
+
+    false_positive_rate = misclassified_doc_assets / total_doc_assets if total_doc_assets > 0 else 0
+    assert false_positive_rate <= 0.05, f"假阳性率超过 5%: {false_positive_rate:.2%}"
+
+
+def test_is_path_governed_path_escape_defense(temp_workspace):
+    """验证路径越界逃逸防御"""
+    cfg = QuenchStackConfig(workspace_root=str(temp_workspace), project_name="escape_test")
+
+    # 向上逃逸出工作区目录，必须判定为受管（被拦截）
+    assert cfg.is_path_governed("../../etc/passwd") is True
+    assert cfg.is_path_governed("../outside_project/evil.py") is True
+    assert cfg.is_path_governed(temp_workspace.parent / "escape.py") is True
+
+
+def test_is_path_governed_symlink_defense(temp_workspace):
+    """验证符号链接穿透防御：指向生产代码的 symlink 必须判定为受管"""
+    code_dir = temp_workspace / "src"
+    code_dir.mkdir(parents=True, exist_ok=True)
+    real_code_file = code_dir / "target.py"
+    real_code_file.write_text("print('hello')", encoding="utf-8")
+
+    docs_dir = temp_workspace / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    symlink_file = docs_dir / "link_to_code.py"
+
+    try:
+        symlink_file.symlink_to(real_code_file)
+        symlink_created = True
+    except (OSError, NotImplementedError):
+        symlink_created = False
+
+    cfg = QuenchStackConfig(workspace_root=str(temp_workspace), project_name="symlink_test")
+
+    if symlink_created:
+        # 即使 symlink 位于 docs/ 目录下，由于指向 src/target.py，必须穿透解析并判定为受管
+        assert cfg.is_path_governed(str(symlink_file)) is True
+    else:
+        # Windows 权限限制若无法创建真实 symlink，使用 mock 测试 realpath 解析效果
+        with patch("os.path.realpath") as mock_realpath:
+            mock_realpath.side_effect = lambda p: str(real_code_file) if "link_to_code.py" in str(p) else str(p)
+            assert cfg.is_path_governed(str(symlink_file)) is True
+
+
+def test_load_project_config_dynamic_script_path(temp_workspace):
+    """验证缺少 quench_stack.yaml 时异常信息动态计算 init_project.py 路径而非硬编码"""
+    import project_config
+
+    mock_file_path = os.path.normpath("/custom/virtual/path/plugins/quench-dev-tasks/server/project_config.py")
+    expected_script = os.path.normpath("/custom/virtual/path/plugins/quench-dev-tasks/scripts/init_project.py")
+
+    with patch.object(project_config, "__file__", mock_file_path):
+        with pytest.raises(FileNotFoundError) as exc_info:
+            load_project_config(str(temp_workspace))
+
+    msg = str(exc_info.value)
+    assert expected_script in msg
+    assert "D:\\Work\\Quench\\MCP" not in msg
+

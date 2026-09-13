@@ -127,7 +127,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_state_machine.py -v
 
 ---
 
-### 任务 2 ✅ 已确认 — 双轨管控边界判定引擎与多语言仓库启发式算法调优
+### 任务 2 ✔️ 已完成 — 双轨管控边界判定引擎与多语言仓库启发式算法调优
 
 #### 【涉及文件】
 

@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import os
 import sys
+import fnmatch
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
 import yaml
 
-
-import fnmatch
-
 DEFAULT_UNMANAGED_EXTENSIONS = {
+    # 文档类
     ".md", ".markdown", ".txt", ".rst", ".adoc",
+    # 图片与素材类
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+    # 设计图类
     ".drawio", ".puml", ".mermaid",
+    # 模板与示例类（新增）
+    ".sample", ".example", ".bak",
+    # 数据与日志类（新增）
+    ".log", ".csv", ".tsv", ".parquet",
+    # 锁文件（新增，非代码产物；构建清单在下方精确受管）
+    ".lock",
 }
 
 DEFAULT_UNMANAGED_DIRS = (
@@ -21,13 +30,20 @@ DEFAULT_UNMANAGED_DIRS = (
     "samples/", ".vscode/", ".idea/", ".github/",
 )
 
-CRITICAL_CODE_MANIFESTS = {
+CRITICAL_CODE_MANIFEST_PATTERNS: list[str] = [
+    # 精确匹配
     "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
     "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
     "cargo.toml", "cargo.lock", "go.mod", "go.sum",
-    "dockerfile", "docker-compose.yml", "docker-compose.yaml",
     "pom.xml", "build.gradle", "build.gradle.kts",
-}
+    # Glob 模式匹配（支持容器、配置与环境变体）
+    "dockerfile*",
+    "docker-compose*.yml", "docker-compose*.yaml",
+    "tsconfig*.json",
+    ".env",  # .env 本身是高危凭据文件
+]
+
+CRITICAL_CODE_MANIFESTS = set(CRITICAL_CODE_MANIFEST_PATTERNS)
 
 
 def _match_glob(target_rel: str, pattern: str) -> bool:
@@ -91,14 +107,42 @@ class QuenchStackConfig:
             return [str(p).strip() for p in patterns if str(p).strip()]
         return []
 
-    def is_path_governed(self, target_file: str) -> bool:
+    def is_path_governed(self, target_file: str | Path, workspace_root: Optional[str | Path] = None) -> bool:
         """判断目标文件是否属于任务状态机强管控的生产代码/构建资产。
 
         采用【项目法定边界清单 (governance_scope) + 内核智能推断】双轨机制。
+        0. symlink 解析 + 路径越界防御
+        1. 显式清单优先 (Explicit Governance Scope)
+        2. 核心构建清单与 Glob 特征匹配
+        3. 扩展名与常用非代码目录推断兜底
         返回 True 表示受管生产代码（触发任务状态机）；返回 False 表示非代码/文档资产（自由放行）。
         """
-        norm_target = os.path.normpath(target_file).replace("\\", "/").lower()
-        norm_root = os.path.normpath(self.workspace_root).replace("\\", "/").lower()
+        ws_root = str(workspace_root or self.workspace_root)
+        try:
+            real_root = os.path.realpath(os.path.abspath(ws_root))
+            target_str = str(target_file)
+            if not os.path.isabs(target_str):
+                abs_target = os.path.join(real_root, target_str)
+            else:
+                abs_target = target_str
+            real_target = os.path.realpath(abs_target)
+
+            # 路径越界穿越防御
+            try:
+                common = os.path.commonpath([real_target, real_root])
+            except ValueError:
+                # 跨驱动器（Windows 下跨盘符逃逸），判定为受管（拦截）
+                return True
+
+            if os.path.normcase(common) != os.path.normcase(real_root):
+                # 路径逃逸出工作区根目录，判定为受管（拦截）
+                return True
+        except Exception:
+            # 路径解析失败兜底为受管
+            return True
+
+        norm_target = real_target.replace("\\", "/").lower()
+        norm_root = real_root.replace("\\", "/").lower()
         if norm_target.startswith(norm_root):
             rel_path = norm_target[len(norm_root):].lstrip("/")
         else:
@@ -124,9 +168,10 @@ class QuenchStackConfig:
                 return False
 
         # 2. 内核智能语义推断兜底 (Smart Heuristics Fallback)
-        # 核心构建与依赖清单（哪怕是 json/txt/yaml 也是高危生产清单）
-        if basename in CRITICAL_CODE_MANIFESTS or basename.startswith("dockerfile"):
-            return True
+        # 核心构建与依赖清单（支持 Glob 变体匹配，优先级高于普通后缀推断）
+        for pat in CRITICAL_CODE_MANIFEST_PATTERNS:
+            if fnmatch.fnmatch(basename, pat.lower()):
+                return True
 
         # 智能识别文档/设计素材扩展名
         if ext in DEFAULT_UNMANAGED_EXTENSIONS:
@@ -150,9 +195,12 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     yaml_path = os.path.join(root, ".agents", "quench_stack.yaml")
 
     if not os.path.isfile(yaml_path):
+        init_script = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "init_project.py")
+        )
         raise FileNotFoundError(
             f"项目配置文件不存在: {yaml_path}\n"
-            f"请先在项目根目录运行初始化: python D:\\Work\\Quench\\MCP\\plugins\\quench-dev-tasks\\scripts\\init_project.py \"{root}\""
+            f"请先在项目根目录运行初始化: python \"{init_script}\" \"{root}\""
         )
 
     try:
