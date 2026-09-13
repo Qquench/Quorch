@@ -1,8 +1,8 @@
 # Quench DevTasks MCP 未来演进路线图索引 (Roadmaps Index)
 
 > **命名澄清与定位说明**：
-> 本项目全称为 **Quench DevTasks MCP**（插件标识为 `quench-dev-tasks`），是专门面向双模型开发任务治理、代码越界拦截与流程自动化的核心调度套件。
-> 严禁简称为宽泛的“Quench MCP”，以便为未来 Quench 体系下可能衍生的其他垂直领域 MCP（如工业 PLC 通信 MCP、CAD 解析 MCP、MES 数据中台 MCP 等）留出清晰独立的命名空间。
+> 本项目已正式定名为 **`quench-dev-orchestrator`**（Quench 智能开发编排器 / 任务调度中枢），插件核心标识为 `quench-dev-tasks`。
+> 该命名精准兼顾了开发任务流转、双模型协同与全生命周期编排，彻底跳出单一 MCP 的狭隘定义，同时为未来 Quench 体系下可能衍生的其他垂直领域 MCP（如工业 PLC 通信、CAD 解析、MES 数据中台等）留出清晰独立的命名空间。
 
 本目录收纳 Quench DevTasks MCP 从当前基线逐步迈向开源与全生态适配的阶段性架构规划与演进路线图。
 

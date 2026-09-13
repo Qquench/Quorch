@@ -85,10 +85,9 @@ Google Antigravity IDE 拥有极强的 Agent 编程能力，但社区开发者�
 * **推荐发布形态**：
   以独立仓库发布插件本身，仓库根目录即对应当前的 `plugins/quench-dev-tasks/`。
 * **推荐仓库名称**：
-  - `antigravity-dev-tasks`（推荐：生态辨识度最高，便于搜索）
-  - 或 `quench-dev-tasks`（保留原始品牌）
+  - `quench-dev-orchestrator`（正式确定：兼顾双模型调度、任务治理与工程质感，精准表达编排调度中枢定位）
 * **简介（One-liner Description）**：
-  > "Dual-model orchestration & task governance plugin for Antigravity IDE (Flash for agile execution, Opus for strategic architecture)."
+  > "Dual-model orchestration & task governance engine for AI IDEs (Antigravity, Cursor, Windsurf) — Flash for agile execution, Opus for strategic architecture."
 
 ### 2.5 GitHub 社区门面资产准备
 在开放在 GitHub 之前，补齐以下社区标准件：

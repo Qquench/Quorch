@@ -3,7 +3,7 @@
 # 供 quench-dev-tasks 插件读取，实现 MCP 仓库本身的自我治理与规范驱动演进。
 # ==============================================================================
 
-project_name: "Quench_DevTasks_MCP"
+project_name: "quench-dev-orchestrator"
 
 dev_tasks_dir: "docs/dev_tasks"
 archive_dir: "docs/dev_tasks/archive"

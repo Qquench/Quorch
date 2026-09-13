@@ -55,12 +55,12 @@
 > [!IMPORTANT]
 > ### ⚠️ 关键实战联动备忘：完成路径自适应后的文件夹更名与 JJW_MES 恢复指引
 > 在本阶段（Epic 2.1 与 Epic 2.2）实现 `install.py` 动态渲染与路径自适应之后，必须立即执行以下三步闭环联动：
-> 1. **执行文件夹重命名**：将当前根目录 `D:\Work\Quench\MCP` 重命名为确定的新工程名（如 `quench-dev-orchestrator`）；
-> 2. **新目录下执行自愈安装**：在新目录下直接执行 `python scripts/install.py`，瞬间完成动态配置渲染与自检；
+> 1. **执行文件夹重命名**：将当前根目录 `D:\Work\Quench\MCP` 重命名为已正式选定的工程名：`D:\Work\Quench\quench-dev-orchestrator`；
+> 2. **新目录下执行自愈安装**：在 `quench-dev-orchestrator` 目录下直接执行 `python scripts/install.py`，瞬间完成动态配置渲染与自检；
 > 3. **★ 同步更新老项目 JJW_MES（防止插件失联）**：
 >    在终端中前往 `D:\Work\JJW_MES` 根目录，执行：
 >    ```powershell
->    python D:\Work\Quench\<新目录名>\plugins\quench-dev-tasks\scripts\init_project.py "D:\Work\JJW_MES"
+>    python D:\Work\Quench\quench-dev-orchestrator\plugins\quench-dev-tasks\scripts\init_project.py "D:\Work\JJW_MES"
 >    ```
 >    重新刷新 `JJW_MES\.agents\plugins.json` 中的插件路径，确保现有业务项目平滑过度、完全无缝！
 

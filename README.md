@@ -1,6 +1,6 @@
-# Quench DevTasks MCP — 双模型开发任务治理套件 (Quench DevTasks Orchestrator)
+# Quench Dev-Orchestrator (`quench-dev-orchestrator`)
 
-> 本目录为 **Quench 标的体系** 下专用于双模型开发任务治理、代码越界拦截与流程自动化的 MCP 服务与 Antigravity IDE Plugin 根目录（插件标识：`quench-dev-tasks`）。独立于 Quench 体系后续可能衍生的其他领域 MCP（如工业 PLC 通信、CAD 数据等）。
+> 本工程为 **Quench 标的体系** 下专用于双模型开发任务治理、代码越界拦截与多工具调度的中枢套件（正式命名：`quench-dev-orchestrator`，插件包标识：`quench-dev-tasks`）。独立于 Quench 体系后续可能衍生的其他垂直领域 MCP（如工业 PLC 通信、CAD 数据中台等）。
 
 ---
 
