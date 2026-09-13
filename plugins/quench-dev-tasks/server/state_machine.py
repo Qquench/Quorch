@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 import filelock
@@ -183,8 +184,19 @@ def transition_task(
 
         lines[target_idx] = new_line
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.writelines(lines)
+        dir_name = os.path.dirname(os.path.abspath(filepath))
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+            os.replace(tmp_path, filepath)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+            raise
 
         target_item.status = norm_new
         target_item.raw_line = new_line

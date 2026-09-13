@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -253,5 +254,63 @@ def test_dev_tasks_set_bypass_and_anti_abuse(mock_workspace):
     # status 检查确认旁路已清除
     st2 = dev_tasks_status(ws)
     assert st2["session_bypass"] is None
+
+
+def test_dev_tasks_set_bypass_sanitization_and_utc(mock_workspace):
+    ws = mock_workspace
+
+    # 1. 尝试传入非法 session_id (含路径遍历/特殊字符)
+    res_bad = dev_tasks_set_bypass(
+        ws,
+        action="enable",
+        category="docs",
+        session_id="../../malicious/path",
+        reason="测试非法路径",
+        user_authorized=True,
+    )
+    assert res_bad["success"] is False
+    assert "非法的 session_id 格式" in res_bad["error"]
+
+    # 2. 尝试传入超长 session_id (> 128 字符)
+    res_overlong = dev_tasks_set_bypass(
+        ws,
+        action="enable",
+        category="docs",
+        session_id="a" * 150,
+        reason="测试超长 session_id",
+        user_authorized=True,
+    )
+    assert res_overlong["success"] is False
+    assert "非法的 session_id 格式" in res_overlong["error"]
+
+    # 3. 正常合规 UUID/十六进制 session_id
+    res_ok = dev_tasks_set_bypass(
+        ws,
+        action="enable",
+        category="docs",
+        session_id="4b138e9a-d661-4e38-b0ff-dfe8f07cb4ee",
+        reason="合规会话 ID 测试",
+        user_authorized=True,
+    )
+    assert res_ok["success"] is True
+
+    # 4. 超长 reason 截断至 500 字符
+    long_reason = "理由前缀: " + ("x" * 600)
+    res_trunc = dev_tasks_set_bypass(
+        ws,
+        action="enable",
+        category="docs",
+        session_id="valid-id-1",
+        reason=long_reason,
+        user_authorized=True,
+    )
+    assert res_trunc["success"] is True
+    assert "超出 500 字符" in res_trunc["message"]
+    # 检查 bypass 文件中确为 500 字符
+    bypass_file = os.path.join(ws, ".agents", ".quench_bypass.json")
+    with open(bypass_file, "r", encoding="utf-8") as f:
+        bdata = json.load(f)
+    assert len(bdata["reason"]) == 500
+
 
 

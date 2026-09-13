@@ -1,14 +1,46 @@
 from __future__ import annotations
 
 import datetime
+from datetime import datetime, timezone, timedelta, date
 import glob
 import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Dict, List, Optional
 from fastmcp import FastMCP
+
+SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+
+
+def _atomic_write_json(filepath: str, data: dict) -> None:
+    """使用临时文件 + os.replace 实现原子写入"""
+    dir_name = os.path.dirname(os.path.abspath(filepath))
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, filepath)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
+
+def _validate_session_id(session_id: Optional[str]) -> Optional[str]:
+    """校验 session_id 格式（UUID 正则白名单，最长 128 字符），返回净化后的值或抛出 ValueError。"""
+    if not session_id:
+        return None
+    s = session_id.strip()
+    if not SESSION_ID_PATTERN.match(s):
+        raise ValueError(f"非法的 session_id 格式: '{s}'。仅支持最长 128 位的 UUID/十六进制/连字符字符。")
+    return s
 
 from changelog_writer import append_changelog_entry
 from project_config import load_project_config
@@ -219,7 +251,12 @@ def dev_tasks_status(workspace_root: str) -> Dict[str, Any]:
                 expires_at = bdata.get("expires_at")
                 is_expired = False
                 if expires_at:
-                    if datetime.datetime.now() > datetime.datetime.fromisoformat(expires_at):
+                    try:
+                        exp_dt = datetime.fromisoformat(expires_at)
+                        exp_dt_utc = exp_dt.astimezone(timezone.utc)
+                        if datetime.now(timezone.utc) > exp_dt_utc:
+                            is_expired = True
+                    except Exception:
                         is_expired = True
                 if not is_expired:
                     bypass_status = {
@@ -360,7 +397,7 @@ def dev_tasks_propose(
             "> - 保留所有现有注释和文档字符串（除非明确要求修改）\n",
             "> - **改逻辑必加单测断言**：在测试目录追加断言，杜绝回归\n",
             "> - 每完成一条任务，更新其状态为 `🔨 执行中`，完成后更新为 `✔️ 已完成`\n\n",
-            f"- **创建日期**：{datetime.date.today().isoformat()}\n\n",
+            f"- **创建日期**：{date.today().isoformat()}\n\n",
             "---\n\n",
             "## 任务清单与状态\n\n",
         ]
@@ -781,8 +818,27 @@ def dev_tasks_set_bypass(
             "error": "【参数校验失败】开启旁路必须在 reason 字段中如实记录用户的授权原由或指令（不少于5字）。",
         }
 
+    # session_id 输入净化与校验
+    clean_session_id = None
+    if session_id:
+        try:
+            clean_session_id = _validate_session_id(session_id)
+        except ValueError as ve:
+            return {"success": False, "error": f"【参数校验失败】{ve}"}
+
+    clean_reason = reason.strip()
+    truncated_warning = None
+    if len(clean_reason) > 500:
+        clean_reason = clean_reason[:500]
+        truncated_warning = "授权原因长度超出 500 字符，已自动截断至 500 字符。"
+
     patterns: List[str] = []
     cat_lower = category.lower()
+    if cat_lower == "docs":
+        cat_lower = "docs_only"
+    elif cat_lower == "tests":
+        cat_lower = "tests_only"
+
     if cat_lower == "all":
         patterns = ["*"]
     elif cat_lower == "custom":
@@ -794,31 +850,37 @@ def dev_tasks_set_bypass(
     else:
         return {
             "success": False,
-            "error": f"不支持的旁路类别: '{category}'。支持类别: {list(BYPASS_PRESET_CATEGORIES.keys()) + ['custom', 'all']}",
+            "error": f"不支持的旁路类别: '{category}'。支持类别: {list(BYPASS_PRESET_CATEGORIES.keys()) + ['custom', 'all', 'docs', 'tests']}",
         }
 
     clamped_duration = max(1, min(duration_hours, 8))
-    now = datetime.datetime.now()
-    expires_at = now + datetime.timedelta(hours=clamped_duration)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=clamped_duration)
 
     payload = {
         "active": True,
         "scope": "session",
-        "session_id": session_id.strip() if session_id else None,
+        "session_id": clean_session_id,
         "category": cat_lower,
         "patterns": patterns,
-        "reason": reason.strip(),
+        "reason": clean_reason,
         "created_at": now.isoformat(),
         "expires_at": expires_at.isoformat(),
         "duration_hours": clamped_duration,
     }
 
     try:
-        os.makedirs(agents_dir, exist_ok=True)
-        with open(bypass_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(bypass_file, payload)
     except Exception as e:
         return {"success": False, "error": f"写入旁路配置失败: {e}"}
+
+    notice_msg = (
+        f"✅ 已为当前会话成功开启 [{cat_lower}] 快速旁路（有效期 {clamped_duration} 小时，至 {expires_at.strftime('%H:%M:%S UTC')}）。\n"
+        f"🎯 允许免任务管控修改的文件模式: {patterns}\n"
+        f"💡 授权原因: {clean_reason}"
+    )
+    if truncated_warning:
+        notice_msg = f"⚠️ {truncated_warning}\n" + notice_msg
 
     return {
         "success": True,
@@ -827,11 +889,7 @@ def dev_tasks_set_bypass(
         "patterns": patterns,
         "expires_at": expires_at.isoformat(),
         "scope": "session",
-        "message": (
-            f"✅ 已为当前会话成功开启 [{cat_lower}] 快速旁路（有效期 {clamped_duration} 小时，至 {expires_at.strftime('%H:%M:%S')}）。\n"
-            f"🎯 允许免任务管控修改的文件模式: {patterns}\n"
-            f"💡 授权原因: {reason.strip()}"
-        ),
+        "message": notice_msg,
     }
 
 

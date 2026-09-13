@@ -2,13 +2,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import datetime
+from datetime import datetime, timezone
 import fnmatch
 import glob
 import json
 import os
 import re
 import sys
+from typing import Optional, List, Tuple
+from filelock import FileLock, Timeout
 
 # 保证能加载上级 server 模块
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -226,52 +228,108 @@ def is_whitelist_matched(config, target_file: str, workspace_root: str) -> bool:
     return False
 
 
+SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+
+
+def verify_session_integrity(
+    bypass_data: dict, incoming_conversation_id: Optional[str]
+) -> Tuple[bool, str]:
+    """
+    校验会话旁路完整性与租约状态。
+    统一使用 UTC aware datetime 进行时间比较。
+    返回: (is_valid, reject_reason)
+    """
+    if not isinstance(bypass_data, dict):
+        return False, "bypass 数据格式非字典"
+
+    if not bypass_data.get("active", False):
+        return False, "bypass 处于未激活状态"
+
+    # 物理会话锁核验 (Session Lock Check)
+    locked_session = bypass_data.get("session_id")
+    if locked_session and incoming_conversation_id:
+        if locked_session.strip().lower() != incoming_conversation_id.strip().lower():
+            return False, f"跨会话冲突: 锁定会话 {locked_session} != 当前会话 {incoming_conversation_id}"
+
+    # 过期失效检查（统一 UTC 时间戳比对与 aware/naive 兼容）
+    expires_at = bypass_data.get("expires_at")
+    if expires_at:
+        try:
+            exp_dt = datetime.fromisoformat(expires_at)
+            exp_dt_utc = exp_dt.astimezone(timezone.utc)
+            if datetime.now(timezone.utc) > exp_dt_utc:
+                return False, f"会话租约已超时过期 ({expires_at})"
+        except Exception as e:
+            return False, f"过期时间格式异常: {e}"
+
+    return True, ""
+
+
+def safe_clean_corrupted_bypass(bypass_path: str) -> None:
+    """原子化清理或重命名已失效/损坏的会话旁路文件，带 FileLock 保护。"""
+    lock_file = bypass_path + ".lock"
+    try:
+        with FileLock(lock_file, timeout=5.0):
+            if os.path.isfile(bypass_path):
+                try:
+                    os.remove(bypass_path)
+                except Exception:
+                    pass
+    except Exception:
+        if os.path.isfile(bypass_path):
+            try:
+                os.remove(bypass_path)
+            except Exception:
+                pass
+
+
 def is_session_bypass_matched(
     workspace_root: str, target_file: str, current_conversation_id: Optional[str] = None
 ) -> bool:
     """第二层：动态会话旁路匹配（.agents/.quench_bypass.json）。
     
-    具备双重防线：
+    具备三重防线：
     1. 物理会话锁核验 (Session Lock)：比对 conversationId，跨会话立即失效并自愈清理；
-    2. 有效时长倒计时 (Expiry Check)：超时自动失效并自愈清理。
+    2. 有效时长倒计时 (Expiry Check)：超时自动失效并自愈清理；
+    3. 并发安全锁 (FileLock)：保护 bypass 文件读取与自愈清理，防止瞬态穿透与数据竞争。
     """
     bypass_file = os.path.join(workspace_root, ".agents", ".quench_bypass.json")
     if not os.path.isfile(bypass_file):
         return False
 
+    lock_file = bypass_file + ".lock"
     try:
-        with open(bypass_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with FileLock(lock_file, timeout=5.0):
+            if not os.path.isfile(bypass_file):
+                return False
 
-        if not data.get("active", False):
-            return False
-
-        # 1. 物理会话锁核验 (Session Lock Check)
-        locked_session = data.get("session_id")
-        if locked_session and current_conversation_id:
-            if locked_session.strip().lower() != current_conversation_id.strip().lower():
-                # 跨会话访问！立即判定失效，并清理前一个会话遗留的旁路配置文件
+            try:
+                with open(bypass_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                # 畸形 JSON 文件，自愈清理
                 try:
                     os.remove(bypass_file)
                 except Exception:
                     pass
                 return False
 
-        # 2. 过期失效检查（最大生效时长防线）
-        expires_at = data.get("expires_at")
-        if expires_at:
-            exp_dt = datetime.datetime.fromisoformat(expires_at)
-            if datetime.datetime.now() > exp_dt:
+            is_valid, reject_reason = verify_session_integrity(data, current_conversation_id)
+            if not is_valid:
+                # 校验未通过（跨会话或已过期或损坏），清理旁路文件
                 try:
                     os.remove(bypass_file)
                 except Exception:
                     pass
                 return False
 
-        patterns = data.get("patterns", [])
-        for pat in patterns:
-            if matches_pattern(target_file, pat, workspace_root):
-                return True
+            patterns = data.get("patterns", [])
+            for pat in patterns:
+                if matches_pattern(target_file, pat, workspace_root):
+                    return True
+    except Timeout:
+        # FileLock 超时，为安全防线起见不放行
+        return False
     except Exception:
         return False
 
