@@ -20,8 +20,8 @@
 ### 本地初始化步骤
 1. Fork 并克隆代码仓库：
    ```bash
-   git clone https://github.com/lzen5150/Quorch.git
-   cd quorch
+   git clone https://github.com/Qquench/Quorch.git
+   cd Quorch
    ```
 2. 创建并激活虚拟环境：
    ```bash

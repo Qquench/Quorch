@@ -5,7 +5,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Python: >=3.11](https://img.shields.io/badge/python-3.11+-brightgreen.svg)](https://www.python.org/)
 [![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
-[![CI](https://github.com/lzen5150/Quorch/actions/workflows/ci.yml/badge.svg)](https://github.com/lzen5150/Quorch/actions/workflows/ci.yml)
+[![CI](https://github.com/Qquench/Quorch/actions/workflows/ci.yml/badge.svg)](https://github.com/Qquench/Quorch/actions/workflows/ci.yml)
 
 > **面向 AI IDE（Antigravity, Cursor, Windsurf, Claude Code）的双模型编排调度与开发任务治理套件**  
 > *高阶推理架构审查模型 (Reviewer) 负责全局架构设计与复杂冲突仲裁 • 敏捷执行模型 (Runner) 负责轻量实施与 DoD 自动化单测断言闭环。*
