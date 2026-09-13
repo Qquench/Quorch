@@ -26,6 +26,7 @@ coverage.xml
 # Quench Runtime & Session Locks
 *.lock
 .agents/.quench_bypass.json
+.agents/.quench_hook.log*
 
 # IDE & OS
 .vscode/

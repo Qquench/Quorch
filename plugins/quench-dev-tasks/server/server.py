@@ -231,6 +231,42 @@ def _audit_test_changes(workspace_root: str, config: Any) -> Dict[str, Any]:
         return {"audit_performed": False, "reason": str(e)}
 
 
+def _get_recent_hook_logs(workspace_root: str, max_lines: int = 10) -> List[str]:
+    """读取 .agents/.quench_hook.log 最近 N 条日志，若不存在返回空列表。
+    对最后一行做格式完整性校验，若不完整则跳过返回前 N-1 条。
+    """
+    log_file = os.path.join(workspace_root, ".agents", ".quench_hook.log")
+    if not os.path.isfile(log_file):
+        return []
+
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            raw_content = f.read()
+
+        if not raw_content:
+            return []
+
+        has_trailing_newline = raw_content.endswith("\n") or raw_content.endswith("\r")
+        raw_lines = raw_content.splitlines()
+        if not raw_lines:
+            return []
+
+        # 若文件末尾没有换行符，说明末行正处于子进程写入半途（未刷盘换行），属于不完整行，剔除
+        if not has_trailing_newline:
+            raw_lines.pop()
+
+        if not raw_lines:
+            return []
+
+        # 剔除可能包含异常空字符的残缺末行
+        if "\x00" in raw_lines[-1]:
+            raw_lines.pop()
+
+        return raw_lines[-max_lines:]
+    except Exception:
+        return []
+
+
 # ==============================================================================
 # MCP Tools
 # ==============================================================================
@@ -291,6 +327,7 @@ def dev_tasks_status(workspace_root: str) -> Dict[str, Any]:
             "session_bypass": bypass_status,
             "static_fast_track_patterns": config.get_fast_track_patterns(),
             "governance_scope": config.governance_scope,
+            "last_hook_log_entries": _get_recent_hook_logs(workspace_root, max_lines=10),
             "message": f"任务目录已创建: {dev_tasks_dir}，当前暂无任务单。",
         }
 
@@ -347,6 +384,7 @@ def dev_tasks_status(workspace_root: str) -> Dict[str, Any]:
         "session_bypass": bypass_status,
         "static_fast_track_patterns": config.get_fast_track_patterns(),
         "governance_scope": config.governance_scope,
+        "last_hook_log_entries": _get_recent_hook_logs(workspace_root, max_lines=10),
     }
 
 

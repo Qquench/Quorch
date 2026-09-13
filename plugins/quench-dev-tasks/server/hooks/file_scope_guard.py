@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import fnmatch
 import glob
 import json
+import logging
+import logging.handlers
 import os
 import re
 import sys
@@ -25,6 +27,96 @@ if sys.version_info >= (3, 7):
         sys.stdin.reconfigure(encoding="utf-8")
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
+class SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Windows 安全轮转：轮转失败时保持当前文件继续写入，不中断日志流。"""
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except (PermissionError, OSError):
+            # 轮转失败（Windows 多进程竞争），继续使用当前日志文件
+            if self.stream is None:
+                try:
+                    self.stream = self._open()
+                except Exception:
+                    pass
+
+
+_LOGGER_CACHE: dict[str, logging.Logger] = {}
+
+
+def get_hook_logger(workspace_root: str) -> logging.Logger:
+    """初始化并缓存基于 workspace_root/.agents/.quench_hook.log 的轮转日志记录器。
+    使用 SafeRotatingFileHandler 保障 Windows 多进程安全。
+    若 .agents 目录不可写，降级为 NullHandler（仅在初始化阶段）。
+    """
+    if not workspace_root:
+        null_logger = logging.getLogger("quench.hook.null")
+        if not null_logger.handlers:
+            null_logger.addHandler(logging.NullHandler())
+        return null_logger
+
+    norm_root = os.path.normcase(os.path.normpath(workspace_root))
+    if norm_root in _LOGGER_CACHE:
+        return _LOGGER_CACHE[norm_root]
+
+    logger_name = f"quench.hook.{abs(hash(norm_root))}"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.handlers.clear()
+
+    agents_dir = os.path.join(workspace_root, ".agents")
+    log_file = os.path.join(agents_dir, ".quench_hook.log")
+
+    try:
+        os.makedirs(agents_dir, exist_ok=True)
+        handler = SafeRotatingFileHandler(
+            log_file,
+            maxBytes=1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    except (PermissionError, OSError, Exception):
+        logger.addHandler(logging.NullHandler())
+
+    _LOGGER_CACHE[norm_root] = logger
+    return logger
+
+
+def log_guard_event(
+    logger: logging.Logger,
+    event_type: str,  # "ALLOW", "DENIED", "ASK_MODAL", "BYPASS_CLEAN", "EXCEPTION"
+    target_file: str,
+    tool_name: str,
+    decision: str,
+    reason: str = "",
+    session_id: Optional[str] = None,
+) -> None:
+    """记录结构化 Hook 治理决策事件。"""
+    if not logger:
+        return
+    try:
+        clean_reason = reason.replace("\r", " ").replace("\n", " ").strip() if reason else ""
+        clean_target = target_file.replace("\r", " ").replace("\n", " ").strip() if target_file else ""
+        sess = session_id.strip() if session_id else "none"
+        msg = f"[{event_type}] decision={decision} tool={tool_name} target={clean_target} session={sess}"
+        if clean_reason:
+            msg += f" reason={clean_reason}"
+
+        if event_type in ("EXCEPTION", "DENIED"):
+            logger.warning(msg)
+        else:
+            logger.info(msg)
     except Exception:
         pass
 
@@ -267,7 +359,7 @@ def verify_session_integrity(
     return True, ""
 
 
-def safe_clean_corrupted_bypass(bypass_path: str) -> None:
+def safe_clean_corrupted_bypass(bypass_path: str, logger: Optional[logging.Logger] = None) -> None:
     """原子化清理或重命名已失效/损坏的会话旁路文件，带 FileLock 保护。"""
     lock_file = bypass_path + ".lock"
     try:
@@ -275,18 +367,25 @@ def safe_clean_corrupted_bypass(bypass_path: str) -> None:
             if os.path.isfile(bypass_path):
                 try:
                     os.remove(bypass_path)
-                except Exception:
-                    pass
-    except Exception:
+                except Exception as e:
+                    if logger:
+                        logger.warning(f"删除旁路文件失败 {bypass_path}: {e}", exc_info=True)
+    except Exception as e:
+        if logger:
+            logger.warning(f"获取旁路文件锁失败 {lock_file}: {e}", exc_info=True)
         if os.path.isfile(bypass_path):
             try:
                 os.remove(bypass_path)
-            except Exception:
-                pass
+            except Exception as e2:
+                if logger:
+                    logger.warning(f"降级删除旁路文件失败 {bypass_path}: {e2}", exc_info=True)
 
 
 def is_session_bypass_matched(
-    workspace_root: str, target_file: str, current_conversation_id: Optional[str] = None
+    workspace_root: str,
+    target_file: str,
+    current_conversation_id: Optional[str] = None,
+    logger: Optional[logging.Logger] = None,
 ) -> bool:
     """第二层：动态会话旁路匹配（.agents/.quench_bypass.json）。
     
@@ -308,37 +407,59 @@ def is_session_bypass_matched(
             try:
                 with open(bypass_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except Exception:
+            except Exception as e:
                 # 畸形 JSON 文件，自愈清理
+                if logger:
+                    logger.warning(f"读取旁路文件 JSON 异常，触发自愈清理 {bypass_file}: {e}", exc_info=True)
+                    log_guard_event(
+                        logger, "BYPASS_CLEAN", bypass_file, "", "clean", reason=f"畸形JSON: {e}", session_id=current_conversation_id
+                    )
                 try:
                     os.remove(bypass_file)
-                except Exception:
-                    pass
+                except Exception as rem_err:
+                    if logger:
+                        logger.warning(f"自愈清理旁路文件失败: {rem_err}", exc_info=True)
                 return False
 
             is_valid, reject_reason = verify_session_integrity(data, current_conversation_id)
             if not is_valid:
                 # 校验未通过（跨会话或已过期或损坏），清理旁路文件
+                if logger:
+                    logger.warning(f"旁路文件校验未通过 ({reject_reason})，触发自愈清理 {bypass_file}")
+                    log_guard_event(
+                        logger, "BYPASS_CLEAN", bypass_file, "", "clean", reason=reject_reason, session_id=current_conversation_id
+                    )
                 try:
                     os.remove(bypass_file)
-                except Exception:
-                    pass
+                except Exception as rem_err:
+                    if logger:
+                        logger.warning(f"清理失效旁路文件失败: {rem_err}", exc_info=True)
                 return False
 
             patterns = data.get("patterns", [])
             for pat in patterns:
                 if matches_pattern(target_file, pat, workspace_root):
                     return True
-    except Timeout:
+    except Timeout as e:
         # FileLock 超时，为安全防线起见不放行
+        if logger:
+            logger.warning(f"旁路文件锁超时: {e}", exc_info=True)
         return False
-    except Exception:
+    except Exception as e:
+        if logger:
+            logger.warning(f"旁路匹配异常: {e}", exc_info=True)
         return False
 
     return False
 
 
 def main():
+    logger = None
+    target_file = ""
+    tool_name = ""
+    conversation_id = None
+    workspace_root = None
+
     try:
         raw_input = sys.stdin.read()
         if not raw_input.strip():
@@ -355,11 +476,41 @@ def main():
 
         workspace_paths = payload.get("workspacePaths", [])
         workspace_root = workspace_paths[0] if workspace_paths and isinstance(workspace_paths, list) else None
+        if workspace_root:
+            logger = get_hook_logger(workspace_root)
 
         env_type = EnvironmentDetector.detect(payload, workspace_root=workspace_root)
         adapter = get_adapter(env_type, workspace_root=workspace_root)
 
-        def emit_decision(decision: str, reason: str = "") -> None:
+        tool_call = payload.get("toolCall", {})
+        args = tool_call.get("args", {})
+        target_file = args.get("TargetFile") or ""
+        tool_name = tool_call.get("name", "")
+        conversation_id = adapter.extract_session_id(payload)
+
+        def emit_decision(decision: str, reason: str = "", event_type: Optional[str] = None) -> None:
+            if logger:
+                if not event_type:
+                    if decision == "allow":
+                        ev = "ALLOW"
+                    elif decision == "deny":
+                        ev = "DENIED"
+                    elif decision == "ask":
+                        ev = "ASK_MODAL"
+                    else:
+                        ev = "ALLOW"
+                else:
+                    ev = event_type
+                log_guard_event(
+                    logger=logger,
+                    event_type=ev,
+                    target_file=target_file,
+                    tool_name=tool_name,
+                    decision=decision,
+                    reason=reason,
+                    session_id=conversation_id,
+                )
+
             out = adapter.format_decision(decision, reason)
             if isinstance(out, dict):
                 print(json.dumps(out))
@@ -368,20 +519,15 @@ def main():
                 if decision in ("deny", "ask") and not adapter.supports_interactive_ask():
                     sys.exit(1)
 
-        tool_call = payload.get("toolCall", {})
-        args = tool_call.get("args", {})
-        target_file = args.get("TargetFile")
-        conversation_id = adapter.extract_session_id(payload)
-
         if not workspace_paths or not target_file:
-            emit_decision("allow")
+            emit_decision("allow", "无工作区或无目标文件")
             return
 
         workspace_root = workspace_paths[0]
         config_path = os.path.join(workspace_root, ".agents", "quench_stack.yaml")
         if not os.path.isfile(config_path):
             # 非 Quench 纳管项目，静默放行
-            emit_decision("allow")
+            emit_decision("allow", "非Quench项目放行")
             return
 
         from project_config import load_project_config
@@ -390,8 +536,6 @@ def main():
         config = load_project_config(workspace_root)
         dev_tasks_dir = config.resolve_path("dev_tasks_dir")
 
-        tool_name = tool_call.get("name", "")
-
         # 0. 任务单文件状态强守卫（严防任何 Agent 擅自修改状态，或初稿私自越级设为已确认）
         if is_task_file(target_file, workspace_root, config):
             guard_decision = check_task_status_guard(target_file, tool_name, args)
@@ -399,17 +543,17 @@ def main():
                 emit_decision(guard_decision.get("decision", "ask"), guard_decision.get("reason", ""))
                 return
             # 任务单非状态内容编辑（如补充步骤细节、完善说明），直接放行
-            emit_decision("allow")
+            emit_decision("allow", "任务单非状态编辑放行")
             return
 
         # 0.1 治理通用元数据文件豁免（.agents 配置文件、CHANGELOG、README）
         if is_meta_file(target_file, workspace_root, config):
-            emit_decision("allow")
+            emit_decision("allow", "治理通用元数据文件豁免放行")
             return
 
         # 0.1 生产代码靶向识别（Dual-Track Boundary Engine）：非受管的纯文档/规划/素材天然豁免
         if hasattr(config, "is_path_governed") and not config.is_path_governed(target_file):
-            emit_decision("allow")
+            emit_decision("allow", "非受管路径（双轨边界）天然豁免放行")
             return
 
         # 寻找当前正在处于 🔨 执行中 的任务
@@ -475,16 +619,16 @@ def main():
                         break
 
             if is_in_allowed_scope:
-                emit_decision("allow")
+                emit_decision("allow", f"命中执行中任务范围 (Task {active_task.id})")
                 return
 
             # 任务外文件，先检查 Layer 1 静态白名单与 Layer 2 会话旁路（含会话锁核验）
             if is_whitelist_matched(config, target_file, workspace_root):
-                emit_decision("allow")
+                emit_decision("allow", "命中静态白名单配置放行")
                 return
 
-            if is_session_bypass_matched(workspace_root, target_file, conversation_id):
-                emit_decision("allow")
+            if is_session_bypass_matched(workspace_root, target_file, conversation_id, logger=logger):
+                emit_decision("allow", "命中动态会话旁路放行")
                 return
 
             # 触发任务越界拦截提示
@@ -503,12 +647,12 @@ def main():
         # -------------------------------------------------------------
         # 第一层：检查静态白名单（配置文件）
         if is_whitelist_matched(config, target_file, workspace_root):
-            emit_decision("allow")
+            emit_decision("allow", "命中静态白名单配置放行")
             return
 
         # 第二层：检查动态会话旁路（.agents/.quench_bypass.json，含会话锁核验）
-        if is_session_bypass_matched(workspace_root, target_file, conversation_id):
-            emit_decision("allow")
+        if is_session_bypass_matched(workspace_root, target_file, conversation_id, logger=logger):
+            emit_decision("allow", "命中动态会话旁路放行")
             return
 
         # 第三层：交互式弹窗向用户确认（Ask Modal）
@@ -523,7 +667,18 @@ def main():
         )
         emit_decision("ask", reason)
 
-    except Exception:
+    except Exception as e:
+        if logger:
+            logger.warning(f"Hook 运行期未捕获异常降级放行: {e}", exc_info=True)
+            log_guard_event(
+                logger=logger,
+                event_type="EXCEPTION",
+                target_file=target_file or "unknown",
+                tool_name=tool_name,
+                decision="allow",
+                reason=f"Exception: {e}",
+                session_id=conversation_id,
+            )
         # 防御兜底：Hook 绝不能崩溃导致 IDE 流程死锁
         print(json.dumps({"decision": "allow"}))
 

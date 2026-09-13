@@ -382,3 +382,24 @@ governance_scope:
     })
     assert res_dep["decision"] == "ask"
 
+
+def test_file_scope_guard_hook_logging(tmp_path):
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = agents_dir / "quench_stack.yaml"
+    stack_yaml.write_text("schema_version: '1.0'\nproject_name: 'HookLogProj'\n", encoding="utf-8")
+
+    ws_str = str(tmp_path)
+    res = run_hook(FILE_GUARD, {
+        "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "test.py")}},
+        "workspacePaths": [ws_str],
+    })
+    assert res["decision"] == "ask"
+
+    log_file = agents_dir / ".quench_hook.log"
+    assert log_file.exists()
+    content = log_file.read_text(encoding="utf-8")
+    assert "[ASK_MODAL]" in content
+    assert "target=" in content
+
+
