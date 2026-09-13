@@ -343,14 +343,18 @@ def diagnose_environment(project_root: str) -> dict:
                 import shlex
                 for cmd_str in commands_found:
                     clean_cmd = cmd_str.strip()
-                    if clean_cmd.startswith('""') and clean_cmd.endswith('""'):
-                        clean_cmd = clean_cmd[1:-1]
-                    try:
-                        tokens = shlex.split(clean_cmd, posix=False)
-                    except Exception:
-                        tokens = [t.strip('"') for t in clean_cmd.split('"') if t.strip()]
+                    while clean_cmd.startswith('""') and clean_cmd.endswith('""') and len(clean_cmd) > 2:
+                        clean_cmd = clean_cmd[1:-1].strip()
+                    quoted_matches = re.findall(r'"([^"]+)"', clean_cmd)
+                    if quoted_matches:
+                        tokens = quoted_matches
+                    else:
+                        try:
+                            tokens = shlex.split(clean_cmd)
+                        except Exception:
+                            tokens = [t.strip('"') for t in clean_cmd.split('"') if t.strip()]
                     for tok in tokens:
-                        clean_tok = tok.strip('"')
+                        clean_tok = tok.strip('"').strip()
                         if os.path.isabs(clean_tok) and (clean_tok.lower().endswith(".py") or clean_tok.lower().endswith(".exe")):
                             if not os.path.isfile(clean_tok):
                                 unreachable_paths.append(clean_tok)

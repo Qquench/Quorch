@@ -34,4 +34,4 @@ jobs:
         env:
           PYTHONPATH: plugins/quench-dev-tasks/server
         run: |
-          pytest plugins/quench-dev-tasks/server/tests -v
+          pytest plugins/quench-dev-tasks/server/tests -v -rA --tb=short

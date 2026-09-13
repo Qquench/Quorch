@@ -10,9 +10,10 @@ SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 INIT_PROJECT = os.path.join(SCRIPTS_DIR, "init_project.py")
 
 
-def test_init_project_nonexistent_root():
+def test_init_project_nonexistent_root(tmp_path):
+    non_existent = str(tmp_path / "non_existent_path_xyz_123")
     p = subprocess.run(
-        [PYTHON_EXE, INIT_PROJECT, "D:/NonExistentPath_XYZ_123"],
+        [PYTHON_EXE, INIT_PROJECT, non_existent],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -289,7 +290,7 @@ def test_diagnose_hooks_json_branches(tmp_path):
     assert any("损坏" in issue for issue in diag_b["issues"])
 
     # Branch C: hooks.json exists, valid JSON, but references non-existent script/python path
-    non_existent_py = "D:/Path/That/Definitely/Does/Not/Exist_123.py"
+    non_existent_py = str(proj_dir / "non_existent_script_123.py")
     bad_hooks = {
         "quench-file-guard": {
             "PreToolUse": [{
@@ -311,7 +312,7 @@ def test_diagnose_hooks_json_branches(tmp_path):
         "quench-file-guard": {
             "PreToolUse": [{
                 "matcher": ".*",
-                "hooks": [{"type": "command", "command": f'""{PYTHON_EXE}" "{real_script}""'}]
+                "hooks": [{"type": "command", "command": f'"{PYTHON_EXE}" "{real_script}"'}]
             }]
         }
     }
