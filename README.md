@@ -14,8 +14,10 @@
   版本更新日志与已完成架构演进历史归档
 - 🌐 **[OPEN_SOURCE_RELEASE_GUIDE.md](file:///D:/Work/Quench/MCP/OPEN_SOURCE_RELEASE_GUIDE.md)**:
   开源发布备忘录与微调指南（实战跑通后对外发布到 GitHub 时的参考操作手册）
+- 📋 **[docs/roadmap/](file:///D:/Work/Quench/MCP/docs/roadmap/)**:
+  阶段开发任务分步路线图（含 Stage 2 社区就绪、Stage 3 跨工具适配，以及 Stage 1 已归档里程碑）
 - 🚀 **[future_roadmap/](file:///D:/Work/Quench/MCP/future_roadmap/)**:
-  未来演进路线与架构方案收纳（含基于独立 API 的全自动 Subagent 委派与代码库动态探查规划）
+  未来版本前沿架构与探索性提案收纳（含基于独立 API 的全自动 Subagent 委派与代码库动态探查规划）
 
 ---
 
@@ -26,12 +28,17 @@ D:\Work\Quench\MCP\
 ├── README.md                              # [当前文件] 项目导航
 ├── CHANGELOG.md                           # ★ 版本更新日志与历史归档
 ├── OPEN_SOURCE_RELEASE_GUIDE.md           # ★ 开源发布备忘录与微调指南（待实战跑通后使用）
-├── future_roadmap\                        # ★ 未来演进路线与架构方案收纳
+├── docs\
+│   ├── roadmap\                           # ★ 阶段开发任务分步路线图
+│   │   ├── README.md                      # 阶段路线图索引
+│   │   ├── archive\                       # ★ 已达成阶段归档目录
+│   │   └── stage<N>_<desc>.md             # 阶段演进路线
+│   └── dev_tasks\                         # 开发任务单管理（双模型工作流）
+│       ├── README.md                      # 任务管理规则
+│       ├── archive\                       # ★ 已闭环任务单归档目录
+│       └── YYYY-MM-DD_<desc>.md           # 活跃任务单
+├── future_roadmap\                        # ★ 面向未来版本的前沿架构与探索性提案
 ├── dev_tasks_mcp_specification.md         # 架构设计规范（参考文档）
-├── docs\dev_tasks\                        # 开发任务管理（双模型工作流）
-│   ├── README.md                          # 任务管理规则
-│   ├── archive\                           # ★ 已闭环任务单归档目录
-│   └── YYYY-MM-DD_<desc>.md              # 活跃任务单
 │
 └── plugins\
     └── quench-dev-tasks\                  # ★ Antigravity IDE Plugin 本体

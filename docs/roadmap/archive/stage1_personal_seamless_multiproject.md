@@ -2,6 +2,8 @@
 (Stage 1 Roadmap: Personal Seamless Multi-Project Governance & E2E Validation)
 
 > **目标定位**：在当前开发者本机环境（Windows + Antigravity IDE）下，实现无论在 `JJW_MES`、`Quench_MCP` 还是未来任意新项目中，都能 **10 秒内无痛接入、环境解释器不脱节、会话锁零冲突、双轨边界精准识别**，并跑通全生命周期的任务流转与自动归档。
+> 
+> **已归档状态 (Completed & Archived)**：本阶段（Stage 1）规划的全部史诗任务（Epic 1.1 ~ 1.6）已于 2026-09-13 全部开发交付完成，并通过全量 65 项自动化断言测试验证，正式移入归档区。后续任务请查阅 [阶段二路线图](../stage2_antigravity_community_ready.md)。
 
 ---
 
