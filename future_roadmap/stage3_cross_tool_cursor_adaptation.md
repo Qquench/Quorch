@@ -1,0 +1,103 @@
+# 阶段三演进路线图：以 Cursor 为切入点的跨开发工具适配
+(Stage 3 Roadmap: Cross-Tool Adaptation with Cursor as Anchor)
+
+> **目标定位**：突破对 Google Antigravity 原生 IDE 插件机制的单一依赖。以 **Cursor** 为首要切入点（并兼顾 Windsurf、Claude Code、Git CLI），构建跨工具适配抽象层，使没有 PreToolUse 钩子能力的现代 AI 编辑器用户，也能全面享受任务状态机、双模型分工与白名单物理拦截带来的工程治理红利。
+
+---
+
+## 一、 核心痛点与技术破局方案
+
+### 1.1 客户端机制差异分析
+
+| 治理能力维度 | Antigravity IDE | Cursor / Windsurf / Claude Code | 破局方案 |
+| :--- | :---: | :---: | :--- |
+| **MCP 工具协议支持** | ✔️ 原生支持 | ✔️ 原生支持 (Cursor Settings / MCP) | **直接复用 FastMCP Server**，8 个 `dev_tasks_*` 工具原生可用 |
+| **写文件前拦截 (PreToolUse)** | ✔️ 原生支持 (Hooks) | ❌ 不支持写入时外部打断 | **平移拦截点**：前置靠 Cursor Rules 约束，后置靠 **Git Pre-commit Hook 物理硬拦截** |
+| **人机交互决策弹窗** | ✔️ 原生 Ask Modal | ❌ 无弹窗 API | **标准终端交互**：CLI 退出码 (Exit Code 0/1) 与红字警示指引 |
+| **常驻系统提示词注入** | ✔️ rules/*.md | ✔️ `.cursorrules` / `.cursor/rules/*.mdc` | **自动转换导出**：将纪律手册转换为 Cursor 原生 Rules |
+
+### 1.2 Cursor 治理“三板斧”架构
+
+```
+                     ┌──────────────────────────────────────────────┐
+                     │              Cursor IDE 客户端               │
+                     └──────┬────────────────────────────────┬──────┘
+                            │                                │ 
+       1. 软性行为规范       │                                │ 2. 标准 MCP 协议调用
+      (.cursor/rules/*.mdc) │                                │
+                            ▼                                ▼
+      ┌───────────────────────────────┐    ┌───────────────────────────────────┐
+      │     Cursor Rules 纪律注入     │    │       Quench MCP Server 工具链     │
+      │ - 领单前严禁触碰业务代码      │    │ - dev_tasks_status / checkout     │
+      │ - 严格按【涉及文件】白名单修改│    │ - dev_tasks_complete / archive    │
+      │ - 改动业务逻辑必加单测断言    │    └─────────────────┬─────────────────┘
+      └───────────────────────────────┘                      │
+                                                             │ 3. 记录任务状态与涉及文件
+                                                             ▼
+                            ┌──────────────────────────────────────────────────┐
+                            │       物理防线：Git Pre-commit Hook 守护脚本      │
+                            │ (在 git commit 时校验修改文件是否超出任务单范围)  │
+                            └──────────────────────────────────────────────────┘
+```
+
+---
+
+## 二、 史诗级任务拆解 (Epics & Tasks)
+
+### Epic 3.1: 抽象适配器架构层 (对应当前活跃任务 3)
+- **背景**：使治理引擎不再直接写死 Antigravity 报文格式，支持灵活扩展不同客户端。
+- **任务项**：
+  - [ ] 在 `plugins/quench-dev-tasks/server/` 下新建 `adapters/` 目录；
+  - [ ] 编写 `adapters/base_adapter.py`，定义 `EnvironmentAdapter` 抽象基类：
+    - `detect_environment(context) -> str`（判断当前是 Antigravity / Cursor / Git Hook / Generic CLI）；
+    - `extract_session_id(context) -> Optional[str]`；
+    - `format_decision(decision, reason) -> dict | str`（格式化 allow/deny 输出）；
+  - [ ] 实现 `adapters/antigravity_adapter.py`：继承并封装现有的 JSON Payload 与 Ask Modal 输出；
+  - [ ] 实现 `adapters/cursor_adapter.py` 与 `adapters/generic_cli_adapter.py`：支持控制台纯文本输出与标准退出码。
+
+### Epic 3.2: Cursor 一键配置与 MCP 接入支持
+- **背景**：降低 Cursor 用户的配置门槛。
+- **任务项**：
+  - [ ] 在 `scripts/init_project.py` 中新增 `--cursor` 选项；
+  - [ ] 自动在目标项目根目录下生成或更新 Cursor MCP 配置文件：
+    - `.cursor/mcp.json`（自动注册 `quench-dev-tasks` 命令）；
+  - [ ] 验证 Cursor 内置 Agent 对 `dev_tasks_status`、`dev_tasks_checkout` 等工具的调用与参数回传稳定性。
+
+### Epic 3.3: 自动生成 `.cursorrules` 与 MDC 规范文件
+- **背景**：将常驻纪律手册注入 Cursor 的系统 Prompt 中。
+- **任务项**：
+  - [ ] 编写规则转换器：将 `rules/dev-tasks-discipline.md` 提取并精简为适合 Cursor 上下文的 Prompt；
+  - [ ] 在项目初始化时自动输出：
+    - `.cursorrules`（兼容旧版 Cursor）；
+    - `.cursor/rules/quench-dev-tasks.mdc`（兼容最新版 Cursor MDC 规范，设置 `alwaysApply: true`）；
+  - [ ] 明确指引 Cursor Agent：未检出任务前严禁写生产代码，涉及文件超出时主动提醒开发者。
+
+### Epic 3.4: 物理硬防线——Git Pre-commit Hook 守护脚本
+- **背景**：在无 PreToolUse 的环境下，将物理拦截防线平移至代码提交点。
+- **任务项**：
+  - [ ] 编写轻量独立守卫脚本 `scripts/git_pre_commit_guard.py`；
+  - [ ] 支持通过命令一键安装至目标项目的 `.git/hooks/pre-commit`；
+  - [ ] 核心拦截逻辑：
+    1. 检查当前是否处于 `🔨 执行中` 的任务单；
+    2. 执行 `git diff --cached --name-only` 获取本次待提交文件；
+    3. 校验是否有超出任务单【涉及文件】白名单的代码文件；
+    4. 若存在越界改动或处于未检出状态，直接 `exit 1` 阻断提交，并打印红字告警与整改指引；
+    5. 校验若修改了核心逻辑，是否配套提交了测试目录变更；
+  - [ ] 编写单元测试验证 Pre-commit 拦截与豁免逻辑。
+
+### Epic 3.5: 开发者友好 CLI 命令行工具 (Quench CLI)
+- **背景**：让不打开 AI 窗口的人类开发者也能在终端中方便地巡检与流转任务。
+- **任务项**：
+  - [ ] 提供统一 CLI 入口（例如 `python -m quench` 或控制台脚本 `quench`）：
+    - `quench status`：终端富文本展示当前任务分布与活跃队列；
+    - `quench init <path> [--cursor]`：快速初始化项目；
+    - `quench check`：手动运行边界与白名单自检；
+    - `quench archive`：手动触发归档流程。
+
+---
+
+## 三、 DoD 验收标准 (Definition of Done)
+
+1. **Cursor 实战体验**：在 Cursor 中打开接入项目，配置 MCP 后，Cursor Composer/Agent 能自主调取 `dev_tasks_*` 工具按部就班领单；
+2. **Git Hook 物理防线**：在 Cursor 中故意修改非任务涉及的源码并执行 `git commit`，被 Git Pre-commit Hook 100% 成功拦截并打印友好的纠偏指引；
+3. **适配器测试覆盖**：`test_adapters.py` 覆盖 Antigravity、Cursor 及 Generic CLI 三种模式的模拟行为，全部通过。
