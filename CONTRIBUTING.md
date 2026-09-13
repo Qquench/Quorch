@@ -4,6 +4,10 @@
 
 Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We welcome bug fixes, feature enhancements, documentation improvements, and architectural suggestions.
 
+> [!TIP]
+> **Author's Transparency Note on Cross-Tool & Cross-Platform Integrations**:  
+> This project originated from real-world development needs on **Windows using Google Antigravity IDE**, and the core codebase has been thoroughly tested and verified. However, extending compatibility to other developer tools (such as **Cursor**) and non-Windows operating systems (macOS/Linux) was generated entirely by AI models based on architectural abstractions, as the author lacks practical development experience with those environments. Real-world edge cases or quirks may still surface. We warmly welcome community feedback, bug reports, and Pull Requests to test and harden these integrations!
+
 ---
 
 ## 🏗️ Development Environment Setup
