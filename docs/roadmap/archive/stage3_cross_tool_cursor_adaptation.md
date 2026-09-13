@@ -2,6 +2,8 @@
 (Stage 3 Roadmap: Cross-Tool Adaptation with Cursor as Anchor)
 
 > **目标定位**：突破对 Google Antigravity 原生 IDE 插件机制的单一依赖。以 **Cursor** 为首要切入点（并兼顾 Windsurf、Claude Code、Git CLI），构建跨工具适配抽象层，使没有 PreToolUse 钩子能力的现代 AI 编辑器用户，也能全面享受任务状态机、双模型分工与白名单物理拦截带来的工程治理红利。
+> 
+> **已归档状态 (Completed & Archived)**：本阶段（Stage 3）规划的全部史诗任务（Epic 3.1 ~ 3.5）已于 2026-09-13 全部交付，并通过全量 105 项自动化断言测试验证（涵盖 Cursor MCP 渲染与保护、Git Pre-commit Guard 物理链式挂载、高密度 Rules/MDC 导出器及统一 Quench CLI），正式移入归档区。后续长期演进提案请查阅 [future_roadmap/](../../../future_roadmap/README.md)。
 
 ---
 
