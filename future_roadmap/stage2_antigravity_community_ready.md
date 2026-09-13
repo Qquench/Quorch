@@ -39,7 +39,8 @@
     ```
   - [ ] 创建 `hooks.json.template`：使用 `{{PYTHON_EXECUTABLE}}` 和 `{{HOOKS_DIR}}` 占位符；
   - [ ] 在 `.gitignore` 中追加 `plugins/quench-dev-tasks/mcp_config.json` 与 `plugins/quench-dev-tasks/hooks.json`，防止本地生成路径被误提交；
-  - [ ] 改造代码中所有 `sys.path` 与相对路径计算，全面使用相对于当前脚本的动态 `os.path.dirname` 解析。
+  - [ ] 改造代码中所有 `sys.path` 与相对路径计算，全面使用相对于当前脚本的动态 `os.path.dirname` 解析；
+  - [ ] **修复 `project_config.py` 错误消息硬编码路径**（架构审查新增）：`load_project_config` 的 `FileNotFoundError` 消息中硬编码了 `D:\\Work\\Quench\\MCP\\plugins\\...` 绝对路径，必须改为基于 `os.path.dirname(os.path.abspath(__file__))` 的动态拼接。
 
 ### Epic 2.2: 编写跨平台自适应安装引导脚本 (`scripts/install.py`)
 - **背景**：外部用户 Clone 仓库后，通过一行命令自动完成环境搭建与配置生效。
@@ -50,11 +51,17 @@
     - 自动安装必要运行时依赖（`fastmcp>=2.0`, `filelock>=3.0`, `pyyaml>=6.0`, `pytest`）；
     - 读取 `.template` 模板文件，替换变量并输出生效的 `mcp_config.json` 与 `hooks.json`；
     - 运行内置冒烟测试（执行 1 次状态查询和环境自检），输出安装成功卡片；
+  - [ ] **Pre-flight 预检与回滚机制**（架构审查新增）：
+    - 在安装或目录重命名前执行目录占用检测（检查是否有进程锁定当前目录或关键文件）；
+    - 自动备份旧路径映射快照至 `.agents/.quench_path_backup.json`，提供 `--rollback` 参数一键恢复；
+    - 在 Windows 上检查安装路径总长度是否接近 260 字符 MAX_PATH 限制，若超过 200 字符输出黄色警告；
+  - [ ] **配置文件版本迁移**（架构审查新增）：安装时自动检测现有 `quench_stack.yaml` 的 `schema_version`，若缺失或版本低于最新，自动补全新字段并更新版本号；
   - [ ] 支持可选参数 `--global`：将插件注册引导注入用户全局配置 `~/.gemini/config/`，或 `--project <path>` 注入特定项目。
 
 > [!IMPORTANT]
 > ### ⚠️ 关键实战联动备忘：完成路径自适应后的文件夹更名与 JJW_MES 恢复指引
-> 在本阶段（Epic 2.1 与 Epic 2.2）实现 `install.py` 动态渲染与路径自适应之后，必须立即执行以下三步闭环联动：
+> 在本阶段（Epic 2.1 与 Epic 2.2）实现 `install.py` 动态渲染与路径自适应之后，必须立即执行以下闭环联动：
+> 0. **⚠️ Pre-flight 预检**（架构审查新增）：执行 `python scripts/install.py --preflight` 确认无进程占用目录、路径长度安全、旧配置已备份；
 > 1. **执行文件夹重命名**：将当前根目录 `D:\Work\Quench\MCP` 重命名为已正式选定的工程名：`D:\Work\Quench\quench-dev-orchestrator`；
 > 2. **新目录下执行自愈安装**：在 `quench-dev-orchestrator` 目录下直接执行 `python scripts/install.py`，瞬间完成动态配置渲染与自检；
 > 3. **★ 同步更新老项目 JJW_MES（防止插件失联）**：
@@ -89,6 +96,8 @@
 
 ## 三、 DoD 验收标准 (Definition of Done)
 
-1. **环境纯净度**：仓库中所有提交的跟踪文件**零包含任何本地驱动器盘符（如 `D:\` 或 `C:\`）**；
+1. **环境纯净度**：仓库中所有提交的跟踪文件（含代码中的错误消息字符串）**零包含任何本地驱动器盘符（如 `D:\` 或 `C:\`）**；
 2. **跨平台一键安装**：在全新目录下运行 `git clone <repo> && python scripts/install.py`，无报错自动完成依赖安装与配置文件渲染；
-3. **自动化测试**：新环境下一键运行 `pytest`，全部测试通过率 100%。
+3. **自动化测试**：新环境下一键运行 `pytest`，全部测试通过率 100%；
+4. **配置版本兼容**（架构审查新增）：旧版 `quench_stack.yaml` 在安装时自动升级至最新 `schema_version`，无数据丢失；
+5. **路径安全**（架构审查新增）：Pre-flight 检查通过后方可执行目录重命名操作，失败时可通过 `--rollback` 一键恢复。

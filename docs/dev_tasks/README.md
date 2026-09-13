@@ -18,7 +18,7 @@
 
 | 任务单 | 核心目标 | 任务数 | 状态 | 审查重点 |
 | :--- | :--- | :---: | :---: | :--- |
-| [`2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./2026-09-11_governance_engine_and_cross_tool_adaptation.md) | 治理引擎深化（旁路锁+双轨边界）与开源跨工具适配 | 3 | ⬜ 待架构审查确认 | 安全防御加固、边界算法完备性、开源跨平台解耦 |
+| [`2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./2026-09-11_governance_engine_and_cross_tool_adaptation.md) | 治理引擎深化（旁路锁+双轨边界）与开源跨工具适配 | 4 | ✅ 已确认待施工 | 安全防御加固、边界算法完备性、开源跨平台解耦 |
 
 ---
 

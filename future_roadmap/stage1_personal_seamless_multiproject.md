@@ -23,10 +23,13 @@
 ### Epic 1.1: 落实会话锁并发加固与自愈机制 (对应当前活跃任务 1)
 - **背景**：当前会话动态旁路绑定了 `conversationId` 和租期，但并发读写可能产生文件竞争。
 - **任务项**：
-  - [ ] 在 `file_scope_guard.py` 中引入 `filelock.FileLock`，包裹 `.quench_bypass.json` 的读写与清理操作；
-  - [ ] 在 `server.py` 的 `dev_tasks_set_bypass` 工具中引入临时文件原子替换（`os.replace`），防范断电/强杀产生的半截畸形 JSON；
-  - [ ] 强化时区处理，统一使用 `datetime.now(timezone.utc)` 避免本地时区变动导致租约失效错乱；
-  - [ ] 扩充 `test_file_scope_guard.py`，模拟并发读写与畸形文件自愈测试。
+  - [ ] 在 `file_scope_guard.py` 中引入 `filelock.FileLock`，包裹 `.quench_bypass.json` 的读写与清理操作，杜绝并发 Hook 实例间的读写竞态安全穿透；
+  - [ ] 在 `server.py` 的 `dev_tasks_set_bypass` 工具中引入 `tempfile.NamedTemporaryFile` + `os.replace()` 原子替换写盘模式，防范断电/强杀产生的半截畸形 JSON；
+  - [ ] 在 `state_machine.py` 的 `transition_task` 锁内写回中同步引入 `tempfile` + `os.replace` 原子模式（架构审查新增）；
+  - [ ] 强化时区处理，**生成端（server.py）与校验端（file_scope_guard.py）统一**使用 `datetime.now(timezone.utc)` 计算与对比，`fromisoformat` 解析后做 aware/naive 兼容处理（架构审查强化）；
+  - [ ] 新增 `session_id` 输入净化（架构审查新增）：UUID 正则白名单 `^[a-f0-9\-]{1,128}$` + `reason` 字段 500 字符上限，防范注入与文件膨胀；
+  - [ ] 补全 `file_scope_guard.py` 缺失的 `from typing import Optional, List` 导入（架构审查新增）；
+  - [ ] 扩充 `test_file_scope_guard.py`，新增并发读写竞态模拟、畸形 JSON 自愈、时区混合比较、session_id 非法输入等测试用例。
 
 ### Epic 1.2: 调优双轨管控边界判定引擎 (对应当前活跃任务 2)
 - **背景**：使任意新接入项目在未手写繁琐配置的情况下，也能智能识别生产代码与放行文档。
@@ -51,10 +54,27 @@
   - [ ] 调用 `dev_tasks_complete` 触发单测断言物理审计；
   - [ ] 调用 `dev_tasks_archive`，验证自动移入 `docs/dev_tasks/archive/` 且自动增量追加 [CHANGELOG.md](file:///d:/Work/Quench/MCP/CHANGELOG.md)。
 
+### Epic 1.5: Hook 决策日志与可观测性基线（架构审查新增）
+- **背景**：当前整个系统缺少结构化日志，`file_scope_guard.py` 的 `except Exception: pass` 模式导致所有异常被静默吞掉，排查问题时缺乏追踪线索。
+- **任务项**：
+  - [ ] 在 `file_scope_guard.py` 中引入 `logging` 模块，所有 Hook 拦截/放行/清理操作写入 `.agents/.quench_hook.log`；
+  - [ ] 配置日志轮转（`RotatingFileHandler`，1MB × 3），保留最近 72 小时的决策审计轨迹；
+  - [ ] 将所有 `except Exception: pass` 替换为 `except Exception as e: logger.warning(...)` + 原有兜底逻辑，确保异常可追溯而不影响 IDE 流程；
+  - [ ] 在 `dev_tasks_status` 返回值中增加 `last_hook_log_entries` 字段，提供最近 10 条决策日志摘要。
+
+### Epic 1.6: 配置文件版本管理与自动迁移（架构审查新增）
+- **背景**：`quench_stack.yaml` 的字段持续扩展（`governance_scope`、`fast_track_rules` 等），旧项目配置文件可能缺少新字段。当前通过 `data.get(..., default)` 隐式兼容，但缺少显式版本标识与自动升级机制。
+- **任务项**：
+  - [ ] 在 `quench_stack.yaml` 模板中增加 `schema_version: "1.0"` 字段；
+  - [ ] 在 `load_project_config` 中增加版本检测：若缺少 `schema_version` 或版本低于当前，自动补全新字段并写回（向后兼容）；
+  - [ ] 编写 `test_config_migration.py`，验证从 v0（无版本号）到 v1.0 的自动升级路径，确保不丢失原有配置。
+
 ---
 
 ## 三、 DoD 验收标准 (Definition of Done)
 
-1. **测试基线**：`pytest plugins/quench-dev-tasks/server/tests/` 全部通过（用例数从 20 项增至 25+ 项，无失败）；
+1. **测试基线**：`pytest plugins/quench-dev-tasks/server/tests/` 全部通过（用例数从 20 项增至 30+ 项，含并发竞态、时区安全、输入净化、配置迁移等新增用例，无失败）；
 2. **接入耗时**：任意本地新项目运行 `quench-init`，10 秒内完成配置注入并可通过 Antigravity IDE 正常拉起；
-3. **闭环留痕**：至少完成一次完整的 `dev_tasks_archive` 归档动作，[CHANGELOG.md](file:///d:/Work/Quench/MCP/CHANGELOG.md) 正确生成增量版本摘要。
+3. **闭环留痕**：至少完成一次完整的 `dev_tasks_archive` 归档动作，[CHANGELOG.md](file:///d:/Work/Quench/MCP/CHANGELOG.md) 正确生成增量版本摘要；
+4. **可观测性**（架构审查新增）：Hook 决策日志（`.agents/.quench_hook.log`）正确记录拦截/放行/清理事件，`dev_tasks_status` 可返回最近日志摘要；
+5. **配置兼容性**（架构审查新增）：旧版 `quench_stack.yaml`（无 `schema_version` 字段）在加载时自动升级至 v1.0 且不丢失原有配置。

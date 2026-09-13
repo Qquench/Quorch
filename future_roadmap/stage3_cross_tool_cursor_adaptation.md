@@ -50,6 +50,10 @@
    通过 `init_project.py --ide cursor|antigravity|all`，一行命令为项目生成对应 IDE 的配置与规则文件。
 3. **团队异构协同红利 (Team Heterogeneity)**：
    架构师使用 Antigravity 进行任务拆解与 Opus 深度审查；前端开发使用 Cursor 领单施工与高速补全。两者操作同一份 Git 仓库中的 `docs/dev_tasks/`，共享同一份状态机与任务生命周期，实现跨工具无缝协作。
+4. **生命周期分离原则 (Lifecycle Separation)**（架构审查新增）：
+   "环境检测"（`EnvironmentDetector`，一次性，Server 启动时执行并缓存结果）与"决策格式化"（`EnvironmentAdapter`，高频，每次 Hook 拦截时调用）必须分离为独立组件，避免每次拦截都重新做环境探测。
+5. **跨机器协同的乐观锁补充防线**（架构审查新增）：
+   当前 `FileLock` 为本地 OS 级文件锁，对单机多进程有效但对跨网络 Git worktree 无效。文档中必须明确声明此适用边界；对于多机协同场景，建议引入 Git 层面的乐观锁机制（在任务文件中嵌入 `last_modified_hash`，transition 前校验文件 SHA 是否一致）。
 
 ### 1.3 Cursor 治理“三板斧”与物理兜底防线
 
@@ -84,13 +88,13 @@
 ### Epic 3.1: 抽象适配器架构层 (对应当前活跃任务 3)
 - **背景**：使治理引擎不再直接写死 Antigravity 报文格式，支持灵活扩展不同客户端。
 - **任务项**：
-  - [ ] 在 `plugins/quench-dev-tasks/server/` 下新建 `adapters/` 目录；
-  - [ ] 编写 `adapters/base_adapter.py`，定义 `EnvironmentAdapter` 抽象基类：
-    - `detect_environment(context) -> str`（判断当前是 Antigravity / Cursor / Git Hook / Generic CLI）；
-    - `extract_session_id(context) -> Optional[str]`；
-    - `format_decision(decision, reason) -> dict | str`（格式化 allow/deny 输出）；
+  - [ ] 在 `plugins/quench-dev-tasks/server/` 下新建 `adapters/` 目录与 `__init__.py` 包标识文件；
+  - [ ] 编写 `adapters/base_adapter.py`，定义分离的双层抽象（架构审查改进）：
+    - `EnvironmentDetector`（静态类）：`detect(context) -> EnvironmentType`，一次性检测并缓存结果；
+    - `EnvironmentAdapter`（抽象基类）：`extract_session_id`、`format_decision`、`supports_interactive_ask`；
   - [ ] 实现 `adapters/antigravity_adapter.py`：继承并封装现有的 JSON Payload 与 Ask Modal 输出；
-  - [ ] 实现 `adapters/cursor_adapter.py` 与 `adapters/generic_cli_adapter.py`：支持控制台纯文本输出与标准退出码。
+  - [ ] 实现 `adapters/cursor_adapter.py`：针对 Cursor `.cursor/mcp.json` 配置格式与终端文本输出；
+  - [ ] 实现 `adapters/generic_cli_adapter.py`（架构审查改进，从原 `cursor_claude_adapter.py` 拆分）：适用于 Claude Code、Windsurf、裸 Git CLI 等通用终端场景，支持标准退出码。
 
 ### Epic 3.2: Cursor 一键配置与 MCP 接入支持
 - **背景**：降低 Cursor 用户的配置门槛。
@@ -112,15 +116,17 @@
 ### Epic 3.4: 物理硬防线——Git Pre-commit Hook 守护脚本
 - **背景**：在无 PreToolUse 的环境下，将物理拦截防线平移至代码提交点。
 - **任务项**：
-  - [ ] 编写轻量独立守卫脚本 `scripts/git_pre_commit_guard.py`；
-  - [ ] 支持通过命令一键安装至目标项目的 `.git/hooks/pre-commit`；
+  - [ ] 编写轻量独立守卫脚本 `scripts/git_pre_commit_guard.py`（**零依赖约束**（架构审查新增）：仅使用 Python 标准库，严禁导入 FastMCP、filelock 或任何第三方库，确保在任意 Python 3.7+ 环境下无需安装即可运行）；
+  - [ ] 支持通过 `python git_pre_commit_guard.py --install [project_path]` 一键安装至目标项目的 `.git/hooks/pre-commit`；
   - [ ] 核心拦截逻辑：
-    1. 检查当前是否处于 `🔨 执行中` 的任务单；
-    2. 执行 `git diff --cached --name-only` 获取本次待提交文件；
-    3. 校验是否有超出任务单【涉及文件】白名单的代码文件；
-    4. 若存在越界改动或处于未检出状态，直接 `exit 1` 阻断提交，并打印红字告警与整改指引；
-    5. 校验若修改了核心逻辑，是否配套提交了测试目录变更；
-  - [ ] 编写单元测试验证 Pre-commit 拦截与豁免逻辑。
+    1. 通过 `git rev-parse --show-toplevel` 定位工作区根目录；
+    2. 直接解析 `docs/dev_tasks/*.md` 文件查找 `🔨 执行中` 的任务单（不依赖 MCP Server）；
+    3. 执行 `git diff --cached --name-only` 获取本次待提交文件；
+    4. 校验是否有超出任务单【涉及文件】白名单的代码文件（自动排除文档/素材类文件）；
+    5. 若存在越界改动或处于未检出状态，直接 `exit 1` 阻断提交，并打印红字告警与整改指引；
+    6. 校验若修改了核心逻辑，是否配套提交了测试目录变更；
+  - [ ] **双拦截避免逻辑**（架构审查新增）：检测 `.agents/plugins.json` 是否存在且包含 `quench-dev-tasks` 插件注册（表明 Antigravity IDE 已接管拦截），若是则降级为 warning-only 模式（打印但不 `exit 1`），将拦截权交给更早生效的 PreToolUse Hook；
+  - [ ] 编写 `test_pre_commit_guard.py` 验证 Pre-commit 拦截、豁免与双拦截降级逻辑。
 
 ### Epic 3.5: 开发者友好 CLI 命令行工具 (Quench CLI)
 - **背景**：让不打开 AI 窗口的人类开发者也能在终端中方便地巡检与流转任务。
@@ -137,4 +143,6 @@
 
 1. **Cursor 实战体验**：在 Cursor 中打开接入项目，配置 MCP 后，Cursor Composer/Agent 能自主调取 `dev_tasks_*` 工具按部就班领单；
 2. **Git Hook 物理防线**：在 Cursor 中故意修改非任务涉及的源码并执行 `git commit`，被 Git Pre-commit Hook 100% 成功拦截并打印友好的纠偏指引；
-3. **适配器测试覆盖**：`test_adapters.py` 覆盖 Antigravity、Cursor 及 Generic CLI 三种模式的模拟行为，全部通过。
+3. **适配器测试覆盖**：`test_adapters.py` 覆盖 Antigravity、Cursor 及 Generic CLI 三种模式的模拟行为，全部通过；
+4. **双拦截避免**（架构审查新增）：在 Antigravity IDE 环境下安装 Git Pre-commit Guard，验证 Guard 自动降级为 warning-only 模式而非 `exit 1` 硬阻断；
+5. **跨机器协同文档**（架构审查新增）：在适配器文档或 README 中明确声明 FileLock 的适用边界为"单机多进程"，并提供乐观锁备选方案指引。
