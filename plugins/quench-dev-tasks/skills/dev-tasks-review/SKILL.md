@@ -106,7 +106,7 @@ description: 指导高阶架构审查模型 (Reviewer) 或架构规划者如何�
 
 ## 4. 升级处理流程 (Escalation Handling)
 
-当主控模型（Flash）调用 `dev_tasks_escalate` 将任务交由深度审查者时：
+当日常执行模型（Runner / 敏捷模型）调用 `dev_tasks_escalate` 将任务交由架构审查专家（Reviewer / 深度推理模型）时：
 1. 审查者应当全面阅读 `context_files` 中包含的文件及冲突原因。
 2. 提出至少两种具备清晰权衡（Pros/Cons）的可行方案供用户选择。
 3. 获得用户授权后，通过标准任务单形式沉淀改造步骤。

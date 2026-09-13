@@ -1,122 +1,133 @@
-# Quench Dev-Orchestrator (`quench-dev-orchestrator`)
+# Quench Dev-Orchestrator (`quorch`)
 
-> 本工程为 **Quench 标的体系** 下专用于双模型开发任务治理、代码越界拦截与多工具调度的中枢套件（正式命名：`quench-dev-orchestrator`，插件包标识：`quench-dev-tasks`）。独立于 Quench 体系后续可能衍生的其他垂直领域 MCP（如工业 PLC 通信、CAD 数据中台等）。
+[English](README.md) | [简体中文](README_zh.md)
 
----
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
+[![Python: >=3.8](https://img.shields.io/badge/python-3.8+-brightgreen.svg)](https://www.python.org/)
+[![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
+[![Tests: 100% Passing](https://img.shields.io/badge/tests-passing-success.svg)]()
 
-## 一、 核心文档
-
-- 📄 **[dev_tasks_mcp_specification.md](file:///D:/Work/Quench/MCP/dev_tasks_mcp_specification.md)**:
-  架构设计与详细规范说明书（设计参考，非直接执行文件）
-- 📋 **[docs/dev_tasks/](file:///D:/Work/Quench/MCP/docs/dev_tasks/)**:
-  开发任务单目录（双模型协作工作流）
-- 📝 **[CHANGELOG.md](file:///D:/Work/Quench/MCP/CHANGELOG.md)**:
-  版本更新日志与已完成架构演进历史归档
-- 🌐 **[OPEN_SOURCE_RELEASE_GUIDE.md](file:///D:/Work/Quench/MCP/OPEN_SOURCE_RELEASE_GUIDE.md)**:
-  开源发布备忘录与微调指南（实战跑通后对外发布到 GitHub 时的参考操作手册）
-- 📋 **[docs/roadmap/](file:///D:/Work/Quench/MCP/docs/roadmap/)**:
-  阶段开发任务分步路线图（含 Stage 2 社区就绪、Stage 3 跨工具适配，以及 Stage 1 已归档里程碑）
-- 🚀 **[future_roadmap/](file:///D:/Work/Quench/MCP/future_roadmap/)**:
-  未来版本前沿架构与探索性提案收纳（含基于独立 API 的全自动 Subagent 委派与代码库动态探查规划）
+> **Dual-Model Orchestration & Task Governance Suite for AI-Augmented IDEs** (Antigravity, Cursor, Windsurf, Claude Code)  
+> *Strategic Frontier Reasoning (Reviewer) for Architecture & Conflict Resolution • Agile Runner for Lightweight Implementation & Automated DoD Verification.*
 
 ---
 
-## 二、 目录结构
+## 🎯 The Problem
 
-```
-D:\Work\Quench\MCP\
-├── README.md                              # [当前文件] 项目导航
-├── CHANGELOG.md                           # ★ 版本更新日志与历史归档
-├── OPEN_SOURCE_RELEASE_GUIDE.md           # ★ 开源发布备忘录与微调指南（待实战跑通后使用）
-├── docs\
-│   ├── roadmap\                           # ★ 阶段开发任务分步路线图
-│   │   ├── README.md                      # 阶段路线图索引
-│   │   ├── archive\                       # ★ 已达成阶段归档目录
-│   │   └── stage<N>_<desc>.md             # 阶段演进路线
-│   └── dev_tasks\                         # 开发任务单管理（双模型工作流）
-│       ├── README.md                      # 任务管理规则
-│       ├── archive\                       # ★ 已闭环任务单归档目录
-│       └── YYYY-MM-DD_<desc>.md           # 活跃任务单
-├── future_roadmap\                        # ★ 面向未来版本的前沿架构与探索性提案
-├── dev_tasks_mcp_specification.md         # 架构设计规范（参考文档）
-│
-└── plugins\
-    └── quench-dev-tasks\                  # ★ Antigravity IDE Plugin 本体
-        ├── plugin.json                    # Plugin 清单
-        ├── mcp_config.json                # MCP Server 启动配置
-        ├── hooks.json                     # 生命周期拦截钩子
-        ├── rules\                         # 常驻行为约束（注入 system prompt）
-        │   └── dev-tasks-discipline.md
-        ├── skills\                        # 按需工作流指南
-        │   ├── dev-tasks-workflow\SKILL.md
-        │   └── dev-tasks-review\SKILL.md
-        ├── agents\                        # Subagent 定义
-        │   └── reviewer\agent.md
-        ├── scripts\                       # 辅助脚本
-        │   └── init_project.py            # 新项目初始化
-        ├── templates\                     # 配置模板
-        │   └── quench_stack.yaml          # 项目配置模板
-        └── server\                        # MCP Server 实现
-            ├── server.py                  # FastMCP 入口（7 个 Tool）
-            ├── state_machine.py           # 任务状态机引擎
-            ├── schema_validator.py        # 六大字段 Schema 校验
-            ├── project_config.py          # 项目配置加载器
-            ├── changelog_writer.py        # CHANGELOG 增量写入
-            ├── hooks\                     # Hook 脚本
-            │   ├── file_scope_guard.py    # PreToolUse: 文件修改范围守卫
-            │   └── context_injector.py    # PreInvocation: 任务状态注入
-            ├── tests\                     # 单元测试
-            ├── requirements.txt
-            └── pyproject.toml
-```
+While AI-assisted coding tools have transformed modern software development, engineering teams frequently encounter four major bottlenecks in real-world codebases:
+
+1. **High Token Costs of Frontier Reasoning Models**: Using expensive flagship reasoning models for full-cycle development quickly exhausts quotas; relying solely on lightweight models for complex architecture leads to costly rework and hallucinations.
+2. **Scope Creep & Hallucinated File Edits**: Agents frequently make unsolicited modifications to unrelated files, breaking legacy contracts and introducing subtle regressions.
+3. **Lack of Lifecycle Traceability**: Development often occurs informally in conversational chat windows without immutable state tracking, structured handoffs, or rollback paths.
+4. **Verbal "Done" without Verified DoD**: Models casually claim "completed" without executing actual test commands or verifying physical assertions.
 
 ---
 
-## 三、 接入方式
+## 💡 The Solution
 
-### 对 Quench 项目的接入
-
-每个 Quench 项目只需在根目录创建两个文件：
+**Quench Dev-Orchestrator (`quorch`)** provides an out-of-the-box, dual-model governance framework that combines agile execution with rigorous architectural oversight:
 
 ```
-<project_root>\.agents\
-├── plugins.json          # 指向本 Plugin（固定 3 行）
-└── quench_stack.yaml     # 项目特定配置
+                  ┌─────────────────────────────────────────┐
+                  │   User Request / Feature Specification  │
+                  └────────────────────┬────────────────────┘
+                                       │
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │   Strategic Reviewer (Frontier)   │
+                     │  • Deep Architectural Analysis    │
+                     │  • Root Cause & Contract Design   │
+                     │  • Six-Field DevTask Formulation  │
+                     └─────────────────┬─────────────────┘
+                                       │ Task Handoff (✅ Confirmed)
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │       Agile Runner (Runner)       │
+                     │  • Sequential Step Implementation │
+                     │  • PreToolUse Scope Enforcement   │
+                     │  • Automated DoD Test Execution   │
+                     └─────────────────┬─────────────────┘
+                                       │
+                 ┌─────────────────────┴─────────────────────┐
+                 ▼                                           ▼
+      [DoD All Tests Pass]                      [Major Conflict / Complexity]
+                 │                                           │
+                 ▼                                           ▼
+      dev_tasks_complete                         dev_tasks_escalate
+  (Changelog & Stage Archive)               (Handoff Back to Reviewer)
 ```
 
-或使用初始化脚本一键生成：
-```powershell
-python D:\Work\Quench\MCP\plugins\quench-dev-tasks\scripts\init_project.py <project_root>
-```
+### Key Capabilities
 
-### 隔离性
-
-本 Plugin **不安装在全局 `~/.gemini/config/`**，仅通过各 Quench 项目的 `.agents/plugins.json` 显式注册，非 Quench 项目完全不受影响。
+- **Dual-Model Role Decoupling**: 90% of implementation is performed by cost-effective agile models (`Runner`). High-order reasoning models (`Reviewer`) are invoked only during task planning, architectural review, or conflict escalation.
+- **Physical PreToolUse Guard**: Intercepts any file modifications outside the active task's `【Affected Files】` whitelist, prompting interactive user confirmation before any out-of-scope edit is permitted.
+- **Atomic State Machine**: Backed by cross-process `filelock`, strictly enforcing single-active-task execution, preventing multi-subagent race conditions.
+- **Six-Core-Field Contract**: Every task must define Affected Files, Root Cause & Target, Type Contracts, Step-by-Step Instructions, Defensive Checks, and Executable DoD Verification Commands.
+- **Zero Business Intrusion**: Completely language- and framework-agnostic. Configured per repository via `.agents/quench_stack.yaml`.
 
 ---
 
-## 四、 ⚠️ 关键环境排错与 MCP 解释器约束 (Prerequisites)
+## ⚡ 30-Second Quickstart
 
-在引入或迁移本插件前，必须确保 Antigravity IDE 能正常通过具备 `fastmcp>=2.0` 的 Python 解释器拉起 MCP 服务：
-1. **解释器绝对路径**：`plugins/quench-dev-tasks/mcp_config.json` 中的 `command` 必须显式指向已安装依赖的虚拟环境 Python（如 `D:\Work\Quench\MCP\venv\Scripts\python.exe`），严禁使用系统全局未安装依赖的裸 `python` 命令，否则 IDE Language Server 启动子进程时将因 `ModuleNotFoundError` 静默失败导致治理工具失联；
-2. **环境验证命令**：
-   ```powershell
-   D:\Work\Quench\MCP\venv\Scripts\python.exe -c "import fastmcp, filelock, yaml; print('MCP Environment OK!')"
-   ```
-3. **状态守卫防线**：`file_scope_guard.py` 已内置任务单状态物理拦截，任何 Agent 尝试将状态修改为已确认均必须经过用户弹窗明确确认，新生成任务强制从【待确认】开始。
+### 1. Installation
+
+Clone this repository and run the cross-platform installer:
+
+```bash
+git clone https://github.com/your-org/quorch.git
+cd quorch
+python scripts/install.py
+```
+
+The installer will:
+- Detect or set up your virtual environment (`.venv` or `venv`);
+- Verify required dependencies (`fastmcp`, `filelock`, `pyyaml`, `pytest`);
+- Render platform-tailored `mcp_config.json` and `hooks.json` from templates;
+- Perform a pre-flight handle and path safety audit.
+
+### 2. Connect Your Project
+
+Navigate to any project repository where you wish to activate Quench DevTasks:
+
+```bash
+python <path-to-quorch>/plugins/quench-dev-tasks/scripts/init_project.py <path-to-your-project>
+```
+
+This creates:
+- `.agents/plugins.json`: Registers the `quench-dev-tasks` plugin;
+- `.agents/quench_stack.yaml`: Custom project boundaries, constraints, and test runners;
+- `docs/dev_tasks/`: Dedicated directory for devtask lifecycle workflows.
 
 ---
 
-## 五、 开源许可与使用说明 (License & Usage)
+## 🛠️ MCP Tools & Capabilities
 
-本项目采用 **[MPL-2.0 (Mozilla Public License 2.0)](LICENSE)** 开源。
+The `quench-dev-tasks` MCP Server provides a suite of specialized tools:
 
-### 简单来说 (TL;DR):
-* **日常开发 / 个人与团队使用**：
-  你可以在 Cursor、Antigravity、自建工作流甚至商业项目中自由接入、配置和调用此 MCP 套件。**它绝不会传染或要求你开源自己的业务代码、专有 Prompt 或下游应用逻辑。**
-* **对本项目源码本身的改进**：
-  如果你直接修改了本项目原有的核心文件（如状态机逻辑、Hook 拦截机制等），根据 MPL-2.0 规则，这部分针对原文件的修改与优化必须保持开源回馈社区。
-* **商业集成**：
-  欢迎正规商业集成。如果你需要在不公开核心修改的前提下进行闭源定制分发，请直接联系作者获取商业授权。
-* **免责声明**：
-  软件按“现状”（AS-IS）提供，作者不对任何因工具拦截行为、状态流转异常或外部 API Token 消耗导致的直接或间接后果承担连带保证责任。
+| Tool | Purpose | Typical Invocation |
+| :--- | :--- | :--- |
+| `dev_tasks_status` | Query active task overview, queue distributions, and hook audit logs | At session startup or after completing milestones |
+| `dev_tasks_propose` | Propose new tasks adhering to the six-field schema (`⬜ Pending`) | During architecture planning or backlog triage |
+| `dev_tasks_confirm` | Transition task states (`confirm`, `rework`, `skip`, `revoke`) | After Reviewer verification before execution |
+| `dev_tasks_checkout` | Check out confirmed tasks and set status to `🔨 In Progress` | Runner claiming the next verified task |
+| `dev_tasks_complete` | Complete a task with DoD test output audit (`✔️ Completed`) | Runner upon passing all automated DoD commands |
+| `dev_tasks_escalate` | Escalate a stuck task and generate a Reviewer Handoff Card | Runner encountering design deadlocks or regressions |
+| `dev_tasks_set_bypass`| Activate time-bounded, session-locked fast-track bypass | Light touch edits (e.g. documentation, typos) |
+| `dev_tasks_archive` | Archive closed tasks and append to `CHANGELOG.md` | Once all tasks in a file are completed |
+
+---
+
+## 📖 Documentation Directory
+
+- 🌐 [CHANGELOG.md](CHANGELOG.md): Historical releases and evolution milestones.
+- 🤝 [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines and testing instructions.
+- ❓ [docs/FAQ.md](docs/FAQ.md): Troubleshooting common environment, path, and encoding questions.
+- 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md): Technical architecture specification.
+- 📜 [LICENSE](LICENSE): Mozilla Public License 2.0 (MPL-2.0).
+
+---
+
+## 📄 License
+
+This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE).  
+Modifications to covered core files must remain open-source, while allowing frictionless commercial use and integration with proprietary downstream codebases.

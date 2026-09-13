@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\Work\\Quench\\MCP\\venv\\Scripts\\python.exe D:\\Work\\Quench\\MCP\\plugins\\quench-dev-tasks\\server\\hooks\\file_scope_guard.py",
+            "command": "\"{{PYTHON_EXECUTABLE}}\" \"{{FILE_GUARD_SCRIPT_PATH}}\"",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "D:\\Work\\Quench\\MCP\\venv\\Scripts\\python.exe D:\\Work\\Quench\\MCP\\plugins\\quench-dev-tasks\\server\\hooks\\context_injector.py",
+        "command": "\"{{PYTHON_EXECUTABLE}}\" \"{{CONTEXT_INJECTOR_SCRIPT_PATH}}\"",
         "timeout": 5
       }
     ]

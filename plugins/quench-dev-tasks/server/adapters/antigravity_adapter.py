@@ -17,10 +17,14 @@ class AntigravityAdapter(EnvironmentAdapter):
         return None
 
     def format_decision(self, decision: str, reason: str = "") -> dict:
-        """格式化为 Antigravity 专有 JSON 报文对象。"""
+        """格式化为 Antigravity 专有 JSON 报文对象与弹窗契约。"""
         d = decision.strip().lower()
         if d == "allow":
             return {"decision": "allow"}
+
+        # 核心加固：Antigravity IDE 中必须使用 force_ask 才能穿透 Always Allow 缓存强制弹窗
+        if d == "ask":
+            d = "force_ask"
 
         out = {"decision": d}
         if reason:

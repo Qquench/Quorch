@@ -3,7 +3,9 @@
     Quench DevTasks 一键初始化与环境体检脚本 (PowerShell)
 
 .DESCRIPTION
-    为指定项目或当前目录快速初始化 Quench 任务治理体系，或执行环境就绪度健康体检。
+    为指定项目或当前目录快速初始化 Quench 任务治理体系，包括自动生成 .agents/plugins.json、
+    .agents/quench_stack.yaml 与 .agents/hooks.json（支持 Windows cmd.exe /c 安全引号防护），
+    或执行全量环境就绪度健康体检（包括 Hooks 完整性诊断）。
 
 .NOTES
     Windows ExecutionPolicy 说明:
@@ -29,7 +31,7 @@ param(
     [Parameter()]
     [switch]$Check,
 
-    [Parameter()]
+    [Parameter(HelpMessage = "强制覆盖已存在的 quench_stack.yaml 与 hooks.json")]
     [switch]$Force
 )
 

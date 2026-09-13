@@ -88,7 +88,7 @@ def test_file_scope_guard_no_active_task_triggers_ask(tmp_path):
         },
         "workspacePaths": [ws_str],
     })
-    assert res["decision"] == "ask"
+    assert res["decision"] == "force_ask"
     assert "未纳管代码修改确认" in res["reason"]
     assert "Adjust core business logic" in res["reason"]
 
@@ -123,7 +123,7 @@ def test_file_scope_guard_layer1_static_whitelist(tmp_path):
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "app.py")}},
         "workspacePaths": [ws_str],
     })
-    assert res_py["decision"] == "ask"
+    assert res_py["decision"] == "force_ask"
 
 
 def test_file_scope_guard_layer2_session_bypass(tmp_path):
@@ -165,7 +165,7 @@ def test_file_scope_guard_layer2_session_bypass(tmp_path):
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "server.py")}},
         "workspacePaths": [ws_str],
     })
-    assert res_py["decision"] == "ask"
+    assert res_py["decision"] == "force_ask"
 
     # 3. Test expired bypass
     past = now - datetime.timedelta(minutes=5)
@@ -183,7 +183,7 @@ def test_file_scope_guard_layer2_session_bypass(tmp_path):
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "App.vue")}},
         "workspacePaths": [ws_str],
     })
-    assert res_expired["decision"] == "ask"
+    assert res_expired["decision"] == "force_ask"
 
 
 def test_file_scope_guard_with_in_progress_task(tmp_path):
@@ -243,7 +243,7 @@ def test_file_scope_guard_with_in_progress_task(tmp_path):
         },
         "workspacePaths": [ws_str],
     })
-    assert res_ask["decision"] == "ask"
+    assert res_ask["decision"] == "force_ask"
     assert "范围外修改拦截" in res_ask["reason"]
     assert "Fixing an unhandled edge case in backend" in res_ask["reason"]
     assert "backend" in res_ask["reason"]
@@ -322,7 +322,7 @@ def test_file_scope_guard_session_lock_match_and_mismatch(tmp_path):
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "App.vue")}},
         "workspacePaths": [ws_str],
     })
-    assert res_mismatched["decision"] == "ask"
+    assert res_mismatched["decision"] == "force_ask"
     assert not bypass_file.exists(), "跨会话访问应触发自动清理前一会话遗留配置"
 
 
@@ -373,14 +373,14 @@ governance_scope:
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "api.py")}},
         "workspacePaths": [ws_str],
     })
-    assert res_code["decision"] == "ask"
+    assert res_code["decision"] == "force_ask"
 
     # 5. 修改高危依赖文件 requirements.txt ➔ 强行拦截并触发确认
     res_dep = run_hook(FILE_GUARD, {
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "requirements.txt")}},
         "workspacePaths": [ws_str],
     })
-    assert res_dep["decision"] == "ask"
+    assert res_dep["decision"] == "force_ask"
 
 
 def test_file_scope_guard_hook_logging(tmp_path):
@@ -394,7 +394,7 @@ def test_file_scope_guard_hook_logging(tmp_path):
         "toolCall": {"name": "replace_file_content", "args": {"TargetFile": str(tmp_path / "src" / "test.py")}},
         "workspacePaths": [ws_str],
     })
-    assert res["decision"] == "ask"
+    assert res["decision"] == "force_ask"
 
     log_file = agents_dir / ".quench_hook.log"
     assert log_file.exists()

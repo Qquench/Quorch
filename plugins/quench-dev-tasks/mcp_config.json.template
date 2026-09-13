@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "quench-dev-tasks": {
+      "command": "{{PYTHON_EXECUTABLE}}",
+      "args": [
+        "{{SERVER_SCRIPT_PATH}}"
+      ]
+    }
+  }
+}

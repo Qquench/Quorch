@@ -19,12 +19,97 @@ if sys.version_info >= (3, 7):
         pass
 
 
+def json_escape_path(path_str: str) -> str:
+    """对文件路径进行 JSON 安全转义，杜绝 Windows 反斜杠破坏 JSON 格式"""
+    return json.dumps(path_str)[1:-1]
+
+
+def detect_python_executable(project_root: str | None = None) -> str:
+    """探测 Python 可执行文件路径。
+    优先检查目标项目根目录下的 .venv 或 venv，其次检查当前运行环境的虚拟环境，兜底返回当前解释器。
+    """
+    if project_root:
+        root = os.path.abspath(project_root)
+        candidates = [".venv", "venv"]
+        for cand in candidates:
+            cand_dir = os.path.join(root, cand)
+            if os.path.isdir(cand_dir):
+                if sys.platform == "win32":
+                    exe = os.path.join(cand_dir, "Scripts", "python.exe")
+                else:
+                    exe = os.path.join(cand_dir, "bin", "python")
+                if os.path.isfile(exe):
+                    return os.path.normpath(exe)
+
+    # 若当前运行进程本身就在虚拟环境中
+    if getattr(sys, "base_prefix", None) and sys.prefix != sys.base_prefix:
+        return os.path.normpath(sys.executable)
+
+    return os.path.normpath(sys.executable)
+
+
+def _render_hooks_json(project_root: str, force: bool = False) -> None:
+    """在目标项目的 .agents/ 目录下渲染并写入 hooks.json。
+    遵循幂等性：若已存在且未指定 force 则跳过，指定 force 则覆盖。
+    根据 sys.platform 自动施加 Windows cmd.exe /c 双引号剥离保护。
+    """
+    root = os.path.abspath(project_root)
+    agents_dir = os.path.join(root, ".agents")
+    os.makedirs(agents_dir, exist_ok=True)
+    target_hooks_path = os.path.join(agents_dir, "hooks.json")
+
+    if os.path.isfile(target_hooks_path) and not force:
+        print("ℹ️ .agents/hooks.json 已存在，跳过覆盖。如需更新请配合 --force 覆盖。")
+        return
+
+    if os.path.isfile(target_hooks_path) and force:
+        print("⚠️ 检测到 --force 参数，正在覆盖已有 .agents/hooks.json...")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_dir = os.path.dirname(script_dir)
+    hooks_template_path = os.path.join(plugin_dir, "hooks.json.template")
+
+    if not os.path.isfile(hooks_template_path):
+        print(f"❌ 错误: Hooks 模板文件缺失: {hooks_template_path}", file=sys.stderr)
+        return
+
+    python_exe = detect_python_executable(root)
+    guard_script = os.path.normpath(os.path.join(plugin_dir, "server", "hooks", "file_scope_guard.py"))
+    injector_script = os.path.normpath(os.path.join(plugin_dir, "server", "hooks", "context_injector.py"))
+
+    esc_python = json_escape_path(python_exe)
+    esc_guard = json_escape_path(guard_script)
+    esc_injector = json_escape_path(injector_script)
+
+    with open(hooks_template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    rendered = (
+        content.replace("{{PYTHON_EXECUTABLE}}", esc_python)
+        .replace("{{FILE_GUARD_SCRIPT_PATH}}", esc_guard)
+        .replace("{{CONTEXT_INJECTOR_SCRIPT_PATH}}", esc_injector)
+    )
+
+    try:
+        hooks_data = json.loads(rendered)
+    except Exception as e:
+        print(f"❌ 渲染后 hooks.json 不是合法 JSON: {e}", file=sys.stderr)
+        return
+
+    with open(target_hooks_path, "w", encoding="utf-8") as f:
+        json.dump(hooks_data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    print(f"✅ 已生成 .agents/hooks.json (配置生命周期拦截钩子，解释器: {python_exe})")
+
+
 def diagnose_environment(project_root: str) -> dict:
     """全面诊断目标项目的治理环境就绪状态。
     返回结构: {
         "is_git_repo": bool,
         "has_quench_stack": bool,
         "has_plugins_json": bool,
+        "has_hooks_json": bool,
+        "hooks_json_valid": bool,
         "python_valid": bool,
         "dependencies_ready": bool,
         "issues": list[str],
@@ -43,6 +128,8 @@ def diagnose_environment(project_root: str) -> dict:
             "is_git_repo": False,
             "has_quench_stack": False,
             "has_plugins_json": False,
+            "has_hooks_json": False,
+            "hooks_json_valid": False,
             "python_valid": sys.version_info >= (3, 8),
             "dependencies_ready": False,
             "issues": issues,
@@ -85,14 +172,72 @@ def diagnose_environment(project_root: str) -> dict:
         issues.append("缺少插件注册文件: .agents/plugins.json")
         suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root}' 注册插件")
 
-    # 5. 检查 Python 版本
+    # 5. 检查 .agents/hooks.json
+    hooks_json_path = os.path.join(root, ".agents", "hooks.json")
+    has_hooks_json = os.path.isfile(hooks_json_path)
+    hooks_json_valid = False
+
+    if not has_hooks_json:
+        issues.append("缺少生命周期 Hook 配置文件: .agents/hooks.json (导致 PreToolUse 规范拦截与任务上下文注入失效)")
+        suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 补齐 .agents/hooks.json")
+    else:
+        try:
+            with open(hooks_json_path, "r", encoding="utf-8") as f:
+                hooks_data = json.load(f)
+
+            # 提取 command 字段并校验引用的路径可达性
+            commands_found: list[str] = []
+
+            def _extract_commands(obj):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if k == "command" and isinstance(v, str):
+                            commands_found.append(v)
+                        else:
+                            _extract_commands(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        _extract_commands(item)
+
+            _extract_commands(hooks_data)
+
+            if not commands_found:
+                issues.append(".agents/hooks.json 未包含任何有效的 Hook 命令定义")
+                suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 重新生成 Hook 配置")
+            else:
+                unreachable_paths = []
+                import shlex
+                for cmd_str in commands_found:
+                    clean_cmd = cmd_str.strip()
+                    if clean_cmd.startswith('""') and clean_cmd.endswith('""'):
+                        clean_cmd = clean_cmd[1:-1]
+                    try:
+                        tokens = shlex.split(clean_cmd, posix=False)
+                    except Exception:
+                        tokens = [t.strip('"') for t in clean_cmd.split('"') if t.strip()]
+                    for tok in tokens:
+                        clean_tok = tok.strip('"')
+                        if os.path.isabs(clean_tok) and (clean_tok.lower().endswith(".py") or clean_tok.lower().endswith(".exe")):
+                            if not os.path.isfile(clean_tok):
+                                unreachable_paths.append(clean_tok)
+
+                if unreachable_paths:
+                    issues.append(f".agents/hooks.json 中引用的依赖路径在本地不存在: {', '.join(unreachable_paths)}")
+                    suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 重新生成匹配当前环境的 Hook 配置")
+                else:
+                    hooks_json_valid = True
+        except Exception as e:
+            issues.append(f".agents/hooks.json 格式损坏（非有效 JSON）: {e}")
+            suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 重新生成 hooks.json")
+
+    # 6. 检查 Python 版本
     python_valid = sys.version_info >= (3, 8)
     if not python_valid:
         py_ver_str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         issues.append(f"当前 Python 版本 ({py_ver_str}) 过低，推荐 Python >= 3.8")
         suggestions.append("请升级 Python 运行环境至 3.8 或更高版本")
 
-    # 6. 检查关键依赖库
+    # 7. 检查关键依赖库
     missing_deps = []
     for dep in ["fastmcp", "yaml", "filelock"]:
         try:
@@ -109,6 +254,8 @@ def diagnose_environment(project_root: str) -> dict:
         "is_git_repo": is_git_repo,
         "has_quench_stack": has_quench_stack,
         "has_plugins_json": has_plugins_json,
+        "has_hooks_json": has_hooks_json,
+        "hooks_json_valid": hooks_json_valid,
         "python_valid": python_valid,
         "dependencies_ready": dependencies_ready,
         "issues": issues,
@@ -124,6 +271,10 @@ def print_diagnostic_report(diag: dict, project_root: str) -> None:
     print(f"• Git 仓库有效性:   {'✅ 是' if diag['is_git_repo'] else '❌ 否'}")
     print(f"• 核心配置文件:     {'✅ 已存在 (.agents/quench_stack.yaml)' if diag['has_quench_stack'] else '❌ 缺失'}")
     print(f"• 插件注册清单:     {'✅ 已就绪 (.agents/plugins.json)' if diag['has_plugins_json'] else '❌ 缺失'}")
+    hooks_status = "✅ 已就绪 (.agents/hooks.json)" if diag.get("hooks_json_valid") else (
+        "⚠️ 存在但配置失效" if diag.get("has_hooks_json") else "❌ 缺失 (生命周期拦截未生效)"
+    )
+    print(f"• 生命周期 Hooks:   {hooks_status}")
     print(f"• Python 运行环境:  {'✅ 合格 (>= 3.8)' if diag['python_valid'] else '❌ 版本过低'}")
     print(f"• 关键依赖库就绪:   {'✅ 全部就绪 (fastmcp, yaml, filelock)' if diag['dependencies_ready'] else '❌ 缺失部分依赖'}")
     print("-" * 60)
@@ -250,14 +401,17 @@ def init_project(project_root: str, project_name: str | None = None, force: bool
             f.write(customized_content)
         print(f"✅ 已创建 .agents/quench_stack.yaml (项目名称: {effective_name})")
 
-    # 5. 创建任务目录结构
+    # 5. 创建 / 渲染 .agents/hooks.json
+    _render_hooks_json(root, force=force)
+
+    # 6. 创建任务目录结构
     dev_tasks_dir = os.path.join(root, "docs", "dev_tasks")
     archive_dir = os.path.join(dev_tasks_dir, "archive")
     os.makedirs(dev_tasks_dir, exist_ok=True)
     os.makedirs(archive_dir, exist_ok=True)
     print(f"✅ 已确认任务目录结构: {dev_tasks_dir} 及 {archive_dir}")
 
-    # 6. 初始化默认 README.md (如果不存在)
+    # 7. 初始化默认 README.md (如果不存在)
     readme_path = os.path.join(dev_tasks_dir, "README.md")
     if not os.path.isfile(readme_path):
         readme_content = f"""# {effective_name} 开发任务管理
@@ -309,7 +463,7 @@ def main():
     parser.add_argument(
         "--force",
         action="store_true",
-        help="强制覆盖已有的 quench_stack.yaml（默认不覆盖）",
+        help="强制覆盖已有的 quench_stack.yaml 与 hooks.json（默认不覆盖）",
     )
 
     args = parser.parse_args()

@@ -13,8 +13,7 @@
 
 | 阶段 | 路线图文件 | 核心里程碑与主题 | 实施重点 | 当前状态 |
 | :--- | :--- | :--- | :--- | :---: |
-| **阶段二** | 🌐 **[stage2_antigravity_community_ready.md](./stage2_antigravity_community_ready.md)** | **Antigravity 社区通用开箱即用与开源准备** | 消除机器绝对路径绑定、跨平台一键安装脚本 `install.py`（含 Pre-flight 预检与回滚）、模板中立化、开源门面资产（MPL-2.0） | 📌 **待推进 (Next)** |
-| **阶段三** | ⚡ **[stage3_cross_tool_cursor_adaptation.md](./stage3_cross_tool_cursor_adaptation.md)** | **以 Cursor 为切入点的跨开发工具适配** | **单核多适配器通用架构**（Detector/Adapter 生命周期解耦）、`.cursorrules` 自动导出、Git Pre-commit 物理兜底硬防线（零依赖+双拦截防范）、跨机器乐观锁指引、Quench CLI 工具 | 📋 **规划中 (Planned)** |
+| **阶段三** | ⚡ **[stage3_cross_tool_cursor_adaptation.md](./stage3_cross_tool_cursor_adaptation.md)** | **以 Cursor 为切入点的跨开发工具适配** | **单核多适配器通用架构**（Detector/Adapter 生命周期解耦）、`.cursorrules` 自动导出、Git Pre-commit 物理兜底硬防线（零依赖+双拦截防范）、跨机器乐观锁指引、Quench CLI 工具 | 📌 **待推进 (Next)** |
 
 ---
 
@@ -23,6 +22,7 @@
 | 阶段 | 归档文件 | 核心达成事项 | 归档时间 |
 | :--- | :--- | :--- | :---: |
 | **阶段一** | ✔️ **[stage1_personal_seamless_multiproject.md](./archive/stage1_personal_seamless_multiproject.md)** | **个人无缝跨项目治理与实战闭环**：<br>• 会话锁并发加固（UTC 统一/原子写入/输入净化/FileLock 并发保护）；<br>• 双轨边界判定引擎（多语言/工程目录智能免管）；<br>• Hook 决策可观测性（`SafeRotatingFileHandler` 1MB×3 轮转、结构化审计日志、消灭静默 pass）；<br>• 配置版本平滑迁移（`schema_version: "1.0"`、零注释破坏文本补丁写盘）；<br>• 脚手架轻量化与体检诊断（`init_project.py --check`、`quench-init.ps1`）。 | 2026-09-13 |
+| **阶段二** | ✔️ **[stage2_antigravity_community_ready.md](./archive/stage2_antigravity_community_ready.md)** | **Antigravity 社区通用开箱即用与开源准备**：<br>• 消除机器绝对路径绑定（配置模板化 + JSON-safe 路径转义）；<br>• 跨平台自适应安装与引导脚手架（`scripts/install.py`，支持 Pre-flight 预检与 `--rollback` 快照恢复）；<br>• 配置模板中立化与通用逻辑角色解耦（Reviewer / Runner）；<br>• 开源门面资产就绪（双语 README / CONTRIBUTING / FAQ / MPL-2.0）；<br>• 生命周期 Hook 决策契约加固（`force_ask` 击穿缓存物理拦截 + Windows Node.js 兼容）。 | 2026-09-13 |
 
 ---
 

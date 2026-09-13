@@ -55,6 +55,32 @@ def test_template_neutrality():
     assert 'schema_version: "1.0"' in content
 
 
+def test_template_multi_stack_guidance():
+    """验证 templates/quench_stack.yaml 包含多技术栈场景注释范例且可正常被 YAML 解析"""
+    import yaml
+    template_path = os.path.normpath(
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "templates",
+            "quench_stack.yaml",
+        )
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 验证多技术栈示例存在
+    assert "Web 全栈开发" in content
+    assert "云原生微服务" in content
+    assert "CLI 命令行工具" in content
+
+    # 验证解析后的 YAML 结构完好
+    data = yaml.safe_load(content.replace("__PROJECT_NAME__", "TestApp"))
+    assert data["project_name"] == "TestApp"
+    assert data["schema_version"] == "1.0"
+    assert isinstance(data["constraints"], list)
+    assert len(data["constraints"]) >= 3
+
+
 def test_migrate_config_v0_to_v1(temp_workspace):
     """验证旧版 v0 配置文件在 load_project_config 时自动平滑升级为 v1.0"""
     yaml_path = temp_workspace / ".agents" / "quench_stack.yaml"

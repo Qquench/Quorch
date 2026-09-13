@@ -72,7 +72,11 @@ def test_antigravity_adapter():
     assert allow_res == {"decision": "allow"}
 
     ask_res = adapter.format_decision("ask", reason="需要确认")
-    assert ask_res == {"decision": "ask", "reason": "需要确认"}
+    assert ask_res == {"decision": "force_ask", "reason": "需要确认"}
+
+    # 验证 force_ask 幂等
+    force_res = adapter.format_decision("force_ask", reason="强制确认")
+    assert force_res == {"decision": "force_ask", "reason": "强制确认"}
 
     deny_res = adapter.format_decision("deny", reason="越界阻断")
     assert deny_res == {"decision": "deny", "reason": "越界阻断"}

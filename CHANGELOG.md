@@ -5,6 +5,50 @@
 
 ---
 
+## [2026-09-13] 2026-09-13_fix_windows_hook_quote_wrapping.md
+
+- **Task 1.1**: 移除 hooks.json 渲染中的多余双引号包裹并验证 Node.js 兼容性
+
+## [2026-09-13] 2026-09-13_fix_windows_hook_quote_wrapping.md
+
+- **Task 1.1**: 移除 hooks.json 渲染中的多余双引号包裹并验证 Node.js 兼容性
+- **fix(hooks)**: 移除 hooks.json 渲染多余双引号，彻底修复 Node.js child_process.exec 语法错误崩溃
+  - **双重包裹根因消除**：Antigravity IDE 基于 Node.js，执行 Hook 时底层自动使用 `cmd.exe /d /s /c "<command>"` 进行包裹。原在 Windows 平台追加的双重外层双引号 (`""...""`) 导致 cmd.exe 产生三层引号嵌套，首部被解析为空命令 `""` 并报错闪退（`文件、目录名或卷标语法不正确。`），触发 IDE Fail-Open 静默放行；
+  - **跨平台命令格式归一**：彻底移除 `install.py` 与 `init_project.py` 中的 `_wrap_cmds` 逻辑，统一使用跨平台合法的 `"python" "script"` 格式；
+  - **Node.js 端到端验证**：使用 Node.js 原生进程调用 `file_scope_guard.py` 测试，确认执行零报错，`force_ask` 拦截报文稳定输出。
+
+## [2026-09-13] 2026-09-13_stage2_antigravity_community_ready.md
+
+- **Task 1**: 消除本地绝对路径与配置模板化 (Epic 2.1)
+- **Task 2**: 跨平台自适应安装引导脚本与 Pre-flight 安全预检 (Epic 2.2)
+- **Task 3**: 项目配置模板去特定化与逻辑角色模型解耦 (Epic 2.3)
+- **Task 4**: 社区门面资产、双语文档与发布走查 (Epic 2.4)
+
+## [2026-09-13] 2026-09-13_upgrade_adapter_to_force_ask.md
+
+- **Task 1.1**: 升级 AntigravityAdapter 决策契约为 force_ask 并同步单测
+
+## [2026-09-13] 2026-09-13_upgrade_adapter_to_force_ask.md
+
+- **Task 1.1**: 升级 AntigravityAdapter 决策契约为 force_ask 并同步单测
+- **fix(adapter)**: AntigravityAdapter 升级 ask 为 force_ask，击穿 IDE 权限缓存确保第三层物理弹窗必现
+  - **决策契约升级**：Antigravity IDE 的 `"ask"` 会尊重“始终允许 / Always Allow”权限缓存，导致未纳管修改可能被静默放行；升级为 `"force_ask"` 契约后，无条件强制唤起交互确认弹窗，实现真正的第三层底线物理拦截；
+  - **跨宿主隔离保全**：该转换内敛封装于 `AntigravityAdapter.format_decision`，通用 CLI 与 Cursor 适配器保持各自终端拦截行为，状态机与日志事件继续维持架构纯洁性；
+  - **单测全量同步**：更新 `test_adapters.py` 与 `test_hooks.py` 中 10 余处断言，83/83 项单测 100% 通过。
+
+## [2026-09-13] 2026-09-13_fix_external_hooks_and_diagnostics.md
+
+- **Task 1.1**: 脚手架 hooks.json 自动生成、体检健康审计增强与 Windows 引号剥离修复
+- **Task 1.2**: 补齐脚手架与体检单元测试及同步文档变更
+
+## [2026-09-13] 2026-09-13_fix_external_hooks_and_diagnostics.md
+
+- **fix(scaffolding)**: 修复外部项目 hooks.json 缺失导致 FileGuard 失效、体检假阳性与 Windows cmd.exe /c 引号剥离导致 Hook 闪退
+  - **外部项目 Hook 闭环生成**：在 `init_project.py` 中增加 `_render_hooks_json()`，为所有接入的外部业务项目（如 JJW_MES）在本地 `.agents/hooks.json` 生成独立的生命周期 Hook 物理文件，支持 `--force` 幂等自愈覆盖；
+  - **健康体检升级 (diagnose_environment)**：增加 `has_hooks_json` 与 `hooks_json_valid` 诊断维度，全面覆盖文件缺失、JSON损坏、解释器或脚本路径不可达分支，杜绝体检假阳性；
+  - **Windows cmd.exe /c 引号剥离保护**：针对 Windows 下 `cmd /c` 剥离首尾引号导致命令解析崩溃的系统性缺陷，在 `hooks.json.template` 及渲染器中对 Windows 平台命令自动包裹双引号保护 (`""{{PYTHON}}" "{{SCRIPT}}""`)；
+  - **全量测试与安装器适配**：在 `scripts/install.py --project` 一键接入流程中联动注入 `--force`，并在 `test_init_project.py` 中新增 5 个专项测试用例。
+
 ## [2026-09-13] 2026-09-13_stage1_scaffolding_observability_and_migration.md
 
 - **Task 1**: Hook 决策日志与可观测性基线 (Epic 1.5)

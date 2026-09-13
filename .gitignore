@@ -27,6 +27,12 @@ coverage.xml
 *.lock
 .agents/.quench_bypass.json
 .agents/.quench_hook.log*
+.agents/.quench_path_backup.json
+
+# Quench Generated Local Configs (use .template in repo)
+plugins/quench-dev-tasks/mcp_config.json
+plugins/quench-dev-tasks/hooks.json
+.agents/hooks.json
 
 # IDE & OS
 .vscode/
