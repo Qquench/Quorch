@@ -1,0 +1,25 @@
+{
+  "quench-file-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "replace_file_content|multi_replace_file_content|write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Work\\Quench\\MCP\\venv\\Scripts\\python.exe D:\\Work\\Quench\\MCP\\plugins\\quench-dev-tasks\\server\\hooks\\file_scope_guard.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "quench-context-injector": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "D:\\Work\\Quench\\MCP\\venv\\Scripts\\python.exe D:\\Work\\Quench\\MCP\\plugins\\quench-dev-tasks\\server\\hooks\\context_injector.py",
+        "timeout": 5
+      }
+    ]
+  }
+}

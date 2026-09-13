@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "quench-dev-tasks": {
+      "command": "D:\\Work\\Quench\\MCP\\venv\\Scripts\\python.exe",
+      "args": [
+        "D:\\Work\\Quench\\MCP\\plugins\\quench-dev-tasks\\server\\server.py"
+      ]
+    }
+  }
+}

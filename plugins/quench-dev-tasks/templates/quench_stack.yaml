@@ -1,0 +1,65 @@
+# ==============================================================================
+# Quench 项目特异化配置清单 (Quench Project Stack Manifest)
+# 供 quench-dev-tasks Plugin 读取，实现项目特定边界、测试套件与目录映射的解耦。
+# ==============================================================================
+
+# 项目名称（必填）
+project_name: "JJW_MES"
+
+# 任务管理目录（相对于项目根目录，默认: docs/dev_tasks）
+dev_tasks_dir: "docs/dev_tasks"
+
+# 已闭环任务归档目录（相对于项目根目录，默认: docs/dev_tasks/archive）
+archive_dir: "docs/dev_tasks/archive"
+
+# 变更记录日志路径（相对于项目根目录，默认: CHANGELOG.md）
+changelog_path: "CHANGELOG.md"
+
+# 系统架构设计手册路径（供 Opus 审查时优先阅读建立上下文）
+architecture_doc: "docs/architecture/internal_system_design.md"
+
+# 测试套件目录（供 DoD 断言物理审计使用）
+test_dir: "backend/tests"
+
+# 默认安全回归测试命令
+test_runner: "python scripts/run_safe_tests.py"
+
+# 项目专有边界与环境约束（自动注入给 Opus 审查和 Flash 执行提示词）
+constraints:
+  - "本项目为离线车间局域网工控系统，严禁引入公网高安全认证（如公网 OAuth、复杂防刷）"
+  - "Python 环境约束：强制使用内置虚拟环境 backend\\venv，严禁调用全局 Python"
+  - "数据库约定：SQLite 必须使用 WAL 模式并启用外键约束，ORM 必须使用 SessionLocal()"
+  - "前端约定：SPA 静态资源由 FastAPI 后端 main.py 统一静态托管"
+  - "物理安全约定：机床参数下发必须双寄存器握手（Standby=0 & Trigger=0），严禁盲发"
+
+# ==============================================================================
+# 第一层：快速通道静态白名单规则（Fast-Track Rules）
+# 允许免除任务状态机管控、直接修改的文件匹配模式（Glob）列表。
+# ⚠️ 维护原则：宁少勿多。默认为空单，由项目根据第二层（会话旁路）的实际应用沉淀后逐步添加。
+# ==============================================================================
+fast_track_rules:
+  allow_untracked_patterns: []
+
+# ==============================================================================
+# 代码审计管控边界 (Governance Scope Boundaries)
+# 明确受管生产代码与免管知识库/规划文档的法定边界，支持多语言与异构项目灵活移植。
+# ==============================================================================
+governance_scope:
+  # 🔴 生产受管范围（涉及业务运行时与核心依赖，强触发任务状态机）
+  managed_paths:
+    - "backend/**"
+    - "frontend/src/**"
+    - "ipc_client/**"
+    - "scripts/**"
+    - "requirements.txt"
+    - "package.json"
+    - "docker-compose.yml"
+
+  # 🟢 自由放行范围（文档、规划、调试数据、设计素材，天生免除任务流程）
+  unmanaged_paths:
+    - "docs/**"
+    - "future_roadmap/**"
+    - "sample_data/**"
+    - "*.md"
+
+

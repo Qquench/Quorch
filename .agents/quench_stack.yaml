@@ -1,0 +1,37 @@
+# ==============================================================================
+# Quench 项目特异化配置清单 (Quench Project Stack Manifest)
+# 供 quench-dev-tasks 插件读取，实现 MCP 仓库本身的自我治理与规范驱动演进。
+# ==============================================================================
+
+project_name: "Quench_MCP"
+
+dev_tasks_dir: "docs/dev_tasks"
+archive_dir: "docs/dev_tasks/archive"
+changelog_path: "CHANGELOG.md"
+architecture_doc: "dev_tasks_mcp_specification.md"
+
+test_dir: "plugins/quench-dev-tasks/server/tests"
+test_runner: "pytest plugins/quench-dev-tasks/server/tests"
+
+constraints:
+  - "本项目为 FastMCP + Antigravity 双模型开发任务治理套件，核心业务为协议与安全网关"
+  - " FastMCP 工具层必须保持跨平台兼容与轻量化，严禁对单一客户端实现强硬硬编码绑定"
+  - "文件管控钩子必须在 50ms 内响应，任何会话锁校验失败必须幂等清理"
+  - "所有生产级变更必须由 20/20 pytest 单测套件 100% 覆盖并保证零破坏性"
+
+fast_track_rules:
+  allow_untracked_patterns: []
+
+governance_scope:
+  managed_paths:
+    - "plugins/quench-dev-tasks/server/**"
+    - "plugins/quench-dev-tasks/hooks.json"
+    - "plugins/quench-dev-tasks/plugin.json"
+    - "plugins/quench-dev-tasks/mcp_config.json"
+    - "plugins/quench-dev-tasks/rules/**"
+    - "plugins/quench-dev-tasks/skills/**"
+    - "plugins/quench-dev-tasks/agents/**"
+  unmanaged_paths:
+    - "docs/**"
+    - "future_roadmap/**"
+    - "*.md"
