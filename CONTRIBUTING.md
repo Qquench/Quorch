@@ -52,12 +52,15 @@ Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We w
 
 ### 1. The Six-Core-Field DevTask Standard
 All non-trivial changes should be planned using standard DevTasks containing the six core fields:
-- **Affected Files** (`【涉及文件】`): Explicit whitelist with `[MODIFY]`, `[NEW]`, `[DELETE]`, `[RENAME]` prefixes.
-- **Root Cause & Target** (`【缺陷根因与修改目标】`): Clear problem statement and objective.
-- **Type Contracts** (`【目标签名与类型契约】`): Interface signatures and return types.
-- **Step-by-Step Instructions** (`【分步改造指引】`): Sequential numbered steps.
-- **Defensive & Edge Checks** (`【防御与边缘校验】`): Defensive bounds, concurrency handling, and fallback behavior.
-- **DoD Verification Commands** (`【DoD 验证命令】`): Concrete test commands that must be executed and pass.
+- **Affected Files** (`#### [Affected Files]`): Explicit whitelist with `[MODIFY]`, `[NEW]`, `[DELETE]`, `[RENAME]` prefixes.
+- **Root Cause & Target** (`#### [Root Cause & Target]`): Clear problem statement and objective.
+- **Type Contracts** (`#### [Type Contracts]`): Interface signatures and return types.
+- **Step-by-Step Instructions** (`#### [Step-by-Step Instructions]`): Sequential numbered steps.
+- **Defensive & Edge Checks** (`#### [Defensive & Edge Checks]`): Defensive bounds, concurrency handling, and fallback behavior.
+- **DoD Verification Commands** (`#### [DoD Verification Commands]`): Concrete test commands that must be executed and pass.
+
+> [!NOTE]
+> Quench natively supports bilingual field headings (e.g., `#### [Affected Files]` and `#### 【涉及文件】` are completely interchangeable).
 
 ### 2. Test-Driven Development (TDD)
 - **Zero Regression**: All existing 105+ tests must continue to pass 100%.
