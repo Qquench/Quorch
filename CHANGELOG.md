@@ -5,6 +5,12 @@
 
 ---
 
+## [2026-09-13] 2026-09-13_stage1_scaffolding_observability_and_migration.md
+
+- **Task 1**: Hook 决策日志与可观测性基线 (Epic 1.5)
+- **Task 2**: 配置文件版本管理、平滑升级迁移与模板项目中立化 (Epic 1.6)
+- **Task 3**: 全局脚手架轻量化与环境自检优化 (Epic 1.3)
+
 ## [2026-09-13] 2026-09-11_governance_engine_and_cross_tool_adaptation.md
 
 - **Task 1**: 三层快速旁路与物理会话锁安全审查与防御加固
