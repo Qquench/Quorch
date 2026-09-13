@@ -20,7 +20,7 @@ Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We w
 ### Local Bootstrap Steps
 1. Fork and clone the repository:
    ```bash
-   git clone https://github.com/your-username/quorch.git
+   git clone https://github.com/lzen5150/Quorch.git
    cd quorch
    ```
 2. Create and activate a virtual environment:

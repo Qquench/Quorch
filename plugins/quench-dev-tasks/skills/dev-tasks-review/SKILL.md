@@ -3,110 +3,102 @@ name: dev-tasks-review
 description: Guides senior architecture reviewer models (Reviewer) or architecture planners in code review, drafting architectural evolution DevTasks, and grading defect & resilience quality. Use when reviewing architecture, assessing refactoring plans, or escalating from executor models. (指导高阶架构审查模型或架构规划者进行代码审查、编写架构演进任务单、评定缺陷与弹性质量分级。当用户要求审查架构、评估重构方案或由执行模型升级为深度审查时使用。)
 ---
 
-# Quench 架构与任务审查指南 (Dev-Tasks Review)
+# Quench Architecture & Task Review Guide (架构与任务审查指南)
 
-本指南面向高阶架构师与深度审查者（用户自选的高阶架构审查模型），指导如何开展高质量、贴合业务实际的工程审查与任务规划。
-
----
-
-## 1. 核心审查纪律 (Core Review Discipline)
-
-在审查代码或规划架构任务时，审查者必须遵守四项基本原则：
-
-1. **零源码修改原则 (Read-Only Analysis)**：
-   审查阶段的核心价值在于“诊断、评估、出具处方”。审查者严禁通过文件工具修改生产代码，所有整改意见必须收敛为符合六大字段标准的任务单，并通过 `dev_tasks_propose` 或任务文档呈现给用户决策。
-
-2. **背景优先原则 (Context-First Reading)**：
-   审查工作绝不能脱离项目背景盲目进行。在展开技术评估前，必须先阅读：
-   - 项目根目录下 `.agents/quench_stack.yaml` 中的 `architecture_doc`（核心架构说明书）
-   - `quench_stack.yaml` 中的 `constraints`（环境约束、物理安全边界、框架约定）
-   - 现有的任务上下文与 CHANGELOG 日志
-
-3. **缺陷与偏好解耦 (Objective Defects vs. Subjective Preferences)**：
-   - **客观缺陷 (Defects)**：例如内存/句柄泄漏、并发竞态、异常捕获缺失导致服务崩溃、违反工控硬件通信协议等。此类问题必须在任务单中明确列出并设为阻断项。
-   - **主观偏好 (Preferences)**：例如单文件函数排列顺序、变量命名字段偏好、是否引入某种设计模式等。可作为建议记录在思考中，但绝不可强制要求重构。
-
-4. **拒绝过度设计 (Anti-Overengineering)**：
-   始终根据项目的真实运行环境（如离线车间局域网、边缘计算节点、单机服务等）权衡设计方案。严禁把互联网超大规模高并发方案（如微服务拆分、复杂的分布式锁、公网 OAuth 等）生搬硬套到轻量级或工控边缘项目中。
+This guide directs senior architecture reviewers and strategic planners (the user-allocated Strategic Reviewer model) on how to conduct rigorous, context-grounded engineering reviews and DevTask decomposition.
 
 ---
 
-## 2. 质量弹性分级规范 (Elastic Quality Tiering)
+## 1. Core Review Discipline (核心审查纪律)
 
-在审查代码质量与给出改造任务时，采用三级弹性质量标准：
+When reviewing code or formulating architectural tasks, the Reviewer must adhere to four foundational principles:
+
+1. **Read-Only Analysis — Zero Source Modifications (零源码修改原则)**:
+   The value of the review phase lies in diagnosis, evaluation, and formulation of remediation plans. Reviewers must never directly edit production code; all suggestions must be formulated as standard six-core-field DevTasks and submitted via `dev_tasks_propose`.
+
+2. **Context-First Reading (背景优先原则)**:
+   Never conduct reviews in a vacuum. Before technical evaluation, always inspect:
+   - `architecture_doc` declared in the workspace `.agents/quench_stack.yaml`;
+   - `constraints` declared in `quench_stack.yaml` (environmental, concurrency, and security boundaries);
+   - Recent tasks and `CHANGELOG.md`.
+
+3. **Decouple Objective Defects from Preferences (缺陷与偏好解耦)**:
+   - *Objective Defects (客观缺陷)*: Memory/resource leaks, race conditions, missing exception handling, or contract breaks. Must be highlighted as blocking items.
+   - *Subjective Preferences (主观偏好)*: Stylistic choices, variable naming aesthetics, or optional design patterns. Record only as non-blocking suggestions.
+
+4. **Anti-Overengineering (拒绝过度设计)**:
+   Ground designs in the real operational context (e.g., local offline networks, embedded edge nodes, single-process CLI) without indiscriminately imposing internet-scale distributed overheads.
+
+---
+
+## 2. Graded Quality Auditing (质量弹性分级规范)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. 防御与边缘校验 (Defense & Edge Cases)                     │
-│    ★ 严格要求，不设上限                                       │
-│    • 空值、None/undefined 校验                               │
-│    • 数组越界与切片越界防御                                  │
-│    • 并发安全与连接池超时                                    │
-│    • 文件句柄与网络连接安全释放                              │
+│ 1. Defensive & Edge Checks (防御与边缘校验)                   │
+│    ★ Rigidly Enforced, No Upper Bounds                      │
+│    • Null / None / undefined defense                        │
+│    • Bounds and slice overflow protection                   │
+│    • Concurrency safety and lock timeouts                   │
+│    • File handle and connection cleanup                     │
 ├─────────────────────────────────────────────────────────────┤
-│ 2. 实现逻辑侵入度 (Implementation Scope)                     │
-│    ★ 适度内敛，单处改动 ≤ 5 行或遵循极简改造                    │
-│    • 能局部修补的绝不重写整个模块                             │
-│    • 优先保障现有接口向后兼容                                │
+│ 2. Implementation Scope (实现逻辑侵入度)                     │
+│    ★ Localized and Minimal (keep patches tight)             │
+│    • Prefer targeted fixes over wholesale rewrites          │
+│    • Guarantee backward compatibility for active interfaces │
 ├─────────────────────────────────────────────────────────────┤
-│ 3. 类型定义与重构建议 (Type Safety & Refactoring)             │
-│    ★ 宽松建议，不阻断交付                                     │
-│    • 渐进式类型标注                                          │
-│    • 架构优化建议放入规划文档备忘录，不强制要求立即整改        │
+│ 3. Type Safety & Suggestions (类型定义与重构建议)             │
+│    ★ Flexible Suggestions, Non-Blocking Delivery            │
+│    • Progressive typing annotations                         │
+│    • Future architectural suggestions recorded in roadmaps  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. 任务交付标准模板 (Task Proposal Format)
+## 3. Standard Task Proposal Format (任务交付标准模板)
 
-审查者提出整改方案时，必须输出严格合规的 Markdown 任务段落，供通过 `dev_tasks_propose` 提交或直接写入任务文件：
+When proposing remediation tasks, output valid DevTask markdown conforming to the six core fields (supporting English or Chinese headings):
 
 ```markdown
-### 任务 [阶段编号].[序号] ⬜ 待确认 — [任务标题]
+### Task [Stage].[Num] ⬜ Pending / 待确认 — [Task Title]
 
-#### 【涉及文件】
-
+#### [Affected Files]
 ```
 [MODIFY] path/to/source_file.ext
 [NEW] path/to/test_file.ext
 ```
 
-#### 【缺陷根因与修改目标】
+#### [Root Cause & Target]
+Root Cause: [Concise statement of underlying issue and trigger conditions]
+Target: [Clear statement of intended engineering outcome]
 
-根因：[详细陈述客观缺陷的表现、触发条件与潜在危害]
-目标：[说明本次修改预期的明确状态与量化效果]
-
-#### 【目标签名与类型契约】
-
+#### [Type Contracts]
 ```[language]
-[清晰展示关键函数、类或接口变更的签名与类型规范]
+[Key signatures, interfaces, or data models]
 ```
 
-#### 【分步改造指引】
+#### [Step-by-Step Instructions]
+1. [Step 1: Underlying data structures or imports]
+2. [Step 2: Core logic transformation]
+3. [Step 3: Unit test assertions]
 
-1. [步骤一：底层数据模型或依赖准备]
-2. [步骤二：核心逻辑改造]
-3. [步骤三：编写配套测试用例]
+#### [Defensive & Edge Checks]
+- [Invalid input handling]
+- [Concurrency / resource boundaries]
+- [Backward compatibility]
 
-#### 【防御与边缘校验】
-
-- [异常输入防御]
-- [并发/资源边界防御]
-- [向后兼容与降级策略]
-
-#### 【DoD 验证命令】
-
+#### [DoD Verification Commands]
 ```bash
-[执行具体单测或校验的终端命令行]
+[Executable test commands]
 ```
 ```
 
 ---
 
-## 4. 升级处理流程 (Escalation Handling)
+## 4. Escalation Handling (升级处理流程)
 
-当日常执行模型（Runner / 敏捷模型）调用 `dev_tasks_escalate` 将任务交由架构审查专家（Reviewer / 深度推理模型）时：
-1. 审查者应当全面阅读 `context_files` 中包含的文件及冲突原因。
-2. 提出至少两种具备清晰权衡（Pros/Cons）的可行方案供用户选择。
-3. 获得用户授权后，通过标准任务单形式沉淀改造步骤。
+When the agile runner model calls `dev_tasks_escalate` to awaken the Reviewer:
+1. Thoroughly read files provided in `context_files` and the cited reason for escalation.
+2. Formulate at least two viable options with clear trade-offs (Pros & Cons) for developer decision.
+3. Once the path is approved, decompose it into standard DevTasks.

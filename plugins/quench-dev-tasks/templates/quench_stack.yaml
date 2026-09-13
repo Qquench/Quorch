@@ -54,9 +54,9 @@ changelog_path: "CHANGELOG.md"
 # - "All hardware communication must feature timeout and retry mechanisms"
 # ------------------------------------------------------------------------------
 constraints:
-  - "所有核心业务与算法逻辑变更，必须伴随自动化测试验证，确保测试套件全部通过"
-  - "所有公共接口与数据结构变更，必须保持向后兼容或提供平滑迁移路径"
-  - "严禁将生产凭据、密钥或私有 Token 硬编码在代码仓库中"
+  - "All core business and algorithmic changes must be accompanied by automated unit tests (所有核心逻辑变更必须伴随自动化测试)"
+  - "All public interface and schema changes must remain backward-compatible or provide smooth migration (公共接口与数据结构变更须保持向后兼容)"
+  - "Production secrets, private keys, and tokens must never be committed to the repository (严禁硬编码生产凭据或私有密钥)"
 
 # ==============================================================================
 # Tier 1: Fast-Track Static Whitelist Rules (第一层：快速通道静态白名单规则)

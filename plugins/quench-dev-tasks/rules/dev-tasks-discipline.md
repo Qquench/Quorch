@@ -1,180 +1,86 @@
-# Quench 开发任务常驻执行纪律 (Dev-Tasks Discipline)
+# Quench Dev-Tasks Resident Discipline (开发任务常驻执行纪律)
 
-作为在 Quench 架构体系下工作的 AI 编程助手，你必须严格遵循以下三层纪律约束：
-
----
-
-## 1. 状态机推进纪律 (State Machine Discipline)
-
-- **严禁手动编辑状态 Emoji**：任务状态的流转（如从 `⬜ 待确认` 到 `✅ 已确认`，或从 `✅ 已确认` 到 `🔨 执行中`、`✔️ 已完成`）**必须严格调用 quench-dev-tasks 提供的 MCP Tools**（`dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_escalate` 等），不得通过 `replace_file_content` 或 `write_to_file` 手动篡改任务 Markdown 文件的状态图标。
-- **单核执行原则**：同一时间内，**只能有一个任务处于 `🔨 执行中` 状态**。在开始新任务之前，必须先将当前任务标记为 `✔️ 已完成`（通过完整 DoD 测试）或 `🔄 需返工`/`✅ 已确认`。
-- **会话启动自检**：在新对话或新一轮开发启动时，首要动作是调用 `dev_tasks_status` 了解当前项目任务全景。
+As an AI coding assistant operating within the Quench governance framework, you MUST strictly adhere to the following resident discipline tiers:  
+（作为在 Quench 架构体系下工作的 AI 编程助手，你必须严格遵循以下三层纪律约束：）
 
 ---
 
-## 2. 执行阶段纪律 (Execution Discipline)
+## 1. State Machine Progression Discipline (状态机推进纪律)
 
-- **严格遵循【涉及文件】清单**：进行代码修改时，只能触碰当前 `🔨 执行中` 任务中【涉及文件】（Affected Files）清单内列出的文件。
-- **物理拦截与例外确认**：任何触碰清单外文件的工具调用都会触发 PreToolUse 钩子拦截。如果确属任务规划阶段的疏漏，必须在工具调用参数的 `Description` 中详细说明修改理由，等待用户在交互弹窗中明确授权。
-- **改逻辑必加单测**：凡是修改核心业务逻辑、算法或接口行为的任务，必须配套编写或更新单元测试，并在【DoD 验证命令】中完成自动化断言。
-- **保持代码风格与注释完整**：严禁无故删除原有的架构注释、设计说明和 docstring。严格遵循项目 `.agents/quench_stack.yaml` 中规定的开发约束。
-
----
-
-## 3. 审查与规划纪律 (Review & Planning Discipline)
-
-- **审查阶段绝不碰源码**：在审查模式（Review Mode）或方案规划阶段，AI 的职责是定位问题、分析架构与输出任务单，严禁修改任何生产源代码。
-- **先读文档与项目规范**：审查前必须先阅读项目架构文档（由 `.agents/quench_stack.yaml` 中 `architecture_doc` 指定）及项目专有约束（`constraints`），绝不能脱离具体业务场景纸上谈兵。
-- **严格区分客观缺陷与主观偏好**：
-  - **客观缺陷**：如内存泄漏、并发竞态、异常未捕获、数据损坏隐患、不满足业务核心契约等，必须严肃指出并明确整改步骤。
-  - **主观偏好**：如代码格式倾向、命名修饰偏好等，仅作建议，不得作为阻断交付的理由。
-- **尊重项目定位，拒绝过度设计**：严格契合项目的实际应用场景与交付约束，不引入不必要的高复杂度抽象与无关依赖。
+- **Strictly Advance via MCP Tools / 严禁手动编辑状态 Emoji**：Task state transitions (e.g., from `[Pending] / ⬜ 待确认` to `[Confirmed] / ✅ 已确认`, or `[Confirmed]` to `[In Progress] / 🔨 执行中` and `[Completed] / ✔️ 已完成`) **MUST strictly be driven via quench-dev-tasks MCP Tools** (`dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_escalate`). Direct manual text replacement of task markdown status icons is prohibited.  
+  （任务状态的流转必须严格调用 MCP Tools，不得通过 `replace_file_content` 或 `write_to_file` 手动篡改任务 Markdown 文件的状态图标。）
+- **Single Active Task Serial Execution / 单核串行施工原则**：Globally, **only ONE task is permitted to be in `[In Progress] / 🔨 执行中` state at any given moment**. Before starting a new task, the active task must first be marked as `[Completed] / ✔️ 已完成` (with full DoD tests passing) or transitioned to `[Rework] / 🔄 需返工` / `[Confirmed] / ✅ 已确认`.  
+  （同一时间内，只能有一个任务处于 `🔨 执行中` 状态。未领单严禁动源码 / 在未检出任务前不得修改代码。）
+- **Session Startup Self-Check / 会话启动自检**：At the start of every new conversation or development session, the immediate mandatory action is to invoke `dev_tasks_status` to inspect the project task landscape.  
+  （在新会话或新一轮开发启动时，首要动作是调用 `dev_tasks_status` 了解当前项目任务全景。）
 
 ---
 
-## 4. 架构审查交接与多会话复工纪律 (Reviewer Handoff & Resume Discipline)
+## 2. Implementation Scope Discipline (执行阶段纪律)
 
-为彻底杜绝长会话 Token 污染、保护用户高阶模型额度并保证架构质量，必须遵循以下交接与复工协议：
+- **Strict Adherence to Whitelist / 严格遵循【涉及文件】清单**：When making code modifications, you may only touch files explicitly listed under `[Affected Files] / 【涉及文件】` of the currently active `[In Progress] / 🔨 执行中` task.  
+  （进行代码修改时，只能触碰当前 `🔨 执行中` 任务中【涉及文件】清单内列出的文件。）
+- **Physical Interception & Explicit Approval / 物理拦截与例外确认**：Any tool call attempting to modify an out-of-scope file triggers a PreToolUse physical hook intercept. If modifications outside the whitelist are genuinely required, detail the rationale in the tool call `Description` and wait for explicit human authorization.
+- **Mandatory Test Assertions / 改逻辑必加单测断言**：Any task modifying core business logic, algorithms, or API contracts MUST include or update accompanying unit test assertions in the test directory, validated via `[DoD Verification Commands] / 【DoD 验证命令】`.  
+  （凡是修改核心业务逻辑、算法或接口行为，必须在测试目录追加单测断言，杜绝功能回归。）
+- **Preserve Architecture & Comments / 保持代码风格与注释完整**：Preserve existing architectural explanations, design rationale, and docstrings. Strictly respect engineering constraints defined in the workspace `.agents/quench_stack.yaml`.
 
-> **角色解耦定义**：在 Quench 治理体系中，“架构审查模型 (Reviewer)”是指用户根据自身环境与算力预算，自主选定用于系统架构分析与深度推理的高阶旗舰模型。审查模型由用户在 IDE 界面手动选择与切换，系统机制与提示词一律不与任何具体模型版本或厂商强绑定。
+---
 
-### ① 停机与上报触发条件 (When to Halt)
-当遇到以下任一情况时，执行模型 **必须立刻停止后续开发与代码编写工具调用**：
-1. 任务单处于 `⬜ 待确认` 或已被标记为 `🔄 需返工`，需要架构审查模型进行方案终审与指南修订；
-2. **已确认任务的返工挂起**：某些任务虽此前状态为 `✅ 已确认`，但若属于执行模型初稿或用户指定需重新审查，必须调用 `dev_tasks_confirm(action="rework")` 降级为 `🔄 需返工`，阻断直接领单施工；
-3. **分批施工批次完工**：当前批次已确认任务全部完工，剩余任务为待确认或需返工时，必须安全停机汇报批次战果，等待下一批次确认或交接；
-4. 执行过程中遇到复杂冲突、重大接口变更或调用了 `dev_tasks_escalate`；
-5. 发现现有任务单的六大字段指引不明确，需要架构级修订。
+## 3. Review & Planning Discipline (审查与规划纪律)
 
-### ② 标准上报格式 (Handoff Card)
-执行模型停机后，必须在回复中输出格式化交接卡，指导用户进行低成本新会话交接。
+- **Read-Only Analysis — Never Touch Source Code (审查阶段绝不碰源码)**: In review mode or solution planning, the AI's sole duty is to diagnose issues, analyze architecture, and draft DevTasks. Modifying production code during review is strictly prohibited.
+- **Context & Docs First (先读文档与项目规范)**: Before reviewing, consult the project architectural documents specified in `.agents/quench_stack.yaml` (`architecture_doc`) and declared constraints (`constraints`).
+- **Distinguish Objective Bugs from Preferences (严格区分客观缺陷与主观偏好)**:
+  - *Objective Defects*: Memory leaks, race conditions, unhandled exceptions, data corruption risks, contract violations. Must be cited with concrete reproduction steps.
+  - *Subjective Preferences*: Formatting inclinations or naming aesthetics. Treat only as non-blocking suggestions.
+- **Respect Scope and Reject Overengineering (尊重项目定位，拒绝过度设计)**: Align strictly with practical project scope without introducing unnecessary high-complexity abstractions.
 
-> [!WARNING]
-> **排版硬性红线**：
-> - 必须直接使用 GitHub Flavored Markdown 引用块（`> [!NOTE]` 或 `> [!IMPORTANT]`）原生渲染；
-> - **严禁使用 ASCII 边框字符**（如 `┌─┐│└┘`）画方框；
-> - **严禁把交接卡整体套在 ```` ```markdown ```` 代码块中**做成展示板/黑板报。
+---
 
-标准交接卡示范（直接原生渲染，非代码块）：
+## 4. Reviewer Handoff & Resume Discipline (架构审查交接与多会话复工纪律)
+
+To prevent long-session token bloat, safeguard flagship model budgets, and guarantee architectural quality:
+
+> **Role Decoupling Definition**: The "Reviewer" represents the user-allocated flagship reasoning model chosen for high-level analysis and task decomposition. The Reviewer role is selected decoupled via user configuration or IDE selection.
+
+### ① When to Halt (停机与上报触发条件)
+The runner model **MUST immediately halt further development and code editing** when:
+1. Tasks are `[Pending] / ⬜ 待确认` or `[Rework] / 🔄 需返工`, requiring architectural review or guideline revision;
+2. Tasks previously marked `[Confirmed]` require rework (degrade via `dev_tasks_confirm(action="rework")`);
+3. Batch completion is reached (current batch of confirmed tasks is done, remaining tasks are pending/rework);
+4. Complex conflicts, breaking interface changes, or escalation via `dev_tasks_escalate` occur;
+5. DevTask guidelines lack clarity.
+
+### ② Handoff Card Format (标准上报格式)
+Halt and output a standard handoff card using native GitHub Flavored Markdown blockquotes:
 
 > [!IMPORTANT]
-> ### ⏸️ Quench 任务交接：等待架构审查与指南修订
-> - **待审查任务单**：`docs/dev_tasks/<文件名>.md` (任务 ID: <待审查ID>)
-> - **交接原因**：<清晰说明为何需要高级架构审查 / 返工重修>
+> ### ⏸️ Quench Task Handoff: Awaiting Architecture Review & Plan Revision
+> - **Target DevTask**: `docs/dev_tasks/<file>.md` (Task ID: <id>)
+> - **Reason**: <Clear reason why strategic review / rework is needed>
 > 
-> **👉 请执行以下低 Token 消耗的交接操作：**
-> 1. 点击 `+` 打开一个【全新会话】（纯净上下文，仅消耗极少 Token）；
-> 2. 手动将模型切换为您选定的**高阶架构审查模型**；
-> 3. 发送提示词：`请审查并修订 docs/dev_tasks/<文件名>.md`；
-> 4. 架构审查模型完成审查修订并将任务置为 `✅ 已确认`；
-> 5. **切回本会话**，输入“`已修订完毕`”或“`继续`”。
+> **👉 Low-Token Handoff Steps:**
+> 1. Click `+` to open a **fresh conversation session** (clean context, minimal tokens);
+> 2. Switch to your allocated **Strategic Reviewer Model**;
+> 3. Submit prompt: `Please review and refine docs/dev_tasks/<file>.md`;
+> 4. The Reviewer finalizes the plan and marks tasks as `[Confirmed] / ✅ 已确认`;
+> 5. **Switch back to this session** and reply `Ready to proceed` or `Continue`.
 
-### ③ 复工确认机制 (Resume Verification)
-当用户切回原会话并给出确认后，执行模型的行为约束如下：
-1. **禁止盲目直接开工**：必须首先调用 `dev_tasks_status` 重新拉取磁盘上的最新任务单；
-2. **校验任务有效性**：核实目标任务已被审查模型标记为 `✅ 已确认`，且六大字段清晰规范；
-3. **定向或顺序领单**：调用 `dev_tasks_checkout(task_id=...)` 或按序领单，将任务置为 `🔨 执行中`，严格按修订后的指南实施。
-
-### ④ 多任务分批施工流水线纪律 (Batch Pipeline Discipline)
-- **按批确认，步步为营**：支持大型项目分批推进（如第一批确认 Task 1~2，后续保留待确认或需返工）。
-- **批次完工严禁越权**：当执行模型（Runner）跑完当前批次所有 `✅ 已确认` 任务后，`dev_tasks_checkout` 会识别批次完工并返回等待信号。Runner 必须向用户总结当前批次成果，等待用户确认下一批任务，严禁擅自跳过流程去写下一批代码。
-
-### ⑤ 逻辑角色解耦规范 (Logical Role Decoupling)
-Quench 双模型架构全面采用逻辑角色定义，不与具体商业模型强制绑定：
-- **Reviewer（架构审查师 / 深度推理模型）**：负责跨模块架构审查、系统性缺陷诊断、复杂冲突仲裁与阶段任务规划。支持映射为 Claude 3.7 Sonnet / Opus / GPT-4.5 / DeepSeek R1 等高阶推理模型。
-- **Runner（日常执行器 / 敏捷模型）**：负责严格遵循【分步改造指引】进行内敛代码编写、单测补充与 DoD 闭环。支持映射为 Gemini 2.0 Flash / GPT-4o-mini 等轻量敏捷模型。
+### ③ Resume Verification (复工确认机制)
+Upon developer confirmation:
+1. Re-read disk status via `dev_tasks_status`;
+2. Verify target task is `[Confirmed] / ✅ 已确认` with all six core fields intact;
+3. Checkout task via `dev_tasks_checkout(task_id=...)` to transition to `[In Progress] / 🔨 执行中` and implement.
 
 ---
 
-## 5. 快速通道与反滥用纪律 (Fast-Track & Anti-Abuse Discipline)
+## 5. Fast-Track & Anti-Abuse Discipline (快速通道与反滥用纪律)
 
-为了在杜绝失控的前提下兼顾轻量级改动（如调整按钮颜色、内边距、修订单纯文档）的敏捷性，Quench 提供了三层快速旁路机制。你必须严格恪守以下边界：
+### ① Three-Tier Progressive Protection
+1. **Tier 1: Static Whitelist (Configuration Tier)**: Declared in `.agents/quench_stack.yaml` (`fast_track_rules.allow_untracked_patterns`). Starts empty.
+2. **Tier 2: Dynamic Session Bypass (Session Tier with Physical Lock)**: Activated via `dev_tasks_set_bypass`. Requires exact session ID matching; auto-expires (default 4h, max 8h).
+3. **Tier 3: Interactive Decision Prompt (Interaction Tier)**: PreToolUse hook physical intercept (`decision: "ask"` / `force_ask`) returning ultimate control to the developer.
 
-### ① 三层渐进防护体系 (Three-Tier Architecture)
-1. **第一层：项目静态白名单（配置层）**
-   - 定义于 `.agents/quench_stack.yaml` 的 `fast_track_rules.allow_untracked_patterns`。
-   - **维护原则：宁少勿多，空单起步**。默认为空列表 `[]`。严禁预置宽泛规则。仅在第二层实际应用中沉淀出高度安全、确定不需要审计的纯静态模式后，由开发者谨慎手动添加。
-2. **第二层：会话动态旁路（会话层，含物理会话锁）**
-   - 通过 `dev_tasks_set_bypass` 工具激活，写入 `.agents/.quench_bypass.json`。
-   - **物理会话锁约束 (Physical Session Lock)**：Agent 调用时**必须传入当前会话的 Conversation ID 作为 `session_id`**。Hook 会严密校验当前修改发起方的会话 ID 与旁路文件是否一致，一旦检测到跨会话或切换窗口，旁路配置**瞬间失效并自愈清除**，绝不残留。
-   - **双重倒计时防线**：强制附加失效时间（`expires_at`，默认 4 小时，最大 8 小时）。过期自动作废，坚决防止全局或永久下线导致管控静默失效。
-3. **第三层：交互式决策弹窗（交互层）**
-   - 当修改触碰了未纳管文件且未命中前两层白名单时，PreToolUse 钩子将触发 Antigravity 交互弹窗（`decision: "ask"`）。
-   - 由用户明确点击【允许】（单次放行）或【拒绝】（强行阻断），把终审决策权交还给用户。
-
-### ② 生产代码靶向与双轨边界 (Dual-Track Boundary Scope)
-- **非代码与知识库天生豁免**：任务治理的核心防线是**生产可执行代码**。所有的纯文档、思考规划（如 `future_roadmap/**`）、客户材料（`docs/client_materials/**`）、操作指南及设计图纸天然免受任务单流程阻断，随写随看，零弹窗干扰。
-- **项目边界清单优先**：各项目通过 `.agents/quench_stack.yaml` 中的 `governance_scope` 显式划分 `managed_paths`（受管生产代码）与 `unmanaged_paths`（自由放行路径），实现跨项目无缝可移植。
-
-### ③ ⚠️ 纪律红线：严禁 Agent 自主调用旁路跳过流程 (Anti-Abuse Redline)
-- **专供用户授权**：`dev_tasks_set_bypass` 是专供用户在轻微改动场景下解绑流程的工具。
-- **严禁擅自规避**：Agent **绝对严禁在未经用户明确指示的情况下，私自调用该工具关闭管控或跳过任务状态机**！违者视为严重违反 Quench 核心治理契约。
-- **合法调用前提**：只有当用户在对话中明确表态（例如：“本次会话仅调整样式，跳过流程”、“开启 UI 样式快速通道”）时，Agent 方可代为执行，且必须传入 `user_authorized=True`、当前会话 `session_id`，并于 `reason` 字段完整摘录用户的授权指令。
-- **透明公示原则**：调用 `dev_tasks_status` 时系统会自动排查并显示旁路状态，严禁向用户隐瞒任何处于激活状态的旁路。
-
-### ④ 用户豁免深度架构审查时的直通模式与微留痕纪律 (Bypass & Micro-Patch Discipline)
-- **风险提示先行**：当用户明确指示“跳过架构审查 / 直接执行”时，Agent 严禁静默开工，必须首先输出【直通模式风险通知卡】（`> [!WARNING]`），向用户声明双模型审查已绕过，进入用户主导驾驶状态。
-- **小修小补轻量留痕**：在用户授权直通模式下的小型修补（如样式调整、文案微调），豁免六大字段任务单编写，但 Agent 完工后必须自动在 `CHANGELOG.md` 中追加一行结构化微摘要，确保变更不留盲区。
-
-### ⑤ 子代理委派与防死锁熔断纪律 (Subagent Delegation & Circuit Breaker)
-- **严禁臆测凭据传参**：委派 `browser_subagent` 或其他子代理前，必须查阅项目配置（如 `quench_stack.yaml` 中的 `constraints`）提取法定凭据，严禁向子代理传递未经核实的臆测参数。
-- **强制注入 2 次失败熔断**：在委派子代理的任务描述（Prompt）中，必须硬性包含熔断声明：*“若表单提交、登录认证或关键元素交互连续失败达到 2 次，严禁盲目尝试其他随机密码或无序点击，必须立即终止任务并输出 `FAILURE` 报告退出，交由主控排查！”* 坚决杜绝死循环空转。
-- **确定性工具优先原则**：对确定性路径的 UI 验证与截屏，优先使用项目内置的无头 CDP 自动化脚本执行，确保毫秒级响应、确定性断言与 100% 进程自愈清理。
-
----
-
-## 6. 全量完工交付与归档闭环纪律 (Delivery, Verification & Archiving Discipline)
-
-当任务单内的所有任务均已达成 `✔️ 已完成`（或 `⏭️ 跳过`）时，Agent **严禁静默结束对话或未经确认擅自归档**，必须严格执行以下完工交付协议：
-
-### ① 验收属性判定与分流提示 (Inspection Verification Split)
-根据本次任务单的核心涉及领域，执行分流动作：
-1. **主观/交互/视觉类任务（如前端 UI、图表呈现、串口硬件通信、复杂工序交互）**：
-   - **必须主动向用户呈现【关键验收清单】**，提醒用户进行人工检验（例如提供本地启动指引、重点测试路径）；
-   - 或主动询问用户：“*是否需要由我启动自动化端到端工具（如浏览器代理/模拟器）先行截屏自检并汇报结果？*”
-2. **纯自动化单测充分覆盖类任务（如后端算法、数据模型迁移、纯逻辑修复）**：
-   - 若自动化测试已 100% 覆盖且全部绿灯、可完全保障系统正确性；
-   - Agent **必须主动向用户说明单测覆盖情况，并询问**：“*单测已全部通过，是否需要我同步更新相关设计文档（如系统设计手册），并调用 `dev_tasks_archive` 进行正式封板归档？*”
-
-### ② 关联系统设计文档同步 (SSOT Sync)
-- 若本次变更影响了核心架构（如新增了公共组件规范、修改了数据表 Schema、新增了状态色令牌或工控协议）：
-  Agent 必须在归档前或归档流程中，主动检查并更新 `quench_stack.yaml` 中配置的 `architecture_doc`（如 `docs/architecture/internal_system_design.md`），确保核心架构手册（Single Source of Truth）与最新代码保持一致，严禁文档滞后。
-
-### ③ 归档确认与正式封板 (Archiving Execution)
-- 经用户验收满意或用户授权归档后，Agent 调用 `dev_tasks_archive`：
-  1. 任务单自动移入 `docs/dev_tasks/archive/`；
-  2. 自动在 `CHANGELOG.md` 中追加语义化版本记录；
-  3. 自动更新 `docs/dev_tasks/README.md` 的归档历史索引，完成里程碑闭环。
-
----
-
-## 7. 文档产物归位纪律 (Document Artifact Placement Discipline)
-
-在审查、开发或规划过程中，除代码文件外还会产出各类文档产物。为杜绝孤岛文件（放置在无规则覆盖的随意位置、格式不合规、执行器无法发现），所有文档产物必须按以下分类归位：
-
-### ① 产物分类与归位规则
-
-| 产物类型 | 归位位置 | 格式要求 | 发现方式 |
-|:---|:---|:---|:---|
-| **任务单** | `docs/dev_tasks/<date>_<topic>.md` | 六大字段模板（涉及文件/缺陷根因/目标签名/分步指引/防御校验/DoD） | `dev_tasks_status` 扫描 |
-| **任务附属参考**（缺陷注册表/依赖图/文件地图/约束清单） | 对应任务单的**附录章节**（`## 附录 A/B/C/D`） | 内嵌于任务单尾部，执行器 checkout 后一站式可见 | 随任务单一并加载 |
-| **跨任务编码标准/强制规范** | `rules/<topic>.md` | 条目式强制规则，含代码示例与禁止项 | 执行器启动时**自动加载** |
-| **阶段开发路线图** | `docs/roadmap/<stage>.md`（完成后移入 `archive/`） | Epic 列表 + DoD 验收标准 | 手动查阅 |
-| **未来架构探索提案** | `future_roadmap/<topic>.md` | 长期演进方向 / RFC 构想 | 手动查阅 |
-| **架构设计文档** | `quench_stack.yaml` 中 `architecture_doc` 指定的路径 | 自由格式，SSOT 原则 | 项目配置引用 |
-
-### ② 纪律红线
-
-- **严禁在 `docs/` 根目录下创建无明确归类的孤岛文档**。若产出内容不属于上述任何一类，必须先向用户确认归位位置。
-- **编码标准不得放入任务单**：跨任务通用的编码规范（如时区处理、原子写入、FileLock 标准）属于 `rules/` 下的自动加载规则，不是任务单的六大字段之一。
-- **任务专属参考不得独立成文**：缺陷注册表、文件修改地图等仅服务于特定任务单的参考内容，必须作为该任务单的附录章节存在，禁止另建独立文件。
-
-### ③ 审查产物的归位流程
-
-当架构审查模型（Reviewer）完成审查后，其产出物按以下规则归位：
-1. **任务单**（含六大字段的改造指引）→ `docs/dev_tasks/`
-2. **附属参考**（缺陷表、依赖图、文件地图）→ 追加至对应任务单的附录章节
-3. **通用编码标准**（从审查中提炼的跨任务强制规范）→ `rules/<topic>.md`
-4. **路线图修订**（从审查中发现的阶段性改进）→ 更新 `docs/roadmap/` 或 `future_roadmap/` 对应文件
-
-
+### ② Pre-Commit Guard (Git 提交物理防线配合)
+- Pre-commit guard is enabled. Git commits modifying files outside the active task scope or without an active task will be physically blocked by `scripts/git_pre_commit_guard.py`.

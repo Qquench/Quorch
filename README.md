@@ -5,7 +5,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Python: >=3.11](https://img.shields.io/badge/python-3.11+-brightgreen.svg)](https://www.python.org/)
 [![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
-[![Tests: 100% Passing](https://img.shields.io/badge/tests-passing-success.svg)]()
+[![CI](https://github.com/lzen5150/Quorch/actions/workflows/ci.yml/badge.svg)](https://github.com/lzen5150/Quorch/actions/workflows/ci.yml)
 
 > **Dual-Model Orchestration & Task Governance Suite for AI-Augmented IDEs** (Antigravity, Cursor, Windsurf, Claude Code)  
 > *Strategic Frontier Reasoning (Reviewer) for Architecture & Conflict Resolution • Agile Runner for Lightweight Implementation & Automated DoD Verification.*

@@ -3,174 +3,97 @@ name: dev-tasks-workflow
 description: Guides how to adhere to the Quench DevTasks state machine lifecycle in development. Covers session startup protocols, six core field specifications, and task granularity guidelines. Use when inspecting task progress, checking out tasks, completing deliveries, or transitioning states. (指导如何在开发中遵循 Quench 任务状态机生命周期流转。涵盖会话启动协议、六大核心字段编写规范与任务粒度拆分原则。当需要查看任务进度、领取执行任务、完成交付或流转状态时使用。)
 ---
 
-# Quench 开发任务工作流指南 (Dev-Tasks Workflow)
+# Quench Dev-Tasks Workflow Guide (开发任务工作流指南)
 
-本指南面向日常开发执行者（Flash 主控或通用模型），指导如何在项目中遵循 Quench 任务治理标准高效开展工作。
+This guide directs everyday development runners (agile execution models) on how to operate efficiently within the Quench task governance framework.
 
 ---
 
-## 1. 会话启动协议 (Session Startup Protocol)
+## 1. Session Startup Protocol (会话启动协议)
 
-每个工作会话开始、或在完成一个阶段的开发后，模型必须按如下标准流程运转：
+At the beginning of each session or after completing a phase of development, the model must follow this standard protocol:
 
 ```
                     ┌─────────────────────────┐
-                    │ 调用 dev_tasks_status   │
+                    │  Call dev_tasks_status  │
                     └────────────┬────────────┘
                                  │
                  ┌───────────────┴───────────────┐
                  ▼                               ▼
-       [存在 🔨 执行中 任务]           [无 🔨 执行中 任务]
+     [Task In Progress 🔨]            [No Task In Progress]
                  │                               │
                  ▼                               ▼
-       提取该任务六大字段指引            检查是否有 ✅ 已确认 任务
-       继续执行未完成开发                ┌───────────────┴───────────────┐
-                                         ▼                               ▼
-                                  [有 ✅ 待执行任务]             [无待执行任务]
-                                         │                               │
-                                         ▼                               ▼
-                             调用 dev_tasks_checkout 领单       询问用户或提出新规划
-                             进入 🔨 执行中 状态                或调用 dev_tasks_archive
+     Extract instructions from        Check for [Confirmed ✅] tasks
+     the 6 core fields & resume       ┌───────────────┴───────────────┐
+                                      ▼                               ▼
+                            [Confirmed Tasks Exist]          [No Pending Work]
+                                      │                               │
+                                      ▼                               ▼
+                            Call dev_tasks_checkout          Ask developer or
+                            Enter [In Progress 🔨]           call dev_tasks_archive
 ```
 
-1. **第一步**：调用 `dev_tasks_status(workspace_root)` 查看所有任务列表与活跃任务。
-2. **第二步**：
-   - 若存在处于 `🔨 执行中` 的任务：立即聚焦于该任务，根据其【分步改造指引】继续执行，严禁跨任务做其他事情。
-   - 若无处于 `🔨 执行中` 的任务：
-     - 若存在 `✅ 已确认` 任务：调用 `dev_tasks_checkout(workspace_root)` 自动检出并领单。
-     - 若只有 `⬜ 待确认` 任务或任务指南不详：**必须停下工作并触发架构审查交接**！向用户输出【任务交接卡】，等待用户在新会话由高阶架构审查模型完成审查修订，切回确认后再行领单。
-    - 若全部任务已是 `✔️ 已完成`（或 `⏭️ 跳过`）：进入**全量完工交付与归档范式（§5）**，判定是否需要提醒人工验收，或在单测完备时主动询问用户更新设计文档并执行归档。
-
-### ★ 核心基准：双模型交接是默认标准流程 (Default Golden Standard)
-
-1. **起草完成后的默认终态**：
-   当执行模型生成全量为【⬜ 待确认】的任务单初稿后，**默认且必须立即主动输出【任务交接卡】**，明确引导用户另起新会话由用户自选的高阶架构审查模型开展深度架构与规范复核。
-2. **严禁越俎代庖**：
-   执行模型严禁在初稿生成后反问用户“是否由我直接开工”或主动准备领单。
-3. **唯一的豁免例外 (Explicit Exemption)**：
-   仅当用户在提示词中显式明确声明“本单无需架构审查 / 跳过双模型交接 / 直接由你执行”时，方可豁免交接流程，直接进入施工。
-4. **豁免时的【直通模式风险通知卡】(Bypass & Manual Steering Notice)**：
-   在获得用户豁免授权后，执行模型严禁静默开工，**必须首先输出标准直通通知卡**，使用原生 `> [!WARNING]` 渲染：
-   > [!WARNING]
-   > **已激活轻量直通模式（已跳过高阶架构审查）**
-   > 
-   > 本次任务已根据您的明确授权，**豁免双模型交叉复核与重型六大字段编写规范**：
-   > - **当前状态**：常规状态机强约束已降级，代码施工由**您直接主导驾驶（Human-in-the-loop）**；
-   > - **行为指引**：Agent 将严格遵循您的实时自然语言指令进行施工，不再主动打断要求起草长文；
-   > - **留痕保证**：变更完成后，Agent 将自动在 `CHANGELOG.md` 的 `[Unreleased / Hotfix]` 中以一句话微摘要完成留痕归档。
-5. **小修小补的极简留痕协议 (Micro-Patch Protocol)**：
-   在直通模式下进行的小修小补（如样式微调、文案订正、单点容错），豁免繁重的六大字段任务单编写。开发完成后，Agent 必须自动提取修改点并在 `CHANGELOG.md` 中追加一行记录（如 `- YYYY-MM-DD [Patch] 文件名: 变更说明`），保证“改得轻松，账目清晰”。
-6. **交接卡排版硬性规范 (Presentation Rule)**：
-   必须直接使用 GitHub Flavored Markdown 原生引用块（如 `> [!NOTE]`、`> [!IMPORTANT]` 或 `> [!WARNING]`）渲染，内部通过粗体和无序列表条目化组织。**绝对严禁使用 ASCII 边框画图（如 `┌─┐`）**，**绝对严禁将交接卡套在 ```` ```markdown ```` 围栏代码块内做成展示板**。
+1. **Step 1**: Invoke `dev_tasks_status(workspace_root)` to inspect queue status and active tasks.
+2. **Step 2**:
+   - If an `[In Progress] / 🔨 执行中` task exists: Immediately focus on it. Follow its `[Step-by-Step Instructions]` without deviation.
+   - If no task is in progress:
+     - If `[Confirmed] / ✅ 已确认` tasks exist: Call `dev_tasks_checkout(workspace_root)` to checkout the next item.
+     - If only `[Pending] / ⬜ 待确认` or `[Rework] / 🔄 需返工` tasks exist: **Halt and present a Handoff Card** to hand off review to the Strategic Reviewer.
+     - If all tasks are `[Completed] / ✔️ 已完成` (or `[Skipped] / ⏭️ 跳过`): Proceed to **Completion & Archiving (§5)**.
 
 ---
 
-## 2. 任务六大字段编写规范 (Six Core Fields)
+## 2. The Six Core Fields Standard (任务六大字段编写规范)
 
-每个任务必须且仅能包含以下标准的六大二级或三级标题段落，Schema 校验器会严格审计各字段的完整性：
+Every DevTask must contain the standard six core fields (bilingual headings supported):
 
-### ① 【涉及文件】 (Affected Files)
-- **格式要求**：必须放置在三反引号代码块（` ``` `）中，每行一个文件。
-- **操作前缀**：行首支持 `[MODIFY]`、`[NEW]`、`[DELETE]`、`[RENAME]` 标识。
-- **说明**：PreToolUse 钩子会将这些文件加入白名单，模型修改范围外的文件会被安全拦截。
-```markdown
-#### 【涉及文件】
+### ① `[Affected Files]` (`#### [Affected Files]` / `#### 【涉及文件】`)
+- **Format**: Fenced code block (` ``` `) with one path per line.
+- **Prefixes**: `[MODIFY]`, `[NEW]`, `[DELETE]`, `[RENAME]`.
+- **Enforcement**: PreToolUse hook whitelists these files; unmanaged file edits are intercepted.
 
-```
-[MODIFY] backend/api/auth.py
-[NEW] backend/services/token_service.py
-[MODIFY] backend/tests/test_auth.py
-```
-```
+### ② `[Root Cause & Target]` (`#### [Root Cause & Target]` / `#### 【缺陷根因与修改目标】`)
+- **Format**: Concise statement of underlying root cause and intended engineering objective.
 
-### ② 【缺陷根因与修改目标】 (Root Cause & Target)
-- **格式要求**：分别清晰说明为什么需要本次修改（根因/痛点）以及修改后应达到的明确业务目标。
-```markdown
-#### 【缺陷根因与修改目标】
+### ③ `[Type Contracts]` (`#### [Type Contracts]` / `#### 【目标签名与类型契约】`)
+- **Format**: Exact function signatures, interfaces, Pydantic schemas, or data models.
 
-根因：Token 过期判定使用本地时区而非 UTC，导致跨夏令时或海外网关访问时认证异常失败。
-目标：统一后端时间戳规范为 UTC ISO-8601，并在 Token 校验模块中增加宽限期校验。
-```
+### ④ `[Step-by-Step Instructions]` (`#### [Step-by-Step Instructions]` / `#### 【分步改造指引】`)
+- **Format**: Numbered sequential action steps ordered by dependency.
 
-### ③ 【目标签名与类型契约】 (Target Signatures & Contracts)
-- **格式要求**：列出核心函数、类、数据模型或接口的签名、参数类型及返回值规范。
-```markdown
-#### 【目标签名与类型契约】
+### ⑤ `[Defensive & Edge Checks]` (`#### [Defensive & Edge Checks]` / `#### 【防御与边缘校验】`)
+- **Format**: Bulleted list of bounds, null-checks, race condition defenses, and fallback behaviors.
 
-```python
-def verify_access_token(token_str: str, grace_seconds: int = 30) -> TokenPayload:
-    """解析并校验 JWT Token，支持宽限期。若无效则抛出 InvalidTokenError。"""
-```
-```
-
-### ④ 【分步改造指引】 (Step-by-Step Transformation)
-- **格式要求**：结构化步骤说明（编号清单），严格按依赖层级与实现顺序编排。
-```markdown
-#### 【分步改造指引】
-
-1. 在 `backend/services/token_service.py` 中引入 `timezone.utc` 并重写时间解析逻辑。
-2. 修改 `backend/api/auth.py`，注入 `verify_access_token` 调用。
-3. 在 `backend/tests/test_auth.py` 中补充跨时区与过期临界点用例。
-```
-
-### ⑤ 【防御与边缘校验】 (Defense & Edge Cases)
-- **格式要求**：列出潜在异常、并发、空指针、边界输入等极端情况的防御对策。
-```markdown
-#### 【防御与边缘校验】
-
-- 空字符串或格式不正确的 Token：直接抛出认证异常，严禁泄露内部堆栈。
-- 签名密钥未配置：启动初始化时报错阻断，禁止降级为弱秘钥。
-- 时间回拨：检测时间戳单调性，拒绝时间倒流的畸形报文。
-```
-
-### ⑥ 【DoD 验证命令】 (Definition of Done)
-- **格式要求**：必须放置在可执行的代码块中，包含清晰的终端命令（单测命令或自动化脚本）。开发完成后必须在终端实际运行并全部通过！
-```markdown
-#### 【DoD 验证命令】
-
-```bash
-pytest backend/tests/test_auth.py -v
-```
-```
+### ⑥ `[DoD Verification Commands]` (`#### [DoD Verification Commands]` / `#### 【DoD 验证命令】`)
+- **Format**: Fenced executable code block containing verifiable terminal commands that must pass 100%.
 
 ---
 
-## 3. 任务粒度拆分原则 (Task Granularity)
+## 3. Task Granularity (任务粒度拆分原则)
 
-- **单一职责原则 (Single Responsibility)**：单个任务应聚焦于一个明确的模块改动或缺陷修复。若涉及“重构整个后端”，应拆分为“数据模型改造”、“服务层适配”、“API路由升级”等系列子任务。
-- **可验证性 (Testability)**：每个任务必须有明确的自动化 DoD 验证命令，不能写“人工肉眼观察”或无法执行的空指令。
-- **改动范围可控 (File Scoping)**：单个任务涉及的文件数通常建议在 1~5 个之间。范围过大容易导致上下文超出或难以回滚。
+- **Single Responsibility (单一职责)**: Focus each task on a single coherent module or bug fix.
+- **Testability (可验证性)**: Every task must feature an automated DoD verification command.
+- **Controlled Scope (改动范围可控)**: Aim for 1–5 files per task to keep contexts manageable and rollback easy.
 
 ---
 
-## 4. MCP 工具调用速查 (MCP Tool Cheatsheet)
+## 4. MCP Tools Cheatsheet (MCP 工具调用速查)
 
-| 工具名称 | 作用 | 典型使用时机 |
+| Tool Name | Purpose | Usage Timing |
 | :--- | :--- | :--- |
-| `dev_tasks_status` | 查询任务状态概览、活跃任务与批次分布 | 会话开始、批次领单前后 |
-| `dev_tasks_checkout` | 领取任务（支持按序或定向 `task_id` 领单） | 领取当前批次已确认任务，自动标记 `🔨 执行中` |
-| `dev_tasks_complete` | 完成任务，置为 `✔️ 已完成` | DoD 验证通过后标记完成并审计单测 |
-| `dev_tasks_propose` | 提交新任务提案（`⬜ 待确认`） | 规划新需求、架构审查输出规范任务单 |
-| `dev_tasks_confirm` | 调整任务状态（`confirm`/`rework`/`skip`/`revoke`） | 分批确认开工、或将粗糙任务标记 `🔄 需返工` 交给审查模型重修 |
-| `dev_tasks_escalate` | 升级任务触发架构审查交接卡 | 遇到复杂冲突、重大架构重构或难以决策 |
-| `dev_tasks_archive` | 归档已闭环的任务单并写入 CHANGELOG | 当前任务集全部通过 DoD 闭环后 |
+| `dev_tasks_status` | Query queue status, active task, and metrics | Session start, before/after checkouts |
+| `dev_tasks_checkout` | Checkout task to `[In Progress]` | Claim confirmed tasks |
+| `dev_tasks_complete` | Mark task as `[Completed]` with DoD proof | After DoD test verification |
+| `dev_tasks_propose` | Propose new task as `[Pending]` | Planning new tasks or architectural reviews |
+| `dev_tasks_confirm` | Transition task state (`confirm`/`rework`/`skip`) | Confirming batches or requesting rework |
+| `dev_tasks_escalate` | Trigger Reviewer handoff card | Complex impasses or structural refactoring |
+| `dev_tasks_archive` | Archive closed tasks and update changelog | All tasks in file closed |
 
 ---
 
-## 5. 全量完工交付与归档闭环范式 (Completion & Archiving Protocol)
+## 5. Completion & Archiving Protocol (完工交付与归档闭环)
 
-当任务单内全部任务均已达成 `✔️ 已完成`（`all_completed == True`）时，执行者必须按如下两路分支主动向用户提出交付决策：
+When all tasks in a DevTask file are `[Completed] / ✔️ 已完成`:
 
-### 分支 A：包含人工体验/视觉/交互清单（如 UI、设备动画、硬件通信）
-1. **呈现验收清单**：从任务单中提取【人工视觉/交互验证清单】，分条目清晰向用户汇报。
-2. **主动提供检验支持**：
-   - 提示用户在本地浏览器/终端进行实际上手体验；
-   - 或询问用户：“*是否需要由我启动浏览器自动化工具（如 browser_subagent）先行录屏/截屏自检？*”
-3. **用户满意后封板**：待用户体验无异议后，询问是否同步系统设计手册，并执行 `dev_tasks_archive`。
-
-### 分支 B：纯自动化单测完备保障（如后端业务逻辑、数据处理、算法修复）
-1. **汇报测试完备性**：列出所有通过的自动化单测、覆盖率与 DoD 执行输出。
-2. **主动询问更新与归档**：
-   - “*自动化测试已全部绿灯通过，是否需要我同步更新系统设计文档（`quench_stack.yaml` 中的 `architecture_doc`），并调用 `dev_tasks_archive` 完成正式封板归档？*”
-3. **执行归档**：在用户确认后，调用 `dev_tasks_archive(workspace_root, task_file)`，自动移入 `archive/` 并追加 `CHANGELOG.md`。
-
+1. **Subjective / Visual / Hardware Tasks**: Provide an interactive inspection checklist for the developer.
+2. **Automated Logic / Test-Covered Tasks**: Report full passing test results and propose archiving via `dev_tasks_archive`.
