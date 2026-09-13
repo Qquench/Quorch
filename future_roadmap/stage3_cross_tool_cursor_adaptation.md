@@ -16,7 +16,44 @@
 | **人机交互决策弹窗** | ✔️ 原生 Ask Modal | ❌ 无弹窗 API | **标准终端交互**：CLI 退出码 (Exit Code 0/1) 与红字警示指引 |
 | **常驻系统提示词注入** | ✔️ rules/*.md | ✔️ `.cursorrules` / `.cursor/rules/*.mdc` | **自动转换导出**：将纪律手册转换为 Cursor 原生 Rules |
 
-### 1.2 Cursor 治理“三板斧”架构
+### 1.2 全生态通用架构：单核多适配器模式 (Core-Adapter Architecture)
+
+为避免因适配不同 IDE 而维护多个分叉版本，系统采用 **“单通用内核 + 差异化适配器外壳”** 架构：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                      【15% 差异接入层】不同 IDE 专属适配器                          │
+│                                                                                 │
+│   Antigravity            Cursor                 Windsurf          Claude Code   │
+│   - plugins.json         - .cursor/mcp.json     - windsurf/mcp    - settings    │
+│   - hooks.json (拦截)    - .cursorrules (规则)  - .windsurfrules  - CLAUDE.md   │
+│   - 交互 Ask 弹窗        - Git Pre-commit 兜底  - CLI 退出码       - 终端交互   │
+└────────────────────────────────────────┬────────────────────────────────────────┘
+                                         │ 标准 JSON-RPC / MCP 协议调用
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                      【85% 通用内核】同一套 Python 代码 (Zero-Dep)                │
+│                                                                                 │
+│   1. FastMCP 服务端 (server.py: 8 个原子工具完全通用，输入输出全为标准 JSON)       │
+│   2. 物理状态机引擎 (state_machine.py: Markdown 解析、合法性流转、FileLock 排他锁) │
+│   3. 六大字段强校验 (schema_validator.py: 契约审计、防伪代码越界)                │
+│   4. 双轨管控边界引擎 (project_config.py: 识别生产代码 vs 免管文档)              │
+│   5. 增量 CHANGELOG 写入器 (changelog_writer.py)                                │
+│   6. Git 物理审计 (基于项目自身的 git status / git diff 审计单测变更)           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 架构核心决断：
+1. **坚决不搞分支分叉 (Zero-Fork Principle)**：
+   核心状态机与 MCP 服务端 100% 共享，拒绝为不同 IDE 维护不同代码分支。
+2. **通过安装脚手架实现多外壳渲染**：
+   通过 `init_project.py --ide cursor|antigravity|all`，一行命令为项目生成对应 IDE 的配置与规则文件。
+3. **团队异构协同红利 (Team Heterogeneity)**：
+   架构师使用 Antigravity 进行任务拆解与 Opus 深度审查；前端开发使用 Cursor 领单施工与高速补全。两者操作同一份 Git 仓库中的 `docs/dev_tasks/`，共享同一份状态机与任务生命周期，实现跨工具无缝协作。
+
+### 1.3 Cursor 治理“三板斧”与物理兜底防线
+
+针对 Cursor 缺少写文件实时拦截能力的现实，采用分层防线实现等价闭环：
 
 ```
                      ┌──────────────────────────────────────────────┐

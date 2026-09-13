@@ -1,6 +1,6 @@
-# Quench MCP 统一开发工具库 (Quench MCP Registry)
+# Quench DevTasks MCP — 双模型开发任务治理套件 (Quench DevTasks Orchestrator)
 
-> 本目录为 **Quench 标的体系** 通用 Antigravity IDE Plugin 根目录。包含面向 Quench 项目矩阵（JJW_MES 及后续衍生项目）的双模型开发任务治理工具集。
+> 本目录为 **Quench 标的体系** 下专用于双模型开发任务治理、代码越界拦截与流程自动化的 MCP 服务与 Antigravity IDE Plugin 根目录（插件标识：`quench-dev-tasks`）。独立于 Quench 体系后续可能衍生的其他领域 MCP（如工业 PLC 通信、CAD 数据等）。
 
 ---
 
