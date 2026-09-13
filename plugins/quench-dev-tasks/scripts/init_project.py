@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 
 # Ensure UTF-8 output on Windows
@@ -18,12 +19,133 @@ if sys.version_info >= (3, 7):
         pass
 
 
-def init_project(project_root: str, project_name: str | None = None) -> None:
+def diagnose_environment(project_root: str) -> dict:
+    """全面诊断目标项目的治理环境就绪状态。
+    返回结构: {
+        "is_git_repo": bool,
+        "has_quench_stack": bool,
+        "has_plugins_json": bool,
+        "python_valid": bool,
+        "dependencies_ready": bool,
+        "issues": list[str],
+        "suggestions": list[str]
+    }
+    """
+    root = os.path.abspath(project_root)
+    issues: list[str] = []
+    suggestions: list[str] = []
+
+    # 1. 检查目标目录是否存在
+    if not os.path.isdir(root):
+        issues.append(f"目标项目根目录不存在: {root}")
+        suggestions.append("请提供已存在的项目目录路径")
+        return {
+            "is_git_repo": False,
+            "has_quench_stack": False,
+            "has_plugins_json": False,
+            "python_valid": sys.version_info >= (3, 8),
+            "dependencies_ready": False,
+            "issues": issues,
+            "suggestions": suggestions,
+        }
+
+    # 2. 检查 Git 仓库有效性
+    is_git_repo = False
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0 and "true" in (res.stdout or "").strip().lower():
+            is_git_repo = True
+        else:
+            issues.append("目标目录不是 Git 仓库（缺少 .git 目录）")
+            suggestions.append("在项目根目录执行 'git init' 初始化版本控制")
+    except FileNotFoundError:
+        issues.append("git 命令未找到，请安装 Git 或将其添加到系统 PATH")
+        suggestions.append("安装 Git 并配置系统环境变量 PATH: https://git-scm.com/")
+    except Exception as e:
+        issues.append(f"Git 检测失败: {e}")
+        suggestions.append("请确保 Git 已安装并在项目目录中可用")
+
+    # 3. 检查 .agents/quench_stack.yaml
+    quench_stack_path = os.path.join(root, ".agents", "quench_stack.yaml")
+    has_quench_stack = os.path.isfile(quench_stack_path)
+    if not has_quench_stack:
+        issues.append("缺少 Quench 核心配置文件: .agents/quench_stack.yaml")
+        suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root}' 初始化配置文件")
+
+    # 4. 检查 .agents/plugins.json
+    plugins_json_path = os.path.join(root, ".agents", "plugins.json")
+    has_plugins_json = os.path.isfile(plugins_json_path)
+    if not has_plugins_json:
+        issues.append("缺少插件注册文件: .agents/plugins.json")
+        suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root}' 注册插件")
+
+    # 5. 检查 Python 版本
+    python_valid = sys.version_info >= (3, 8)
+    if not python_valid:
+        py_ver_str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        issues.append(f"当前 Python 版本 ({py_ver_str}) 过低，推荐 Python >= 3.8")
+        suggestions.append("请升级 Python 运行环境至 3.8 或更高版本")
+
+    # 6. 检查关键依赖库
+    missing_deps = []
+    for dep in ["fastmcp", "yaml", "filelock"]:
+        try:
+            __import__(dep)
+        except ImportError:
+            missing_deps.append(dep)
+
+    dependencies_ready = (len(missing_deps) == 0)
+    if not dependencies_ready:
+        issues.append(f"缺少关键 Python 依赖库: {', '.join(missing_deps)}")
+        suggestions.append(f"在当前运行环境中执行: pip install {' '.join(missing_deps)}")
+
+    return {
+        "is_git_repo": is_git_repo,
+        "has_quench_stack": has_quench_stack,
+        "has_plugins_json": has_plugins_json,
+        "python_valid": python_valid,
+        "dependencies_ready": dependencies_ready,
+        "issues": issues,
+        "suggestions": suggestions,
+    }
+
+
+def print_diagnostic_report(diag: dict, project_root: str) -> None:
+    root = os.path.abspath(project_root)
+    print("=" * 60)
+    print(f"🏥 Quench DevTasks 治理环境体检报告: {root}")
+    print("=" * 60)
+    print(f"• Git 仓库有效性:   {'✅ 是' if diag['is_git_repo'] else '❌ 否'}")
+    print(f"• 核心配置文件:     {'✅ 已存在 (.agents/quench_stack.yaml)' if diag['has_quench_stack'] else '❌ 缺失'}")
+    print(f"• 插件注册清单:     {'✅ 已就绪 (.agents/plugins.json)' if diag['has_plugins_json'] else '❌ 缺失'}")
+    print(f"• Python 运行环境:  {'✅ 合格 (>= 3.8)' if diag['python_valid'] else '❌ 版本过低'}")
+    print(f"• 关键依赖库就绪:   {'✅ 全部就绪 (fastmcp, yaml, filelock)' if diag['dependencies_ready'] else '❌ 缺失部分依赖'}")
+    print("-" * 60)
+    if not diag["issues"]:
+        print("🎉 恭喜！当前项目治理环境完全就绪，可无缝使用 Quench DevTasks。")
+    else:
+        print("⚠️ 诊断发现以下潜在问题与建议:")
+        for idx, issue in enumerate(diag["issues"], 1):
+            sugg = diag["suggestions"][idx - 1] if idx - 1 < len(diag["suggestions"]) else ""
+            print(f"  {idx}. [问题] {issue}")
+            if sugg:
+                print(f"     [建议] {sugg}")
+    print("=" * 60)
+
+
+def init_project(project_root: str, project_name: str | None = None, force: bool = False) -> None:
     """在 project_root 创建 .agents/plugins.json 和 .agents/quench_stack.yaml 模板。
 
     Args:
         project_root: 目标项目根目录路径。
         project_name: 项目名称，若未提供则默认使用 project_root 的文件夹名称。
+        force: 是否强制覆盖已有 quench_stack.yaml 配置文件。
     """
     root = os.path.abspath(project_root)
     if not os.path.isdir(root):
@@ -31,6 +153,24 @@ def init_project(project_root: str, project_name: str | None = None) -> None:
         sys.exit(1)
 
     effective_name = project_name or os.path.basename(root)
+
+    # 0. 检查 Git 仓库（友好提示但不强阻断）
+    is_git = False
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0 and "true" in (res.stdout or "").strip().lower():
+            is_git = True
+    except Exception:
+        pass
+
+    if not is_git:
+        print("⚠️ 提示: 目标目录暂未初始化为 Git 仓库。建议初始化完成后运行 'git init' 以获得完整的规范守卫能力。")
 
     # 1. 查找模板文件路径
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -90,9 +230,11 @@ def init_project(project_root: str, project_name: str | None = None) -> None:
 
     # 4. 创建 .agents/quench_stack.yaml
     stack_yaml_path = os.path.join(agents_dir, "quench_stack.yaml")
-    if os.path.isfile(stack_yaml_path):
-        print("ℹ️ .agents/quench_stack.yaml 已存在，跳过覆盖。")
+    if os.path.isfile(stack_yaml_path) and not force:
+        print("ℹ️ .agents/quench_stack.yaml 已存在，跳过覆盖。如需更新请使用版本迁移检查或配合 --force 覆盖。")
     else:
+        if os.path.isfile(stack_yaml_path) and force:
+            print("⚠️ 检测到 --force 参数，正在覆盖已有 .agents/quench_stack.yaml...")
         with open(template_path, "r", encoding="utf-8") as f:
             template_content = f.read()
 
@@ -145,11 +287,13 @@ def init_project(project_root: str, project_name: str | None = None) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Quench DevTasks 项目接入初始化脚本：为目标项目生成 .agents 插件注册与配置清单。"
+        description="Quench DevTasks 项目接入初始化脚本：为目标项目生成 .agents 插件注册与配置清单，或诊断环境就绪状态。"
     )
     parser.add_argument(
         "project_root",
-        help="目标项目根目录路径（必须是已存在的目录）",
+        nargs="?",
+        default=".",
+        help="目标项目根目录路径（默认当前目录）",
     )
     parser.add_argument(
         "--name",
@@ -157,9 +301,25 @@ def main():
         default=None,
         help="项目名称（可选，默认使用目标目录文件夹名）",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="健康体检模式：全面诊断目标项目的治理环境就绪状态",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="强制覆盖已有的 quench_stack.yaml（默认不覆盖）",
+    )
 
     args = parser.parse_args()
-    init_project(args.project_root, args.project_name)
+
+    if args.check:
+        diag = diagnose_environment(args.project_root)
+        print_diagnostic_report(diag, args.project_root)
+        return
+
+    init_project(args.project_root, args.project_name, force=args.force)
 
 
 if __name__ == "__main__":

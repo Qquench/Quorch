@@ -187,7 +187,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_project_config.py -v
 
 ---
 
-### 任务 3 ✅ 已确认 — 全局脚手架轻量化与环境自检优化 (Epic 1.3)
+### 任务 3 ✔️ 已完成 — 全局脚手架轻量化与环境自检优化 (Epic 1.3)
 
 #### 【涉及文件】
 
