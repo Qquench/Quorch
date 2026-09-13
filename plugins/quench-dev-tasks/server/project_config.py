@@ -6,11 +6,21 @@ from __future__ import annotations
 import os
 import sys
 import fnmatch
+import re
+import tempfile
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 import yaml
+
+CURRENT_SCHEMA_VERSION = "1.0"
+
+_DEFAULT_SCHEMA_VERSION_PATCH = 'schema_version: "1.0"\n'
+_DEFAULT_FAST_TRACK_PATCH = """fast_track_rules:
+  allow_untracked_patterns: []
+"""
+
 
 DEFAULT_UNMANAGED_EXTENSIONS = {
     # 文档类
@@ -82,6 +92,7 @@ def _match_glob(target_rel: str, pattern: str) -> bool:
 class QuenchStackConfig:
     workspace_root: str
     project_name: str
+    schema_version: str = "1.0"
     dev_tasks_dir: str = "docs/dev_tasks"
     archive_dir: str = "docs/dev_tasks/archive"
     test_runner: str | None = None
@@ -189,6 +200,92 @@ class QuenchStackConfig:
         return True
 
 
+def migrate_config_if_needed(yaml_path: str, data: dict) -> Tuple[dict, bool]:
+    """纯文本级追加缺失字段，零注释破坏。
+
+    读取文件原文本，用正则检测缺失的顶层字段，在文件末尾追加补丁文本块。
+    使用 tempfile + os.replace 原子写回。
+    返回: (migrated_data, has_changes)
+    """
+    if not os.path.isfile(yaml_path):
+        return data, False
+
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+    except Exception:
+        return data, False
+
+    # 剥离 UTF-8 BOM
+    clean_text = raw_text.lstrip("\ufeff")
+    if not clean_text.strip():
+        raise ValueError(f"配置文件为空或仅包含空白字符: {yaml_path}")
+
+    current_ver = str(data.get("schema_version", "")).strip()
+    if current_ver:
+        try:
+            # 若配置版本高于当前支持版本，不降级，仅发出警告
+            if float(current_ver) > float(CURRENT_SCHEMA_VERSION):
+                warnings.warn(
+                    f"配置文件版本 '{current_ver}' 高于当前系统支持版本 '{CURRENT_SCHEMA_VERSION}'，跳过自动降级迁移。",
+                    stacklevel=2,
+                )
+                return data, False
+        except (ValueError, TypeError):
+            pass
+
+    has_changes = False
+    patch_blocks: list[str] = []
+
+    # 1. 检查 schema_version
+    if not re.search(r"^\s*schema_version\s*:", clean_text, flags=re.MULTILINE):
+        patch_blocks.append(_DEFAULT_SCHEMA_VERSION_PATCH.strip("\n"))
+        data["schema_version"] = CURRENT_SCHEMA_VERSION
+        has_changes = True
+
+    # 2. 检查 fast_track_rules
+    if not re.search(r"^\s*fast_track_rules\s*:", clean_text, flags=re.MULTILINE):
+        patch_blocks.append(_DEFAULT_FAST_TRACK_PATCH.strip("\n"))
+        data["fast_track_rules"] = {"allow_untracked_patterns": []}
+        has_changes = True
+
+    if not has_changes:
+        return data, False
+
+    updated_text = clean_text
+    if not updated_text.endswith("\n"):
+        updated_text += "\n"
+    for pb in patch_blocks:
+        updated_text += "\n" + pb + "\n"
+
+    # 原子写回（使用 tempfile + os.replace）
+    yaml_dir = os.path.dirname(os.path.abspath(yaml_path))
+    temp_file = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=yaml_dir, delete=False, encoding="utf-8") as tf:
+            temp_file = tf.name
+            tf.write(updated_text)
+        os.replace(temp_file, yaml_path)
+    except OSError as e:
+        warnings.warn(f"自动升级配置文件写回失败（可能是只读文件系统）: {e}，将在内存中维持升级状态。", stacklevel=2)
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
+        return data, False
+
+    # 重新从更新文本解析 data 保持完全一致
+    try:
+        reloaded = yaml.safe_load(updated_text)
+        if isinstance(reloaded, dict):
+            data = reloaded
+    except Exception:
+        pass
+
+    return data, True
+
+
 def load_project_config(workspace_root: str) -> QuenchStackConfig:
     """从 workspace_root/.agents/quench_stack.yaml 加载配置。
 
@@ -208,9 +305,25 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            raw_content = f.read()
+    except Exception as e:
+        raise ValueError(f"读取 {yaml_path} 失败: {e}") from e
+
+    # 剥离 UTF-8 BOM
+    raw_content = raw_content.lstrip("\ufeff")
+    if not raw_content.strip():
+        raise ValueError(f"配置文件为空或仅包含空白字符: {yaml_path}")
+
+    try:
+        data = yaml.safe_load(raw_content) or {}
     except yaml.YAMLError as e:
         raise ValueError(f"解析 {yaml_path} 失败（YAML 语法错误）: {e}") from e
+
+    if not isinstance(data, dict):
+        raise ValueError(f"配置文件格式无效（应为 YAML 字典键值对）: {yaml_path}")
+
+    # 执行向后兼容自动升级迁移
+    data, _ = migrate_config_if_needed(yaml_path, data)
 
     # 必填项校验
     project_name = data.get("project_name")
@@ -237,6 +350,7 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     return QuenchStackConfig(
         workspace_root=root,
         project_name=project_name,
+        schema_version=data.get("schema_version", CURRENT_SCHEMA_VERSION),
         dev_tasks_dir=data.get("dev_tasks_dir", "docs/dev_tasks"),
         archive_dir=data.get("archive_dir", "docs/dev_tasks/archive"),
         test_runner=data.get("test_runner"),
@@ -252,3 +366,4 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 def resolve_path(config: QuenchStackConfig, field_name: str) -> str:
     """辅助函数：解析绝对路径"""
     return config.resolve_path(field_name)
+

@@ -35,3 +35,5 @@ governance_scope:
     - "docs/**"
     - "future_roadmap/**"
     - "*.md"
+
+schema_version: "1.0"

@@ -99,7 +99,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_hooks.py -v
 
 ---
 
-### 任务 2 ✅ 已确认 — 配置文件版本管理、平滑升级迁移与模板项目中立化 (Epic 1.6)
+### 任务 2 ✔️ 已完成 — 配置文件版本管理、平滑升级迁移与模板项目中立化 (Epic 1.6)
 
 #### 【涉及文件】
 
