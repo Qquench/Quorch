@@ -88,54 +88,55 @@
 ### Epic 3.1: 抽象适配器架构层 (对应当前活跃任务 3)
 - **背景**：使治理引擎不再直接写死 Antigravity 报文格式，支持灵活扩展不同客户端。
 - **任务项**：
-  - [ ] 在 `plugins/quench-dev-tasks/server/` 下新建 `adapters/` 目录与 `__init__.py` 包标识文件；
-  - [ ] 编写 `adapters/base_adapter.py`，定义分离的双层抽象（架构审查改进）：
+  - [x] 在 `plugins/quench-dev-tasks/server/` 下新建 `adapters/` 目录与 `__init__.py` 包标识文件；
+  - [x] 编写 `adapters/base_adapter.py`，定义分离的双层抽象（架构审查改进）：
     - `EnvironmentDetector`（静态类）：`detect(context) -> EnvironmentType`，一次性检测并缓存结果；
     - `EnvironmentAdapter`（抽象基类）：`extract_session_id`、`format_decision`、`supports_interactive_ask`；
-  - [ ] 实现 `adapters/antigravity_adapter.py`：继承并封装现有的 JSON Payload 与 Ask Modal 输出；
-  - [ ] 实现 `adapters/cursor_adapter.py`：针对 Cursor `.cursor/mcp.json` 配置格式与终端文本输出；
-  - [ ] 实现 `adapters/generic_cli_adapter.py`（架构审查改进，从原 `cursor_claude_adapter.py` 拆分）：适用于 Claude Code、Windsurf、裸 Git CLI 等通用终端场景，支持标准退出码。
+  - [x] 实现 `adapters/antigravity_adapter.py`：继承并封装现有的 JSON Payload 与 Ask Modal 输出；
+  - [x] 实现 `adapters/cursor_adapter.py`：针对 Cursor `.cursor/mcp.json` 配置格式与终端文本输出；
+  - [x] 实现 `adapters/generic_cli_adapter.py`（架构审查改进，从原 `cursor_claude_adapter.py` 拆分）：适用于 Claude Code、Windsurf、裸 Git CLI 等通用终端场景，支持标准退出码。
 
 ### Epic 3.2: Cursor 一键配置与 MCP 接入支持
 - **背景**：降低 Cursor 用户的配置门槛。
 - **任务项**：
-  - [ ] 在 `scripts/init_project.py` 中新增 `--cursor` 选项；
-  - [ ] 自动在目标项目根目录下生成或更新 Cursor MCP 配置文件：
+  - [x] 在 `scripts/init_project.py` 中新增 `--cursor` 选项；
+  - [x] 自动在目标项目根目录下生成或更新 Cursor MCP 配置文件：
     - `.cursor/mcp.json`（自动注册 `quench-dev-tasks` 命令）；
-  - [ ] 验证 Cursor 内置 Agent 对 `dev_tasks_status`、`dev_tasks_checkout` 等工具的调用与参数回传稳定性。
+  - [x] 验证 Cursor 内置 Agent 对 `dev_tasks_status`、`dev_tasks_checkout` 等工具的调用与参数回传稳定性。
 
 ### Epic 3.3: 自动生成 `.cursorrules` 与 MDC 规范文件
 - **背景**：将常驻纪律手册注入 Cursor 的系统 Prompt 中。
 - **任务项**：
-  - [ ] 编写规则转换器：将 `rules/dev-tasks-discipline.md` 提取并精简为适合 Cursor 上下文的 Prompt；
-  - [ ] 在项目初始化时自动输出：
+  - [x] 编写规则转换器：将 `rules/dev-tasks-discipline.md` 提取并精简为适合 Cursor 上下文的 Prompt；
+  - [x] 在项目初始化时自动输出：
     - `.cursorrules`（兼容旧版 Cursor）；
     - `.cursor/rules/quench-dev-tasks.mdc`（兼容最新版 Cursor MDC 规范，设置 `alwaysApply: true`）；
-  - [ ] 明确指引 Cursor Agent：未检出任务前严禁写生产代码，涉及文件超出时主动提醒开发者。
+  - [x] 明确指引 Cursor Agent：未检出任务前严禁写生产代码，涉及文件超出时主动提醒开发者。
 
 ### Epic 3.4: 物理硬防线——Git Pre-commit Hook 守护脚本
 - **背景**：在无 PreToolUse 的环境下，将物理拦截防线平移至代码提交点。
 - **任务项**：
-  - [ ] 编写轻量独立守卫脚本 `scripts/git_pre_commit_guard.py`（**零依赖约束**（架构审查新增）：仅使用 Python 标准库，严禁导入 FastMCP、filelock 或任何第三方库，确保在任意 Python 3.7+ 环境下无需安装即可运行）；
-  - [ ] 支持通过 `python git_pre_commit_guard.py --install [project_path]` 一键安装至目标项目的 `.git/hooks/pre-commit`；
-  - [ ] 核心拦截逻辑：
+  - [x] 编写轻量独立守卫脚本 `scripts/git_pre_commit_guard.py`（**零依赖约束**（架构审查新增）：仅使用 Python 标准库，严禁导入 FastMCP、filelock 或任何第三方库，确保在任意 Python 3.7+ 环境下无需安装即可运行）；
+  - [x] 支持通过 `python git_pre_commit_guard.py --install [project_path]` 一键安装至目标项目的 `.git/hooks/pre-commit`；
+  - [x] 核心拦截逻辑：
     1. 通过 `git rev-parse --show-toplevel` 定位工作区根目录；
     2. 直接解析 `docs/dev_tasks/*.md` 文件查找 `🔨 执行中` 的任务单（不依赖 MCP Server）；
     3. 执行 `git diff --cached --name-only` 获取本次待提交文件；
     4. 校验是否有超出任务单【涉及文件】白名单的代码文件（自动排除文档/素材类文件）；
     5. 若存在越界改动或处于未检出状态，直接 `exit 1` 阻断提交，并打印红字告警与整改指引；
     6. 校验若修改了核心逻辑，是否配套提交了测试目录变更；
-  - [ ] **双拦截避免逻辑**（架构审查新增）：检测 `.agents/plugins.json` 是否存在且包含 `quench-dev-tasks` 插件注册（表明 Antigravity IDE 已接管拦截），若是则降级为 warning-only 模式（打印但不 `exit 1`），将拦截权交给更早生效的 PreToolUse Hook；
-  - [ ] 编写 `test_pre_commit_guard.py` 验证 Pre-commit 拦截、豁免与双拦截降级逻辑。
+  - [x] **双拦截避免逻辑**（架构审查新增）：检测 `.agents/plugins.json` 是否存在且包含 `quench-dev-tasks` 插件注册（表明 Antigravity IDE 已接管拦截），若是则降级为 warning-only 模式（打印但不 `exit 1`），将拦截权交给更早生效的 PreToolUse Hook；
+  - [x] 编写 `test_pre_commit_guard.py` 验证 Pre-commit 拦截、豁免与双拦截降级逻辑。
 
 ### Epic 3.5: 开发者友好 CLI 命令行工具 (Quench CLI)
 - **背景**：让不打开 AI 窗口的人类开发者也能在终端中方便地巡检与流转任务。
 - **任务项**：
-  - [ ] 提供统一 CLI 入口（例如 `python -m quench` 或控制台脚本 `quench`）：
+  - [x] 提供统一 CLI 入口（例如 `python -m quench` 或控制台脚本 `quench`）：
     - `quench status`：终端富文本展示当前任务分布与活跃队列；
     - `quench init <path> [--cursor]`：快速初始化项目；
     - `quench check`：手动运行边界与白名单自检；
     - `quench archive`：手动触发归档流程。
+
 
 ---
 

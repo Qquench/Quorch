@@ -5,6 +5,18 @@
 
 ---
 
+## [2026-09-13] 2026-09-13_stage3_cross_tool_cursor_adaptation.md
+
+- **Task 1**: Cursor MCP 一键配置接入与 Git Pre-commit Guard 自动化安装集成
+- **Task 2**: Cursor Rules 规则转换器与 MDC 规范文件自动生成
+- **Task 3**: 统一轻量 Quench CLI 命令行工具与跨工具流转集成
+- **feat(stage3)**: 完成以 Cursor 为切入点的跨开发工具适配体系与统一轻量 Quench CLI
+  - **Cursor MCP 一键接入与已有工具合并保护**：在 `init_project.py` 与 `install.py` 中增加 `--ide {antigravity,cursor,all}` 支持，自动生成/安全合并 `.cursor/mcp.json`，确保用户既有其他 MCP 服务不被覆盖；
+  - **Git Pre-commit Guard 自动化链式挂载**：支持 `--install-git-hook` 自动将物理硬拦截脚本挂载至 `.git/hooks/pre-commit`，若已有自定义 Hook 自动采用链式追加注入，零依赖物理防御越界提交；
+  - **Rules 导出器与 MDC 规范生成**：实现 `rules_exporter.py`，提炼纪律手册为高密度指令，自动输出 `.cursorrules` 与符合最新 Cursor MDC 规范的 `.cursor/rules/quench-dev-tasks.mdc`；
+  - **统一轻量终端 CLI (Quench CLI)**：实现 `plugins/quench-dev-tasks/server/cli.py`，支持 `status` 看板、`check` 体检、`init` 初始化与 `archive` 一键归档，自适应 ANSI 彩色降级，并在 `pyproject.toml` 中注册 `quench` 控制台入口；
+  - **全量测试套件 105/105 绿灯**：新增 22 个专项测试用例，全套测试 100% 通过无回归。
+
 ## [2026-09-13] 2026-09-13_fix_windows_hook_quote_wrapping.md
 
 - **Task 1.1**: 移除 hooks.json 渲染中的多余双引号包裹并验证 Node.js 兼容性

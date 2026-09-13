@@ -102,6 +102,140 @@ def _render_hooks_json(project_root: str, force: bool = False) -> None:
     print(f"✅ 已生成 .agents/hooks.json (配置生命周期拦截钩子，解释器: {python_exe})")
 
 
+def generate_cursor_mcp_config(project_root: str, python_exe: str, force: bool = False) -> str:
+    """在目标项目根目录下生成或安全合并 .cursor/mcp.json 配置。
+    自动注册 quench-dev-tasks FastMCP 服务，并保留用户现有的其他 MCP 工具。
+    返回目标配置文件路径。
+    """
+    root = os.path.abspath(project_root)
+    cursor_dir = os.path.join(root, ".cursor")
+    os.makedirs(cursor_dir, exist_ok=True)
+    mcp_path = os.path.join(cursor_dir, "mcp.json")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_dir = os.path.dirname(script_dir)
+    server_script = os.path.normpath(os.path.join(plugin_dir, "server", "server.py"))
+
+    quench_server_def = {
+        "command": python_exe,
+        "args": [server_script],
+    }
+
+    existing_data: dict = {}
+    if os.path.isfile(mcp_path):
+        try:
+            with open(mcp_path, "r", encoding="utf-8") as f:
+                existing_data = json.load(f)
+        except Exception as e:
+            print(f"⚠️ 解析已有 .cursor/mcp.json 失败 ({e})，将重置该文件。")
+            existing_data = {}
+
+    if not isinstance(existing_data, dict):
+        existing_data = {}
+
+    mcp_servers = existing_data.setdefault("mcpServers", {})
+    if not isinstance(mcp_servers, dict):
+        mcp_servers = {}
+        existing_data["mcpServers"] = mcp_servers
+
+    if "quench-dev-tasks" in mcp_servers and not force:
+        current_def = mcp_servers["quench-dev-tasks"]
+        if current_def == quench_server_def:
+            print("ℹ️ .cursor/mcp.json 中的 quench-dev-tasks 配置已存在且一致，跳过更新。")
+            return mcp_path
+
+    mcp_servers["quench-dev-tasks"] = quench_server_def
+
+    with open(mcp_path, "w", encoding="utf-8") as f:
+        json.dump(existing_data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+    print(f"✅ 已生成/更新 .cursor/mcp.json (注册 quench-dev-tasks，解释器: {python_exe})")
+    return mcp_path
+
+
+def install_git_pre_commit_hook(project_root: str, force: bool = False) -> bool:
+    """将 git_pre_commit_guard.py 部署至目标项目的 .git/hooks/pre-commit 并赋予可执行权限。
+    若未初始化 Git 仓库，优雅提示并返回 False。
+    若目标已存在自定义 pre-commit 钩子，采用链式追加策略注入调用。
+    """
+    root = os.path.abspath(project_root)
+    git_dir = os.path.join(root, ".git")
+    if not os.path.isdir(git_dir):
+        print("⚠️ 目标目录不是 Git 仓库（未找到 .git 目录），跳过 Git Pre-commit Hook 安装。")
+        return False
+
+    hooks_dir = os.path.join(git_dir, "hooks")
+    os.makedirs(hooks_dir, exist_ok=True)
+    target_hook = os.path.join(hooks_dir, "pre-commit")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    guard_script = os.path.normpath(os.path.join(script_dir, "git_pre_commit_guard.py"))
+    guard_script_unix = guard_script.replace("\\", "/")
+
+    injection_block = (
+        "\n# === Quench Git Pre-commit Guard Injection ===\n"
+        f'python3 "{guard_script_unix}" "$@" || python "{guard_script_unix}" "$@"\n'
+    )
+
+    if os.path.isfile(target_hook):
+        try:
+            with open(target_hook, "r", encoding="utf-8", errors="ignore") as f:
+                existing_content = f.read()
+        except Exception as e:
+            print(f"❌ 读取已有 pre-commit 钩子失败: {e}", file=sys.stderr)
+            return False
+
+        if "git_pre_commit_guard.py" in existing_content:
+            print(f"ℹ️ Quench Pre-commit Guard 已存在于: {target_hook}")
+            return True
+
+        if force:
+            hook_content = (
+                "#!/usr/bin/env bash\n"
+                "# Quench Git Pre-commit Guard Shim\n"
+                "set -e\n"
+                f'python3 "{guard_script_unix}" "$@" || python "{guard_script_unix}" "$@"\n'
+            )
+            with open(target_hook, "w", encoding="utf-8", newline="\n") as f:
+                f.write(hook_content)
+            try:
+                os.chmod(target_hook, 0o755)
+            except Exception:
+                pass
+            print(f"✅ 已强制覆盖安装 Quench Pre-commit Guard 至: {target_hook}")
+            return True
+        else:
+            with open(target_hook, "a", encoding="utf-8", newline="\n") as f:
+                f.write(injection_block)
+            try:
+                os.chmod(target_hook, 0o755)
+            except Exception:
+                pass
+            print(f"✅ 已链式追加 Quench Pre-commit Guard 至现有 hook: {target_hook}")
+            return True
+
+    hook_content = (
+        "#!/usr/bin/env bash\n"
+        "# Quench Git Pre-commit Guard Shim\n"
+        "set -e\n"
+        f'python3 "{guard_script_unix}" "$@" || python "{guard_script_unix}" "$@"\n'
+    )
+    try:
+        with open(target_hook, "w", encoding="utf-8", newline="\n") as f:
+            f.write(hook_content)
+        try:
+            os.chmod(target_hook, 0o755)
+        except Exception:
+            pass
+        print(f"✅ 已成功安装 Quench Pre-commit Guard 至: {target_hook}")
+        return True
+    except Exception as e:
+        print(f"❌ 写入 pre-commit 钩子失败: {e}", file=sys.stderr)
+        return False
+
+
+
 def diagnose_environment(project_root: str) -> dict:
     """全面诊断目标项目的治理环境就绪状态。
     返回结构: {
@@ -290,13 +424,21 @@ def print_diagnostic_report(diag: dict, project_root: str) -> None:
     print("=" * 60)
 
 
-def init_project(project_root: str, project_name: str | None = None, force: bool = False) -> None:
-    """在 project_root 创建 .agents/plugins.json 和 .agents/quench_stack.yaml 模板。
+def init_project(
+    project_root: str,
+    project_name: str | None = None,
+    force: bool = False,
+    ide: str = "antigravity",
+    install_hook: bool = False,
+) -> None:
+    """在 project_root 初始化 Quench DevTasks 治理配置。
 
     Args:
         project_root: 目标项目根目录路径。
         project_name: 项目名称，若未提供则默认使用 project_root 的文件夹名称。
         force: 是否强制覆盖已有 quench_stack.yaml 配置文件。
+        ide: 目标接入 IDE 环境 (antigravity | cursor | all，默认 antigravity)。
+        install_hook: 是否自动安装 Git Pre-commit 守卫脚本。
     """
     root = os.path.abspath(project_root)
     if not os.path.isdir(root):
@@ -337,47 +479,48 @@ def init_project(project_root: str, project_name: str | None = None, force: bool
         )
         sys.exit(1)
 
-    print(f"🚀 开始在项目 [{effective_name}] ({root}) 初始化 Quench DevTasks 配置...")
+    print(f"🚀 开始在项目 [{effective_name}] ({root}) 初始化 Quench DevTasks 配置 (IDE 目标: {ide})...")
 
     # 2. 创建 .agents 目录
     agents_dir = os.path.join(root, ".agents")
     os.makedirs(agents_dir, exist_ok=True)
 
-    # 3. 配置 plugins.json
-    plugins_json_path = os.path.join(agents_dir, "plugins.json")
-    norm_plugins_parent = os.path.normpath(plugins_parent_dir)
+    # 3. 配置 plugins.json (仅 antigravity 或 all)
+    if ide in ("antigravity", "all"):
+        plugins_json_path = os.path.join(agents_dir, "plugins.json")
+        norm_plugins_parent = os.path.normpath(plugins_parent_dir)
 
-    if os.path.isfile(plugins_json_path):
-        try:
-            with open(plugins_json_path, "r", encoding="utf-8") as f:
-                plugins_data = json.load(f)
-        except Exception:
-            plugins_data = {}
+        if os.path.isfile(plugins_json_path):
+            try:
+                with open(plugins_json_path, "r", encoding="utf-8") as f:
+                    plugins_data = json.load(f)
+            except Exception:
+                plugins_data = {}
 
-        entries = plugins_data.setdefault("entries", [])
-        already_configured = False
-        for entry in entries:
-            entry_path = entry.get("path", "")
-            if os.path.normpath(entry_path).lower() == norm_plugins_parent.lower() or "quench-dev-tasks" in entry_path.lower():
-                already_configured = True
-                break
+            entries = plugins_data.setdefault("entries", [])
+            already_configured = False
+            for entry in entries:
+                entry_path = entry.get("path", "")
+                if os.path.normpath(entry_path).lower() == norm_plugins_parent.lower() or "quench-dev-tasks" in entry_path.lower():
+                    already_configured = True
+                    break
 
-        if already_configured:
-            print("ℹ️ .agents/plugins.json 已配置 quench-dev-tasks 插件路径，跳过添加。")
+            if already_configured:
+                print("ℹ️ .agents/plugins.json 已配置 quench-dev-tasks 插件路径，跳过添加。")
+            else:
+                entries.append({"path": norm_plugins_parent})
+                with open(plugins_json_path, "w", encoding="utf-8") as f:
+                    json.dump(plugins_data, f, indent=2, ensure_ascii=False)
+                print(f"✅ 已在 .agents/plugins.json 中添加插件路径: {norm_plugins_parent}")
         else:
-            entries.append({"path": norm_plugins_parent})
+            plugins_data = {
+                "entries": [
+                    {"path": norm_plugins_parent}
+                ]
+            }
             with open(plugins_json_path, "w", encoding="utf-8") as f:
                 json.dump(plugins_data, f, indent=2, ensure_ascii=False)
-            print(f"✅ 已在 .agents/plugins.json 中添加插件路径: {norm_plugins_parent}")
-    else:
-        plugins_data = {
-            "entries": [
-                {"path": norm_plugins_parent}
-            ]
-        }
-        with open(plugins_json_path, "w", encoding="utf-8") as f:
-            json.dump(plugins_data, f, indent=2, ensure_ascii=False)
-        print(f"✅ 已创建 .agents/plugins.json (注册插件路径: {norm_plugins_parent})")
+            print(f"✅ 已创建 .agents/plugins.json (注册插件路径: {norm_plugins_parent})")
 
     # 4. 创建 .agents/quench_stack.yaml
     stack_yaml_path = os.path.join(agents_dir, "quench_stack.yaml")
@@ -401,8 +544,9 @@ def init_project(project_root: str, project_name: str | None = None, force: bool
             f.write(customized_content)
         print(f"✅ 已创建 .agents/quench_stack.yaml (项目名称: {effective_name})")
 
-    # 5. 创建 / 渲染 .agents/hooks.json
-    _render_hooks_json(root, force=force)
+    # 5. 创建 / 渲染 .agents/hooks.json (仅 antigravity 或 all)
+    if ide in ("antigravity", "all"):
+        _render_hooks_json(root, force=force)
 
     # 6. 创建任务目录结构
     dev_tasks_dir = os.path.join(root, "docs", "dev_tasks")
@@ -436,7 +580,26 @@ def init_project(project_root: str, project_name: str | None = None, force: bool
             f.write(readme_content)
         print("✅ 已生成 docs/dev_tasks/README.md 说明文档。")
 
-    print(f"\n🎉 项目 [{effective_name}] 初始化完成！随时可在 Antigravity IDE 中开始开发。")
+    # 8. Cursor MCP 配置与 Rules 规范注入 (仅 cursor 或 all)
+    if ide in ("cursor", "all"):
+        python_exe = detect_python_executable(root)
+        generate_cursor_mcp_config(root, python_exe, force=force)
+        try:
+            from rules_exporter import RulesExporter
+            RulesExporter.export_all(project_root=root, force=force)
+        except Exception as e:
+            print(f"⚠️ 导出 Cursor rules 规范失败: {e}", file=sys.stderr)
+
+    # 9. 安装 Git Pre-commit Hook (若指定 install_hook)
+    if install_hook:
+        install_git_pre_commit_hook(root, force=force)
+
+    if ide == "cursor":
+        print(f"\n🎉 项目 [{effective_name}] Cursor 接入初始化完成！随时可在 Cursor 中连接 MCP 并开始开发。")
+    elif ide == "all":
+        print(f"\n🎉 项目 [{effective_name}] 全生态接入初始化完成！可在 Antigravity 与 Cursor 等多客户端协同开发。")
+    else:
+        print(f"\n🎉 项目 [{effective_name}] 初始化完成！随时可在 Antigravity IDE 中开始开发。")
 
 
 def main():
@@ -465,6 +628,22 @@ def main():
         action="store_true",
         help="强制覆盖已有的 quench_stack.yaml 与 hooks.json（默认不覆盖）",
     )
+    parser.add_argument(
+        "--ide",
+        choices=["antigravity", "cursor", "all"],
+        default="antigravity",
+        help="目标接入 IDE 环境 (antigravity | cursor | all，默认 antigravity)",
+    )
+    parser.add_argument(
+        "--cursor",
+        action="store_true",
+        help="快捷选项：等同于 --ide cursor",
+    )
+    parser.add_argument(
+        "--install-git-hook",
+        action="store_true",
+        help="自动将 Quench Git Pre-commit Guard 挂载到目标项目的 .git/hooks/pre-commit",
+    )
 
     args = parser.parse_args()
 
@@ -473,8 +652,16 @@ def main():
         print_diagnostic_report(diag, args.project_root)
         return
 
-    init_project(args.project_root, args.project_name, force=args.force)
+    effective_ide = "cursor" if args.cursor else args.ide
+    init_project(
+        args.project_root,
+        args.project_name,
+        force=args.force,
+        ide=effective_ide,
+        install_hook=args.install_git_hook,
+    )
 
 
 if __name__ == "__main__":
     main()
+

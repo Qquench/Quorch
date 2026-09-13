@@ -398,6 +398,22 @@ def main() -> int:
         action="store_true",
         help="输出全局注册指引 (~/.gemini/config/)",
     )
+    parser.add_argument(
+        "--ide",
+        choices=["antigravity", "cursor", "all"],
+        default="antigravity",
+        help="指定项目接入的 IDE 环境 (antigravity | cursor | all，默认 antigravity)",
+    )
+    parser.add_argument(
+        "--cursor",
+        action="store_true",
+        help="快捷选项：等同于 --ide cursor",
+    )
+    parser.add_argument(
+        "--install-git-hook",
+        action="store_true",
+        help="自动将 Quench Git Pre-commit Guard 部署至目标项目的 .git/hooks/pre-commit",
+    )
 
     args = parser.parse_args()
 
@@ -474,13 +490,16 @@ def main() -> int:
 
         if args.project:
             init_script = os.path.join(plugin_dir, "scripts", "init_project.py")
-            print(f"\n🚀 正在为目标项目 [{args.project}] 执行自动接入...")
-            cmd = [python_exe, init_script, args.project, "--force"]
+            effective_ide = "cursor" if args.cursor else args.ide
+            print(f"\n🚀 正在为目标项目 [{args.project}] 执行自动接入 (IDE: {effective_ide})...")
+            cmd = [python_exe, init_script, args.project, "--force", "--ide", effective_ide]
+            if args.install_git_hook:
+                cmd.append("--install-git-hook")
             subprocess.run(cmd)
         else:
             print("\n💡 下一步：在任何项目中运行以下命令即可完成接入：")
             init_script = os.path.join(plugin_dir, "scripts", "init_project.py")
-            print(f'   python "{init_script}" <你的项目根路径>')
+            print(f'   python "{init_script}" <你的项目根路径> [--ide cursor|antigravity|all] [--install-git-hook]')
         print("=" * 65)
         return 0
     else:

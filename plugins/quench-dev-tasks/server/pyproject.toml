@@ -13,3 +13,6 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+
+[project.scripts]
+quench = "cli:main"
