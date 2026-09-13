@@ -3,10 +3,10 @@
 > **审查与执行模型须知**
 > - 本任务单用于对近期在 Quench MCP 中落地的一系列重大架构特性（三层旁路治理体系、物理会话锁、双轨生产代码边界划分引擎、开源跨工具适配体系）进行**工程留痕与深度架构审查**。
 > - **设计参考文档**：
->   - [dev_tasks_mcp_specification.md](file:///D:/Work/Quench/MCP/dev_tasks_mcp_specification.md)
->   - [rules/dev-tasks-discipline.md](file:///D:/Work/Quench/MCP/plugins/quench-dev-tasks/rules/dev-tasks-discipline.md)
->   - [OPEN_SOURCE_RELEASE_GUIDE.md](file:///D:/Work/Quench/MCP/OPEN_SOURCE_RELEASE_GUIDE.md)
->   - [architecture_review_report.md](file:///C:/Users/asus/.gemini/antigravity-ide/brain/4b138e9a-d661-4e38-b0ff-dfe8f07cb4ee/architecture_review_report.md)（2026-09-13 架构审查报告）
+>   - [dev_tasks_mcp_specification.md](../../../dev_tasks_mcp_specification.md)
+>   - [rules/dev-tasks-discipline.md](../../../plugins/quench-dev-tasks/rules/dev-tasks-discipline.md)
+>   - `OPEN_SOURCE_RELEASE_GUIDE.md`（开源发布前微调备忘录）
+>   - `architecture_review_report.md`（2026-09-13 架构审查报告）
 > - **审查状态**：本任务单已通过高阶架构审查模型（Reviewer）于 2026-09-13 完成系统性诊断与修订，所有任务已纳入审查发现的改进项。
 > - **改逻辑必加单测断言**：在测试目录追加断言，杜绝回归。
 > - **建议执行顺序**：任务 1 → 任务 2 → 任务 3 → 任务 4（任务 1 是安全基石，修复并发竞态隐患，阻塞后续所有依赖文件锁的功能扩展）

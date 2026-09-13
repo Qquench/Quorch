@@ -11,7 +11,7 @@
 
 - **当前现状**：
   - 拥有完善的插件清单 `plugin.json`、`mcp_config.json`、`hooks.json`、常驻规则 `rules/`、工作流指南 `skills/` 与子代理 `agents/`；
-  - 编写了初始的 [OPEN_SOURCE_RELEASE_GUIDE.md](file:///d:/Work/Quench/MCP/OPEN_SOURCE_RELEASE_GUIDE.md) 作为设计备忘录；
+  - 编写了初始的 `OPEN_SOURCE_RELEASE_GUIDE.md` 作为设计备忘录；
 - **核心痛点与差距**：
   1. **致命的机器绝对路径强绑定**：
      - `mcp_config.json` 硬编码了 `D:\\Work\\Quench\\MCP\\venv\\Scripts\\python.exe` 与固定插件源码路径；
@@ -84,7 +84,7 @@
 ### Epic 2.4: 社区门面资产与开源发布走查
 - **背景**：打造专业、清晰、吸引社区贡献者的高品质开源仓库。
 - **任务项**：
-  - [x] 重写根目录 [README.md](file:///d:/Work/Quench/MCP/README.md)：
+  - [x] 重写根目录 [README.md](../../../README.md)：
     - 增加痛点陈述（AI 越界失控、Token 消耗过大、口头 DoD 缺测试）；
     - 增加核心架构 ASCII 动图/流程图；
     - 增加“30 秒快速上手”引导；

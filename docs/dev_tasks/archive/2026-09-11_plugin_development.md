@@ -2,14 +2,14 @@
 
 > **执行模型须知**
 > - 本任务单涵盖一个完整的 Antigravity IDE Plugin 从零构建
-> - **设计参考文档**：执行前必须先阅读 [dev_tasks_mcp_specification.md](file:///D:/Work/Quench/MCP/dev_tasks_mcp_specification.md) 建立设计上下文
-> - **Plugin 规范参考**：Antigravity Plugin 的目录结构、hooks.json 契约、mcp_config.json 格式见 [agy-customizations SKILL](file:///C:/Users/asus/.gemini/antigravity-ide/builtin/skills/agy-customizations/SKILL.md) 及其 `docs/` 子目录
+> - **设计参考文档**：执行前必须先阅读 [dev_tasks_mcp_specification.md](../../../dev_tasks_mcp_specification.md) 建立设计上下文
+> - **Plugin 规范参考**：Antigravity Plugin 的目录结构、hooks.json 契约、mcp_config.json 格式见 `agy-customizations` 规范文档
 > - 严格按照每条任务的【分步改造指引】顺序执行
 > - 不得修改任务未涉及的文件
 > - 每完成一条任务，在其状态标记处更新为 `🔨 执行中`，完成后更新为 `✔️ 已完成`
 > - 遇到指引不明确的情况，停止并说明问题，不要猜测
 
-**Plugin 根路径**：`D:\Work\Quench\MCP\plugins\quench-dev-tasks\`
+**Plugin 根路径**：`plugins/quench-dev-tasks/`
 （下文以 `$PLUGIN` 指代此路径）
 
 ---

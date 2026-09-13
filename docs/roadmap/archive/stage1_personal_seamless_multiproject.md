@@ -51,10 +51,10 @@
 ### Epic 1.4: 真实开发全生命周期端到端实战归档
 - **背景**：通过本仓库自身治理推进上述任务，跑通从检出到归档封板的全流程。
 - **任务项**：
-  - [ ] 将本阶段任务落地到 [docs/dev_tasks/](file:///d:/Work/Quench/MCP/docs/dev_tasks/) 活跃任务单中；
-  - [ ] 完成上述功能实现并通过所有 DoD 单元测试；
-  - [ ] 调用 `dev_tasks_complete` 触发单测断言物理审计；
-  - [ ] 调用 `dev_tasks_archive`，验证自动移入 `docs/dev_tasks/archive/` 且自动增量追加 [CHANGELOG.md](file:///d:/Work/Quench/MCP/CHANGELOG.md)。
+  - [x] 将本阶段任务落地到 [docs/dev_tasks/](../../dev_tasks/) 活跃任务单中；
+  - [x] 完成上述功能实现并通过所有 DoD 单元测试；
+  - [x] 调用 `dev_tasks_complete` 触发单测断言物理审计；
+  - [x] 调用 `dev_tasks_archive`，验证自动移入 `docs/dev_tasks/archive/` 且自动增量追加 [CHANGELOG.md](../../../CHANGELOG.md)。
 
 ### Epic 1.5: Hook 决策日志与可观测性基线（架构审查新增）
 - **背景**：当前整个系统缺少结构化日志，`file_scope_guard.py` 的 `except Exception: pass` 模式导致所有异常被静默吞掉，排查问题时缺乏追踪线索。
@@ -77,6 +77,6 @@
 
 1. **测试基线**：`pytest plugins/quench-dev-tasks/server/tests/` 全部通过（用例数从 20 项增至 30+ 项，含并发竞态、时区安全、输入净化、配置迁移等新增用例，无失败）；
 2. **接入耗时**：任意本地新项目运行 `quench-init`，10 秒内完成配置注入并可通过 Antigravity IDE 正常拉起；
-3. **闭环留痕**：至少完成一次完整的 `dev_tasks_archive` 归档动作，[CHANGELOG.md](file:///d:/Work/Quench/MCP/CHANGELOG.md) 正确生成增量版本摘要；
+3. **闭环留痕**：至少完成一次完整的 `dev_tasks_archive` 归档动作，[CHANGELOG.md](../../../CHANGELOG.md) 正确生成增量版本摘要；
 4. **可观测性**（架构审查新增）：Hook 决策日志（`.agents/.quench_hook.log`）正确记录拦截/放行/清理事件，`dev_tasks_status` 可返回最近日志摘要；
 5. **配置兼容性**（架构审查新增）：旧版 `quench_stack.yaml`（无 `schema_version` 字段）在加载时自动升级至 v1.0 且不丢失原有配置。
