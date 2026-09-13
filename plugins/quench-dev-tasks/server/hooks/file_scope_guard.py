@@ -349,21 +349,37 @@ def main():
         return
 
     try:
+        from adapters import EnvironmentDetector, get_adapter
+
+        workspace_paths = payload.get("workspacePaths", [])
+        workspace_root = workspace_paths[0] if workspace_paths and isinstance(workspace_paths, list) else None
+
+        env_type = EnvironmentDetector.detect(payload, workspace_root=workspace_root)
+        adapter = get_adapter(env_type, workspace_root=workspace_root)
+
+        def emit_decision(decision: str, reason: str = "") -> None:
+            out = adapter.format_decision(decision, reason)
+            if isinstance(out, dict):
+                print(json.dumps(out))
+            else:
+                print(out)
+                if decision in ("deny", "ask") and not adapter.supports_interactive_ask():
+                    sys.exit(1)
+
         tool_call = payload.get("toolCall", {})
         args = tool_call.get("args", {})
         target_file = args.get("TargetFile")
-        conversation_id = payload.get("conversationId")
+        conversation_id = adapter.extract_session_id(payload)
 
-        workspace_paths = payload.get("workspacePaths", [])
         if not workspace_paths or not target_file:
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         workspace_root = workspace_paths[0]
         config_path = os.path.join(workspace_root, ".agents", "quench_stack.yaml")
         if not os.path.isfile(config_path):
             # 非 Quench 纳管项目，静默放行
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         from project_config import load_project_config
@@ -378,20 +394,20 @@ def main():
         if is_task_file(target_file, workspace_root, config):
             guard_decision = check_task_status_guard(target_file, tool_name, args)
             if guard_decision:
-                print(json.dumps(guard_decision))
+                emit_decision(guard_decision.get("decision", "ask"), guard_decision.get("reason", ""))
                 return
             # 任务单非状态内容编辑（如补充步骤细节、完善说明），直接放行
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         # 0.1 治理通用元数据文件豁免（.agents 配置文件、CHANGELOG、README）
         if is_meta_file(target_file, workspace_root, config):
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         # 0.1 生产代码靶向识别（Dual-Track Boundary Engine）：非受管的纯文档/规划/素材天然豁免
         if hasattr(config, "is_path_governed") and not config.is_path_governed(target_file):
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         # 寻找当前正在处于 🔨 执行中 的任务
@@ -457,16 +473,16 @@ def main():
                         break
 
             if is_in_allowed_scope:
-                print(json.dumps({"decision": "allow"}))
+                emit_decision("allow")
                 return
 
             # 任务外文件，先检查 Layer 1 静态白名单与 Layer 2 会话旁路（含会话锁核验）
             if is_whitelist_matched(config, target_file, workspace_root):
-                print(json.dumps({"decision": "allow"}))
+                emit_decision("allow")
                 return
 
             if is_session_bypass_matched(workspace_root, target_file, conversation_id):
-                print(json.dumps({"decision": "allow"}))
+                emit_decision("allow")
                 return
 
             # 触发任务越界拦截提示
@@ -477,7 +493,7 @@ def main():
                 f"💡 模型给出的修改理由: {desc}\n\n"
                 f"若确属规划遗漏请点击【允许】，若属非预期变动请点击【拒绝】。"
             )
-            print(json.dumps({"decision": "ask", "reason": reason}))
+            emit_decision("ask", reason)
             return
 
         # -------------------------------------------------------------
@@ -485,12 +501,12 @@ def main():
         # -------------------------------------------------------------
         # 第一层：检查静态白名单（配置文件）
         if is_whitelist_matched(config, target_file, workspace_root):
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         # 第二层：检查动态会话旁路（.agents/.quench_bypass.json，含会话锁核验）
         if is_session_bypass_matched(workspace_root, target_file, conversation_id):
-            print(json.dumps({"decision": "allow"}))
+            emit_decision("allow")
             return
 
         # 第三层：交互式弹窗向用户确认（Ask Modal）
@@ -503,7 +519,7 @@ def main():
             f"• 点击【允许】：仅对本次修改单次放行（临时微调）；\n"
             f"• 点击【拒绝】：拦截本次修改。如需批量微调，可对 Agent 发送“开启样式快速通道”或领单正式任务。"
         )
-        print(json.dumps({"decision": "ask", "reason": reason}))
+        emit_decision("ask", reason)
 
     except Exception:
         # 防御兜底：Hook 绝不能崩溃导致 IDE 流程死锁

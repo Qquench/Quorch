@@ -221,7 +221,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_project_config.py -v
 
 ---
 
-### 任务 3 ✅ 已确认 — 跨开发工具环境适配器抽象层设计
+### 任务 3 ✔️ 已完成 — 跨开发工具环境适配器抽象层设计
 
 #### 【涉及文件】
 
