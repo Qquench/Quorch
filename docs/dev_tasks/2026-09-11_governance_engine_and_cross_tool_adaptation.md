@@ -323,7 +323,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_hooks.py -v
 
 ---
 
-### 任务 4 ✅ 已确认 — Git Pre-commit Guard 物理硬防线独立脚本
+### 任务 4 ✔️ 已完成 — Git Pre-commit Guard 物理硬防线独立脚本
 
 #### 【涉及文件】
 
