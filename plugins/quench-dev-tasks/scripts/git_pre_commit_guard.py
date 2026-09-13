@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+# If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """Quench Git Pre-commit Guard — 零依赖独立守卫脚本。
 仅使用 Python 标准库，无任何第三方依赖。
 在不支持 PreToolUse Hook 的开发工具（如 Cursor、Windsurf、Claude Code、裸 Git CLI）中

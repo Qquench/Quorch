@@ -97,3 +97,19 @@ python D:\Work\Quench\MCP\plugins\quench-dev-tasks\scripts\init_project.py <proj
    D:\Work\Quench\MCP\venv\Scripts\python.exe -c "import fastmcp, filelock, yaml; print('MCP Environment OK!')"
    ```
 3. **状态守卫防线**：`file_scope_guard.py` 已内置任务单状态物理拦截，任何 Agent 尝试将状态修改为已确认均必须经过用户弹窗明确确认，新生成任务强制从【待确认】开始。
+
+---
+
+## 五、 开源许可与使用说明 (License & Usage)
+
+本项目采用 **[MPL-2.0 (Mozilla Public License 2.0)](LICENSE)** 开源。
+
+### 简单来说 (TL;DR):
+* **日常开发 / 个人与团队使用**：
+  你可以在 Cursor、Antigravity、自建工作流甚至商业项目中自由接入、配置和调用此 MCP 套件。**它绝不会传染或要求你开源自己的业务代码、专有 Prompt 或下游应用逻辑。**
+* **对本项目源码本身的改进**：
+  如果你直接修改了本项目原有的核心文件（如状态机逻辑、Hook 拦截机制等），根据 MPL-2.0 规则，这部分针对原文件的修改与优化必须保持开源回馈社区。
+* **商业集成**：
+  欢迎正规商业集成。如果你需要在不公开核心修改的前提下进行闭源定制分发，请直接联系作者获取商业授权。
+* **免责声明**：
+  软件按“现状”（AS-IS）提供，作者不对任何因工具拦截行为、状态流转异常或外部 API Token 消耗导致的直接或间接后果承担连带保证责任。
