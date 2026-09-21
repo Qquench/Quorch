@@ -3,16 +3,22 @@
 
 负责连接高阶推理模型 (DeepSeek-Flash / Reasoner)，组装高命中率的静态架构上下文缓存前缀，
 并为任务规约强化 (Spec Refine) 与架构疑难升级 (Escalate) 提供确定性分析能力。
+具备非阻塞异步线程卸载 (acomplete)、企业网络异常防御与总耗时预算熔断。
 """
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import os
+import random
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
+
+import anyio
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
 
@@ -24,6 +30,10 @@ if sys.version_info >= (3, 7):
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+# 模块级并发限制器：限制同时在途的审查请求，防止突发流量触发 429 流控与 TLS 握手风暴
+_REVIEWER_LIMITER = anyio.CapacityLimiter(4)
+MAX_RESPONSE_BYTES = 1024 * 1024  # 1 MiB 响应体积硬上限
 
 
 class ReviewerEngineError(Exception):
@@ -51,10 +61,44 @@ class ReviewerRateLimitError(ReviewerEngineError):
     pass
 
 
+def _read_windows_env_var(var_name: str) -> Optional[str]:
+    """安全读取 Windows 注册表环境变量（支持 HKCU 与 HKLM，免重启 IDE/终端）。
+    抽离为模块级无副作用函数以保障跨平台与 CI 单元测试的可 Patch 隔离性。
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg  # type: ignore
+
+        # 1. 优先检查当前用户级变量 (HKCU)
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
+                val, _ = winreg.QueryValueEx(key, var_name)
+                if val and str(val).strip():
+                    return str(val).strip()
+        except (FileNotFoundError, OSError):
+            pass
+
+        # 2. 兜底检查机器系统级变量 (HKLM)
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+            ) as key:
+                val, _ = winreg.QueryValueEx(key, var_name)
+                if val and str(val).strip():
+                    return str(val).strip()
+        except (FileNotFoundError, OSError):
+            pass
+    except Exception:
+        pass
+    return None
+
+
 class PromptAssembler:
     """静态系统提示词组装器。
     
-    ★ 核心防线：为保障 DeepSeek Prompt Cache 极致命中率（>1024 tokens 缓存后成本降至 $0.006/M），
+    ★ 核心防线：为保障 DeepSeek Prompt Cache 极致命中率，
     本组装器组装的 System Prompt 必须保持绝对纯洁，严禁拼接任何动态时间戳、动态会话 ID 或随机数。
     """
 
@@ -89,11 +133,13 @@ class PromptAssembler:
             parts.append("\n")
 
         # 3. 挂载 Quench 六大核心字段标准与审查纪律
-        rules_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..",
-            "rules",
-            "dev-tasks-discipline.md",
+        rules_path = os.path.normpath(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "rules",
+                "dev-tasks-discipline.md",
+            )
         )
         if os.path.isfile(rules_path):
             try:
@@ -114,9 +160,21 @@ class PromptAssembler:
 
         return "".join(parts)
 
+    @staticmethod
+    def get_prefix_hash(prefix: str) -> str:
+        """获取静态前缀的 SHA256 指纹前 16 位，用于 Prompt Cache 命中审计与观测。"""
+        return hashlib.sha256(prefix.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def assemble_messages(static_prefix: str, dynamic_turns: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """从结构上强制保证静态前缀作为第 1 个 system message，确保最长缓存前缀不被破坏。"""
+        return [{"role": "system", "content": static_prefix}, *dynamic_turns]
+
 
 class DeepSeekClient:
-    """基于标准库实现的 DeepSeek API 客户端，具备退避重试与异常智能分级。"""
+    """基于标准库与 AnyIO 实现的工业级 DeepSeek API 客户端。
+    具备异步非阻塞调度 (acomplete)、退避重试、企业网络防崩解析与总耗时预算熔断。
+    """
 
     def __init__(self, config: ReviewerEngineConfig):
         self.config = config
@@ -135,34 +193,39 @@ class DeepSeekClient:
                 return val
 
         # 2. Windows 注册表动态穿透（免重启 IDE/终端）
-        if sys.platform == "win32":
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
-                    for var in unique_candidates:
-                        try:
-                            val, _ = winreg.QueryValueEx(key, var)
-                            if val and str(val).strip():
-                                return str(val).strip()
-                        except FileNotFoundError:
-                            continue
-            except Exception:
-                pass
+        for var in unique_candidates:
+            val = _read_windows_env_var(var)
+            if val:
+                return val
 
         return None
 
     def is_available(self) -> bool:
         """检查 Reviewer 引擎是否就绪。"""
-        if self.config.provider != "deepseek":
+        if self.config.provider not in ("deepseek", "deepseek-compatible"):
             return False
         return bool(self.resolve_api_key())
+
+    @staticmethod
+    def _parse_json_body(raw: bytes, context: str = "") -> Dict[str, Any]:
+        """健壮的响应 JSON 解析 Seam：防御企业代理 200+HTML、非 UTF-8 编码与残缺报文。"""
+        try:
+            text = raw.decode("utf-8", errors="replace")
+            return json.loads(text)
+        except (UnicodeDecodeError, ValueError) as e:
+            truncated = raw[:200].decode("utf-8", errors="replace")
+            raise ReviewerEngineError(
+                f"[Malformed Response] {context} 非合法 JSON 响应 ({len(raw)}B): {truncated!r}"
+            ) from e
 
     def complete(
         self,
         messages: List[Dict[str, str]],
         timeout: Optional[int] = None,
+        *,
+        total_deadline_s: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """向 DeepSeek API 发起请求，具备精细化重试与结果解析。"""
+        """向 DeepSeek API 发起同步请求，具备精细化重试、有界读取与总耗时预算熔断。"""
         if not self.is_available():
             raise ReviewerEngineUnavailableError(
                 f"Reviewer 引擎未就绪 (provider='{self.config.provider}', api_key_env='{self.config.api_key_env}')"
@@ -170,7 +233,12 @@ class DeepSeekClient:
 
         api_key = self.resolve_api_key()
         endpoint = f"{self.config.base_url.rstrip('/')}/chat/completions"
-        effective_timeout = timeout or self.config.timeout_seconds
+        per_call_timeout = float(timeout or self.config.timeout_seconds)
+
+        # 整体总耗时预算（Wall-clock Total Deadline），防止多次重试导致 MCP 请求无限挂起
+        deadline_budget = total_deadline_s or (per_call_timeout * 2.5)
+        start_time = time.monotonic()
+        deadline = start_time + deadline_budget
 
         payload: Dict[str, Any] = {
             "model": self.config.model,
@@ -186,6 +254,15 @@ class DeepSeekClient:
         max_attempts = 1 + max(0, self.config.max_retries)
 
         for attempt in range(max_attempts):
+            # 动态检查剩余总时间预算
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ReviewerEngineError(
+                    f"[Deadline Exceeded] 审查引擎总耗时预算耗尽 ({deadline_budget:.1f}s)，已熔断"
+                )
+
+            effective_timeout = min(per_call_timeout, max(1.0, remaining))
+
             req = urllib.request.Request(
                 url=endpoint,
                 data=data_bytes,
@@ -199,17 +276,30 @@ class DeepSeekClient:
 
             try:
                 with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
-                    raw_bytes = resp.read()
-                    body_json = json.loads(raw_bytes.decode("utf-8"))
+                    # 有界读取：最大读取 MAX_RESPONSE_BYTES + 1
+                    raw_bytes = resp.read(MAX_RESPONSE_BYTES + 1)
+                    if len(raw_bytes) > MAX_RESPONSE_BYTES:
+                        raise ReviewerEngineError(
+                            f"[Payload Too Large] 审查服务端响应超出体积安全上限 ({MAX_RESPONSE_BYTES}B)"
+                        )
 
-                    choice = body_json.get("choices", [{}])[0]
+                    body_json = self._parse_json_body(raw_bytes, context="HTTP 200")
+                    choices = body_json.get("choices") or []
+                    if not choices:
+                        raise ReviewerEngineError(
+                            f"[Malformed Response] 响应缺少 choices 字段: {raw_bytes[:200]!r}"
+                        )
+
+                    choice = choices[0]
                     message = choice.get("message", {})
                     content = message.get("content", "")
                     reasoning_content = message.get("reasoning_content", "")
+                    finish_reason = choice.get("finish_reason", "stop")
 
                     return {
                         "content": content,
                         "reasoning_content": reasoning_content,
+                        "finish_reason": finish_reason,
                         "usage": body_json.get("usage", {}),
                         "raw": body_json,
                     }
@@ -217,37 +307,71 @@ class DeepSeekClient:
             except urllib.error.HTTPError as e:
                 err_body = ""
                 try:
-                    err_body = e.read().decode("utf-8", errors="replace")
+                    raw_err = e.read(5000 + 1)
+                    err_body = raw_err[:500].decode("utf-8", errors="replace")
                 except Exception:
                     pass
+                finally:
+                    try:
+                        e.close()
+                    except Exception:
+                        pass
 
-                # 401 鉴权失败：不可重试，立即报错
+                # 401 鉴权失败：单次快速失败，严禁盲目重试
                 if e.code == 401:
                     raise ReviewerAuthenticationError(
                         f"[HTTP 401 Unauthorized] DeepSeek API 凭据鉴权失败: {err_body}"
                     )
-                # 400 参数非法：不可重试，立即报错
+                # 400 参数非法：单次快速失败，严禁重试
                 elif e.code == 400:
                     raise ReviewerBadRequestError(
                         f"[HTTP 400 Bad Request] DeepSeek 请求参数非法: {err_body}"
                     )
-                # 403 / 404：不可重试
+                # 403 / 404：无权限或路由不存在，直接失败
                 elif e.code in (403, 404):
                     raise ReviewerEngineError(f"[HTTP {e.code}] 接口调用失败: {err_body}")
 
-                # 429（流控）或 5xx（服务端错误）：支持有限次数退避重试
+                # 429（流控）或 5xx（服务端错误）：支持有限次数指数退避 + 抖动重试
                 if (e.code == 429 or e.code >= 500) and attempt < max_attempts - 1:
-                    backoff_sec = 1.0 * (2 ** attempt)
+                    retry_after_hdr = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                    if retry_after_hdr and retry_after_hdr.isdigit():
+                        backoff_sec = min(float(retry_after_hdr), 30.0)
+                    else:
+                        base = 1.0 * (2 ** attempt)
+                        backoff_sec = random.uniform(0.75, 1.25) * base
+
                     time.sleep(backoff_sec)
                     continue
 
                 raise ReviewerEngineError(f"[HTTP {e.code}] 超过最大重试次数: {err_body}")
 
             except (urllib.error.URLError, TimeoutError, OSError) as e:
+                # SSL 证书失效：快速失败，避免无谓重试
+                err_str = str(e)
+                if "CERTIFICATE_VERIFY_FAILED" in err_str or "certificate verify failed" in err_str.lower():
+                    raise ReviewerEngineError(f"[SSL Error] 证书校验失败: {err_str}")
+
                 if attempt < max_attempts - 1:
-                    backoff_sec = 1.0 * (2 ** attempt)
+                    base = 1.0 * (2 ** attempt)
+                    backoff_sec = random.uniform(0.75, 1.25) * base
                     time.sleep(backoff_sec)
                     continue
+
                 raise ReviewerEngineError(f"[Network Error] 网络通信超时或异常: {e}")
 
-        raise ReviewerEngineError("请求异常终止")
+        # 正常情况下由循环内返回或抛出，此处为类型系统安全兜底
+        raise ReviewerEngineError("[Fatal] 审查客户端请求异常退出")
+
+    async def acomplete(
+        self,
+        messages: List[Dict[str, str]],
+        timeout: Optional[int] = None,
+        *,
+        total_deadline_s: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """异步非阻塞调用门面：使用 AnyIO 卸载至后台线程，防止阻塞 FastMCP 主事件循环。
+        自带容量限制器 (_REVIEWER_LIMITER) 防拥塞，abandon_on_cancel=True 支持超时快速取消。
+        """
+        fn = functools.partial(self.complete, messages, timeout, total_deadline_s=total_deadline_s)
+        async with _REVIEWER_LIMITER:
+            return await anyio.to_thread.run_sync(fn, abandon_on_cancel=True)
