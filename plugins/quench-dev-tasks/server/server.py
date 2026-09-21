@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Any, Dict, List, Optional, Literal, TypedDict
 from fastmcp import FastMCP
 
@@ -50,7 +51,13 @@ import anyio
 from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
 from project_config import load_project_config, QuenchStackConfig, ReviewerEngineConfig, DispatchStrategy
-from reviewer_engine import PromptAssembler, DeepSeekClient, ReviewerClient
+from reviewer_engine import (
+    PromptAssembler,
+    DeepSeekClient,
+    ReviewerClient,
+    RotatingFileSink,
+    AdaptiveHeartbeatSink,
+)
 from schema_validator import validate_task_schema
 from state_machine import (
     ALL_STATUSES,
@@ -1270,8 +1277,21 @@ async def dev_tasks_refine_spec(
         static_prefix, [{"role": "user", "content": user_prompt}]
     )
 
+    session_id = f"refine-{task_id}-{int(time.time())}"
+    log_dir = os.path.join(workspace_root, ".agents", "logs", "reviewer")
+    file_sink = RotatingFileSink(log_dir, session_id, max_bytes=1024 * 1024)
+    heartbeat_sink = AdaptiveHeartbeatSink(mcp_context=None, interval_ms=1000)
+    sinks = [file_sink, heartbeat_sink]
+
     try:
-        res = await client.acomplete(messages, timeout=config.reviewer_engine.timeout_seconds)
+        res = await client.acomplete(
+            messages,
+            timeout=config.reviewer_engine.timeout_seconds,
+            stream=True,
+            sinks=sinks,
+            session_id=session_id,
+            log_dir=log_dir,
+        )
         raw_output = res.get("content", "")
         parsed_dict = _parse_task_markdown_sections(raw_output)
         parsed_dict["id"] = task_id
@@ -1286,6 +1306,9 @@ async def dev_tasks_refine_spec(
             "degraded": not val_res.is_valid,
             "task_id": task_id,
             "title": title,
+            "session_id": session_id,
+            "log_file": file_sink.log_file,
+            "truncated": res.get("truncated", False),
             "refined_spec": rendered_markdown,
             "reasoning_summary": res.get("reasoning_content", "")[:500],
             "validation": {

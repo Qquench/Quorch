@@ -399,7 +399,7 @@ class ReviewerClient(DeepSeekClient):
 
 ---
 
-### 任务 6 ⬜ 待确认 — Milestone 5: 极简实时思考流落盘与环境自适应进度心跳 (Minimalist Real-time Thinking Log & Adaptive Progress Heartbeat)
+### 任务 6 ✔️ 已完成 — Milestone 5: 极简实时思考流落盘与环境自适应进度心跳 (Minimalist Real-time Thinking Log & Adaptive Progress Heartbeat)
 
 #### 【涉及文件】
 ```
