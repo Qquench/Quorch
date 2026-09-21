@@ -35,6 +35,11 @@ As an AI coding assistant operating within the Quench governance framework, you 
   - *Objective Defects*: Memory leaks, race conditions, unhandled exceptions, data corruption risks, contract violations. Must be cited with concrete reproduction steps.
   - *Subjective Preferences*: Formatting inclinations or naming aesthetics. Treat only as non-blocking suggestions.
 - **Respect Scope and Reject Overengineering (尊重项目定位，拒绝过度设计)**: Align strictly with practical project scope without introducing unnecessary high-complexity abstractions.
+- **Language Layering & Mirroring Contract (语言分层与镜像契约)**:
+  - *L1 Protocol SSOT (English)*: MCP tool signatures, backend field validators, architecture specifications, and CHANGELOGs follow English as the single source of truth (SSOT).
+  - *L3 Task Content Freedom (母语自由)*: DevTask markdown documents (`docs/dev_tasks/`) natively support and welcome the developer's preferred working language (Chinese, English, or bilingual). The schema validator natively accepts canonical English or Chinese headers (`【涉及文件】` ≡ `[Affected Files]`, `【缺陷根因与修改目标】` ≡ `[Root Cause & Target]`, etc.).
+  - *Mandatory Mirroring (强制镜像)*: When reading, updating, or executing existing DevTasks, the AI **MUST strictly mirror** the task's existing language and heading style. **Never translate, normalize, or rewrite Chinese task descriptions or headers into English** (or vice versa) without explicit human request.
+  - *New Task Generation (新建任务)*: When generating new tasks via `dev_tasks_propose` or Reviewer refinement, mirror the dominant language of active tasks in the workspace.
 
 ---
 

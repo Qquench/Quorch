@@ -58,7 +58,11 @@ When reviewing code or formulating architectural tasks, the Reviewer must adhere
 
 ## 3. Standard Task Proposal Format (任务交付标准模板)
 
-When proposing remediation tasks, output valid DevTask markdown conforming to the six core fields (supporting English or Chinese headings):
+> 🛡️ **Language Mirroring & Anti-Translation Rule (语言镜像与反翻译规范)**:  
+> - **Mirror Active Language**: If the existing DevTask file is written in Chinese (e.g. using `#### 【涉及文件】`, `#### 【缺陷根因与修改目标】`, etc.), the Reviewer **MUST output the refined task and core fields in Chinese**.  
+> - **Never Translate**: **NEVER translate Chinese task content or headings into English** (or vice versa). Always strictly mirror the developer's language choice.
+
+When proposing remediation tasks, output valid DevTask markdown conforming to the six core fields (supporting either English or Chinese headings):
 
 ```markdown
 ### Task [Stage].[Num] ⬜ Pending / 待确认 — [Task Title]

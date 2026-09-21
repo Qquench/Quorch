@@ -47,6 +47,10 @@ At the beginning of each session or after completing a phase of development, the
 
 Every DevTask must contain the standard six core fields (bilingual headings supported):
 
+> 🛡️ **Language Mirroring Contract (语言分层与镜像契约)**:  
+> - **Freedom of Language**: DevTasks fully support either Chinese (`#### 【涉及文件】`, etc.) or English (`#### [Affected Files]`, etc.). Both heading formats are natively accepted by `schema_validator.py`.  
+> - **Mandatory Mirroring**: When reading or refining existing tasks, the AI **MUST strictly mirror** the task's existing language and heading format. **Never translate or normalize Chinese task content or headings into English** (or vice versa).
+
 ### ① `[Affected Files]` (`#### [Affected Files]` / `#### 【涉及文件】`)
 - **Format**: Fenced code block (` ``` `) with one path per line.
 - **Prefixes**: `[MODIFY]`, `[NEW]`, `[DELETE]`, `[RENAME]`.
