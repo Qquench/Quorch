@@ -292,8 +292,6 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 [MODIFY] plugins/quench-dev-tasks/server/server.py
 [MODIFY] plugins/quench-dev-tasks/server/project_config.py
 [MODIFY] plugins/quench-dev-tasks/server/reviewer_engine.py
-[MODIFY] plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md
-[MODIFY] plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md
 [NEW] plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py
 ```
 
@@ -308,7 +306,8 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 1. 架构解耦：将 Reviewer 客户端彻底解耦为通用 OpenAI 兼容协议适配器（ReviewerClient），支持任意第三方服务商或本地 Ollama 端点，DeepSeek 仅作为开箱即用的预置 Provider 之一；
 2. 纯净上下文能力协商信封：在 server.py 引入单一响应信封（reviewer_handoff），实现 Subagent -> Engine -> Manual 的三层纯净上下文策略匹配；坚决杜绝在冗长旧会话内就地切模型（彻底规避 5万~10万+ 冗余历史 Token 重新提交造成的巨大浪费与注意力稀释）；
 3. 恪守四大红线：零同步阻塞网络 I/O（50ms 治理预算保证）、manual 恒为终局兜底（R3 不变式）、零客户端指纹嗅探、密钥绝不回显；
-4. 100% 向后兼容：所有既有顶级键（status, task_id, instructions, handoff_card 等）完全保留，旧客户端无感兼容。
+4. 确保 stdout 字节绝对纯净：严禁在 ReviewerClient 或信封组装中直接 print 到 stdout，杜绝任何对 FastMCP JSON-RPC 传输帧的破坏（P0#1 防护）；
+5. 100% 向后兼容：所有既有顶级键（status, task_id, instructions, handoff_card 等）完全保留，旧客户端无感兼容。
 ```
 
 #### 【目标签名与类型契约】
@@ -371,7 +370,7 @@ class ReviewerClient(DeepSeekClient):
    - `manual` 载荷：输出 100% 经典的 Markdown 交接卡，并强制设为终局兜底（`available: True`）。
 3. 【工具挂载与并发安全】：重构 `dev_tasks_checkout`（批次完工分支）与 `dev_tasks_escalate`，确保在状态机 `FileLock` 释放后再调用 `_resolve_handoff_envelope`；在现有返回字典上增量挂载 `reviewer_handoff` 键，将顶层 `handoff_card` 与 `legacy_card_markdown` 保持严格字节一致。
 4. 【技能文档规范同步】：更新 `skills/dev-tasks-workflow/SKILL.md` 与 `skills/dev-tasks-review/SKILL.md`，记录三层纯净上下文能力协商信封契约、宿主 Agent 优先取用第一条 `available` 策略的自治指引、以及模型中立的 Reviewer 审查职责。
-5. 【单测刚性闭环】：编写 `tests/test_handoff_protocol.py`，覆盖 15 项核心测试（R3 manual 兜底不变式、未知 mode 自动回落 manual、provider 自动迁移映射、旧客户端字段 100% 存在、密钥零序列化泄露、路径穿越防御、以及零阻塞网络 I/O 验证）。
+5. 【单测刚性闭环】：编写 `tests/test_handoff_protocol.py`，覆盖核心断言（R3 manual 兜底不变式、未知 mode 自动回落 manual、provider 自动迁移映射、旧客户端字段 100% 存在、密钥零序列化泄露、路径穿越防御、零阻塞网络 I/O 验证、以及 stdout 字节绝对纯净断言）。
 
 #### 【防御与边缘校验】
 - R3 终局兜底不变式：`strategies` 列表末尾恒为 `strategy == "manual"` 且 `available is True`，从结构上彻底杜绝“策略集为空”或降级断裂。
@@ -381,25 +380,197 @@ class ReviewerClient(DeepSeekClient):
 - 幂等与锁释放：状态机跃迁完成后立即释放 `FileLock`，再行组装信封，杜绝持锁期间字符串拼接导致死锁。
 - 子代理只读防越权：`subagent` 载荷的 Prompt 中必须明确声明“只读审查，严禁直接修改源码，审查结论必须通过 dev_tasks_confirm 回调流转”。
 - 零客户端嗅探：严禁检测特定宿主环境变量，能力仅由配置与显式参数声明。
+- stdout 字节绝对纯净（P0#1 防护）：在单测中对完整信封组装过程进行 `capfd.readouterr()` 断言，stdout 必须输出为 `""`，严禁产生任何非 JSON-RPC 字符。
 
 #### 【DoD 验证命令】
 ```bash
-# 1. 验证多层自适应与模型解耦专项单测（15 项核心断言）
-cd plugins/quench-dev-tasks/server && python -m pytest tests/test_handoff_protocol.py -v
+# 1. 验证多层自适应与模型解耦专项单测（含能力协商与 stdout 纯净断言）
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py -v
 
-# 2. 全量回归验证（确保已有 126 项单测 100% 通过）
-cd plugins/quench-dev-tasks/server && python -m pytest tests/ -q
+# 2. 全量回归验证（确保已有单测 100% 通过）
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/ -q
 
 # 3. 语法与导入完整性校验
-cd plugins/quench-dev-tasks/server && python -c "import ast; ast.parse(open('server.py', encoding='utf-8').read()); ast.parse(open('reviewer_engine.py', encoding='utf-8').read()); print('AST OK')"
+.\venv\Scripts\python.exe -c "import ast; ast.parse(open('plugins/quench-dev-tasks/server/server.py', encoding='utf-8').read()); ast.parse(open('plugins/quench-dev-tasks/server/reviewer_engine.py', encoding='utf-8').read()); print('AST OK')"
 
 # 4. 模型解耦向后兼容验证：Generic ReviewerClient 能够正常无缝实例化
-cd plugins/quench-dev-tasks/server && python -c "from reviewer_engine import ReviewerClient, DeepSeekClient; assert issubclass(ReviewerClient, DeepSeekClient); print('Client Decoupling OK')"
+.\venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'plugins/quench-dev-tasks/server'); from reviewer_engine import ReviewerClient, DeepSeekClient; assert issubclass(ReviewerClient, DeepSeekClient); print('Client Decoupling OK')"
 ```
 
 ---
 
-### 任务 6 ⬜ 待确认 — Milestone 5: 规约文档同步与架构规范归档 (Documentation Sync & End-to-End Self-Hosting Validation)
+### 任务 6 ⬜ 待确认 — Milestone 5: 极简实时思考流落盘与环境自适应进度心跳 (Minimalist Real-time Thinking Log & Adaptive Progress Heartbeat)
+
+#### 【涉及文件】
+```
+[MODIFY] plugins/quench-dev-tasks/server/reviewer_engine.py
+[MODIFY] plugins/quench-dev-tasks/server/server.py
+[NEW] plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py
+```
+
+#### 【缺陷根因与修改目标】
+```
+根因：
+1. 外部长思考模型推演耗时 15~30 秒，缺少活性信号易引发用户“假死”焦虑；
+2. 上一轮架构推演揭示 2 处 P0 致命风险：stdio 模式下向 stdout 打印打字机字符会撕裂 JSON-RPC 协议帧造成服务崩溃 (P0#1)；向 MCP 逐 token 广播内心独白会打爆 Agent 上下文并饿死信道 (P0#2)；
+3. 遥测先行方案若完全取消 Token 硬顶，单次死循环在归档剪枝前可无限写入直接填满磁盘 (B1 盲区)；且多会话并发共用 latest.log 会发生撕裂写 (B2 盲区)；跨块密钥脱敏存在截断漏脱隐患 (B3 盲区)。
+
+目标：
+1. 单一真理源落盘 (FileSink)：全量思考流仅写入本地日志（.agents/logs/reviewer/latest-<session_id>.log），建立写入期 512KB 硬字节封顶（超限改记心跳，B1）、Session 并发文件隔离（B2）、写入期流式脱敏 + 64B 跨块滑动结转缓冲区（B3）；归档实行 50MB / 50文件 / 30天上限剪枝；
+2. 进度脉冲降维与环境自适应：彻底放弃全文信道转播，仅发轻量进度心跳（[Reviewer 思考中: 420 tokens | 6.5s]）。判定优先级定死为：mcp_context (progress) > isatty (stderr 单行动态覆写) > 静默（B5）；非 tty 环境严禁输出 \r 避免垃圾字符；
+3. 低频节流心跳：按用户指示将 MCP 心跳降频至 1.0s 一次（默认 1000ms，可选 500ms 即 1~2Hz），彻底消解信道洪泛；
+4. 宽松软天花板与标准化 JSONL 遥测：纠偏“HTTP超时兜底”逻辑误述，设置 32,000 tokens / 300s 宽松软天花板，超限时标记 truncated=true 保留部分结果转交互确认，不粗暴中断（B6）；遥测日志标准化为 JSONL（schema: 1，含事件标记与数值化 repetition_score，B7）。
+```
+
+#### 【目标签名与类型契约】
+```python
+# ---- plugins/quench-dev-tasks/server/reviewer_engine.py ----
+class ThoughtChunk(NamedTuple):
+    content: str
+    is_thought: bool
+    tokens_estimate: int
+
+class ProgressSink(Protocol):
+    def on_chunk(self, chunk: ThoughtChunk) -> None: ...
+    def on_heartbeat(self, tokens_so_far: int, elapsed_s: float) -> None: ...
+    def on_finish(self, reason: str, meta: Dict[str, Any]) -> None: ...
+
+class RotatingFileSink:
+    """Live write-time capped log sink with carry-over desensitization and rotation."""
+    def __init__(
+        self,
+        log_dir: str,
+        session_id: str,
+        max_bytes: int = 512 * 1024,
+        carry_over_bytes: int = 64,
+        flush_interval_s: float = 0.5,
+    ): ...
+
+class AdaptiveHeartbeatSink:
+    """Low-frequency heartbeat pulse adapter (1Hz / 1000ms interval)."""
+    def __init__(
+        self,
+        mcp_context: Any = None,
+        stderr: TextIO = sys.stderr,
+        interval_ms: int = 1000,
+    ): ...
+
+class TelemetryRecord(TypedDict):
+    schema: Literal[1]
+    ts: str
+    session_id: str
+    event: Literal["start", "tick", "warn_repetition", "finish"]
+    elapsed_ms: int
+    tokens_out: int
+    repetition_score: float
+    truncated: bool
+    advisory: Optional[str]
+```
+
+#### 【分步改造指引】
+1. 【流式落盘与写入期硬封顶】：在 `reviewer_engine.py` 实现 `RotatingFileSink`，启动时在 `.agents/logs/reviewer/` 下创建或清空 `latest-<session_id>.log`；维护 `written_bytes` 计数，严格约束 $\le 512\text{ KB}$，超限后写入 `[... TRUNCATED AT 512KB ...]` 并转为仅记 token 计数；每 0.5s 或 16KB 批量刷盘，保障崩溃时尾部完整性。
+2. 【写入期跨块流式脱敏】：在 `RotatingFileSink.write` 中建立 64 字节 carry-over 缓冲，每次将前次残留末尾与本次 chunk 拼接后再执行正则脱敏替换（`sk-[A-Za-z0-9_-]{20,}` $\to$ `[REDACTED]`），彻底杜绝跨网络包截断导致的密钥泄漏。
+3. 【环境自适应低频心跳】：实现 `AdaptiveHeartbeatSink`，判定逻辑锁死为：若 `mcp_context` 存在且支持 progress，调用 progress 接口；若 `stderr.isatty()` 为真且非 server 模式，向 `sys.stderr`（严禁 stdout）写入 `\r[Reviewer 思考中: {tokens} tokens | {elapsed:.1f}s]...`；否则静默。内部引入时间节流器，强制触发间隔 $\ge 1000\text{ ms}$（支持配置 500ms）。
+4. 【宽松软天花板与 JSONL 遥测】：在流式迭代器中累加 tokens，设置软天花板（默认 32,000 tokens / 300s）；达到软天花板时置 `truncated=True`，保留已生成文本并追加 warning 提示；同时向 `.agents/logs/reviewer/telemetry.jsonl` 追加标准化遥测事件。
+5. 【server.py 接线与单测闭环】：将 `AdaptiveHeartbeatSink` 与 `RotatingFileSink` 接入 `dev_tasks_refine_spec` 与 `dev_tasks_escalate`；编写 `tests/test_reviewer_observability.py` 全面断言 stdout 绝对纯净、跨块密钥脱敏成功、写入期 512KB 硬截断生效、心跳低频节流生效。
+
+#### 【防御与边缘校验】
+- B1 写入期磁盘硬顶：单次调用写入字节数由代码实时校验，`current_size() <= max_bytes` 恒成立，不依赖事后归档。
+- B2 会话并发隔离：日志命名包含 `session_id`，杜绝多任务/多会话并发执行时日志交错撕裂。
+- B3 跨块脱敏防漏：通过 64B carry-over buffer 解决跨数据包拆分的 API 密钥匹配问题。
+- B4 低频心跳防洪：心跳间隔强制 $\ge 500\text{ms}$（默认 $1000\text{ms}$），禁止逐 Token 产生 RPC 消息。
+- B5 环境优先级与终端字符保护：`mcp_context > isatty(stderr) > 静默`；非 tty 环境严禁输出 `\r`，严禁向 `stdout` 输出任何字符。
+- B6 软天花板非暴力截断：32k tokens 超限时不抛异常、不中断进程，保留已产出内容并标记 `truncated=True`。
+- B7 遥测标准化：固定 `schema: 1`，为后续模型死循环自动熔断算法提供可回放的高质量样本。
+
+#### 【DoD 验证命令】
+```bash
+# 1. 验证可观测性与心跳安全专项单测（含 stdout 纯净、跨块脱敏、512KB 封顶、节流断言）
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py -v
+
+# 2. 模拟跨块密钥脱敏断言
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py -k "test_streaming_redaction_across_chunk_boundary" -v
+
+# 3. 模拟 stdout 零污染断言
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py -k "test_stdout_is_byte_clean" -v
+
+# 4. 全量回归验证
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/ -q
+```
+
+---
+
+### 任务 7 ⬜ 待确认 — Milestone 6: Draft 任务草案态与物理可行性 Lint 闸门 (Draft Task State & Physical Feasibility Lint Gate)
+
+#### 【涉及文件】
+```
+[MODIFY] plugins/quench-dev-tasks/server/server.py
+[MODIFY] plugins/quench-dev-tasks/server/schema_validator.py
+[NEW] plugins/quench-dev-tasks/server/tests/test_draft_lint.py
+```
+
+#### 【缺陷根因与修改目标】
+```
+根因：
+Reviewer 审查模型缺乏对本地物理文件系统的感知能力（不能 read/write 文件、不能跑 pytest）。当 Reviewer 推演起草任务单时，可能臆造实际不存在的文件路径（如将 async_sink.py 臆造为 thinking_logger.py）并写入 [Affected Files]。
+若草案直接进入 [Pending] 并被人工确认，执行 Agent 领单 [In Progress] 后试图修改实际文件时，将遭到 file_scope_guard 白名单的物理硬拦截，形成“合法修改被拦、白名单文件不存在”的不可解死锁。
+
+目标：
+1. 引入 Draft 草案预处理态：Reviewer 产出的任务单标注 frontmatter `draft: true`，dev_tasks_status 默认不纳入就绪待领队列；
+2. 物理可行性 Lint 闸门：由执行 Agent 在本地自动执行严格的物理环境一致性 Lint（[MODIFY] 物理存在性核验、[NEW] 防覆盖冲突校验、[DoD] pytest 命令语法 dry-run）；
+3. 全绿晋升机制：只有物理 Lint 完全通过，才抹除 draft 标记晋升为正式 [Pending]，呈报用户确认领单，彻底在根源上消解白名单死锁风险。
+```
+
+#### 【目标签名与类型契约】
+```python
+# ---- plugins/quench-dev-tasks/server/schema_validator.py ----
+class LintIssue(NamedTuple):
+    severity: Literal["error", "warning"]
+    field: str
+    message: str
+
+class PhysicalLintResult(NamedTuple):
+    passed: bool
+    issues: List[LintIssue]
+    validated_files: List[str]
+
+def lint_task_physical_feasibility(
+    workspace_root: str,
+    task_content: str,
+) -> PhysicalLintResult:
+    """Validate physical sanity:
+    1. [MODIFY]/[DELETE] files must physically exist on disk (Path.exists() == True).
+    2. [NEW] target file must NOT already exist, but parent directory must exist.
+    3. DoD pytest commands must pass `pytest --collect-only -q` dry-run (exit code in {0, 5}).
+    """
+```
+
+#### 【分步改造指引】
+1. 【Draft 状态机扩展】：在 `schema_validator.py` 与 `server.py` 中扩展任务元数据解析，支持 `draft: true` 标识。调整 `dev_tasks_status`，使其在统计未领单任务时默认隔离 Draft 任务（可传 `include_drafts=True` 查看）。
+2. 【物理可行性 Lint 实现】：在 `schema_validator.py` 实现 `lint_task_physical_feasibility`：
+   - 逐项扫描 `[Affected Files]`：对 `[MODIFY]`、`[DELETE]` 校验 `os.path.exists`；对 `[NEW]` 校验目标不存在且父目录合法；
+   - 提取 `[DoD Verification Commands]` 中的单测命令，使用 `subprocess.run(..., ['--collect-only', '-q'])` 执行快速静态语法检查；
+   - 返回包含 `passed: bool` 与详细问题清单的结构化结果。
+3. 【草案晋升工具闭环】：在 `server.py` 新增或扩展 `dev_tasks_promote_draft` 工具（或在 `dev_tasks_refine_spec` 成功后自动触发），全绿自动晋升为正式 `[Pending]`；若 Lint 失败，保留 Draft 状态并向用户明确列出物理冲突路径与修正建议。
+4. 【单测刚性闭环】：编写 `tests/test_draft_lint.py`，覆盖虚构路径拒绝、重名覆盖拒绝、语法错误拦截、全绿正常晋升等核心断言。
+
+#### 【防御与边缘校验】
+- 路径穿越防护：Lint 校验的所有路径严格限制在 `workspace_root` 之内，解析后 `os.path.commonpath` 必须等于工作区根。
+- 命令注入防护：`--collect-only` dry-run 执行时仅接受白名单测试执行器（`pytest`），严禁执行任意外部 shell 命令。
+- 零破坏性向后兼容：历史未标记 `draft: true` 的老任务卡默认按正常任务处理，无缝兼容。
+
+#### 【DoD 验证命令】
+```bash
+# 1. 验证 Draft 态与物理 Lint 闸门单测
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_draft_lint.py -v
+
+# 2. 全量回归测试
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/ -q
+```
+
+---
+
+### 任务 8 ⬜ 待确认 — Milestone 7: 架构规约同步与端到端自举验证 (Documentation Sync & E2E Validation)
 
 #### 【涉及文件】
 ```
@@ -410,28 +581,33 @@ cd plugins/quench-dev-tasks/server && python -c "from reviewer_engine import Rev
 
 #### 【缺陷根因与修改目标】
 ```
-根因：底层工具增强后，系统架构规约与项目模板需要同步升级至 v1.4.0，明确双轨自适应协议、审查引擎标准与平滑迁移路线。
-目标：更新双语规范文档与配置模板，固化零 Opus 自举、双轨交接卡规范以及未来向 Gemini 4 Pro 原生平滑迁移的机制。
-```
-
-#### 【目标签名与类型契约】
-```
-None (Documentation and schema specification updates)
+根因：在完成模型解耦、极简流式落盘与 Draft 物理 Lint 闸门后，双语架构规约与模板文件需要同步升级至 v1.4.0，确立解耦后的多层能力协商、观测基准与 Draft 准入规范。
+目标：更新中英文规范文档与配置模板，固化 ReviewerClient 抽象、RotatingFileSink 规范、Draft 物理门禁与 100% 测试自举基线。
 ```
 
 #### 【分步改造指引】
-1. 更新 dev_tasks_mcp_specification.md 与 dev_tasks_mcp_specification_zh.md，记录 ReviewerEngine、refine_spec 以及双轨自适应交接协议（Dual-Track Adaptive Handoff Protocol）。
-2. 更新 templates/quench_stack.yaml，提供 reviewer_engine 声明示例与双轨模式注释。
-3. 执行端到端自举验证并回归验证全量 pytest 测试套件。
-
-#### 【防御与边缘校验】
-- 双语同步性：英文与中文规约保持版本号与章节结构 1:1 对齐
-- 配置注释完备性：模板中必须明确标注 provider='none' 与 provider='deepseek' 的行为差异
+1. 更新 `dev_tasks_mcp_specification.md` 与 `dev_tasks_mcp_specification_zh.md`，同步记录 Reviewer 职责流水线、极简观测规范、Draft 状态流转图与自适应协商协议。
+2. 更新 `templates/quench_stack.yaml`，提供最新的通用 ReviewerClient 配置范式与低频心跳说明。
+3. 执行全流程自举验证与 100% 单测回归。
 
 #### 【DoD 验证命令】
 ```bash
-.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/ -q
 ```
 
 ---
 
+## Future Roadmap / 未来演进路线图
+
+> 本章节记录已完成架构论证、预备在后续里程碑中实施的高级特性（暂不纳入当前施工任务）：
+
+1. **动态四级自适应路由（L0~L3 Tiering）**：
+   - `L0 bypass`（纯文档/注释，0s 延迟）
+   - `L1 direct`（单文件清晰修复，0s 延迟）
+   - `L2 auto`（多文件/契约微调，轻量 Reviewer 复核 5~8s）
+   - `L3 deep_review`（跨模块/接口破坏/返工 $\ge 2$，全量深推 15~30s）
+   - 决策合并规则：$\text{final\_tier} = \max(\text{user\_override},\ \text{runner\_suggestion},\ \text{hard\_trigger\_floor})$
+2. **确定性硬触发地板（Hard Trigger Floor）**：
+   - 变更文件数 $>3$、AST 公开签名 diff、返工次数 $\ge 2$ 时强制锁定 L3，用户降级必须显式走 `dev_tasks_set_bypass` 审计通道。
+3. **推测性预热（Speculative Pre-warm）**：
+   - 意图澄清后半段异步打包 Evidence Pack 提前建立推理连接，抵消网络握手延迟。
