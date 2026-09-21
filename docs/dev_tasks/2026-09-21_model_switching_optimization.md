@@ -285,7 +285,7 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 
 ---
 
-### 任务 5 ⬜ 待确认 — Milestone 4: 多层能力自适应交接协议与模型解耦 (Multi-Tier Adaptive Reviewer Handoff Protocol & Model Decoupling)
+### 任务 5 ✔️ 已完成 — Milestone 4: 多层能力自适应交接协议与模型解耦 (Multi-Tier Adaptive Reviewer Handoff Protocol & Model Decoupling)
 
 #### 【涉及文件】
 ```

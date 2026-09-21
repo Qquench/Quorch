@@ -11,7 +11,7 @@ import tempfile
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Literal
 import yaml
 
 CURRENT_SCHEMA_VERSION = "1.0"
@@ -88,15 +88,22 @@ def _match_glob(target_rel: str, pattern: str) -> bool:
     return False
 
 
+DispatchStrategy = Literal["subagent", "engine", "manual"]
+
+
 @dataclass
 class ReviewerEngineConfig:
-    provider: str = "none"  # "deepseek" | "none"
+    mode: str = "auto"  # "auto" | "subagent" | "engine" | "manual"
+    strategy_order: list[str] = field(
+        default_factory=lambda: ["subagent", "engine", "manual"]
+    )
+    provider: str = "none"  # "deepseek" | "openai" | "ollama" | "custom" | "none"
     model: str = "deepseek-flash"
     api_key_env: str = "DEEPSEEK_API_KEY_Quench"
     base_url: str = "https://api.deepseek.com"
     thinking: bool = True
     reasoning_effort: str = "high"
-    timeout_seconds: int = 30
+    timeout_seconds: int = 60
     max_retries: int = 2
     max_tool_hops: int = 3
 
@@ -359,19 +366,42 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
     re_data = data.get("reviewer_engine")
     if isinstance(re_data, dict):
+        provider_val = str(re_data.get("provider", "none")).lower().strip()
+        raw_mode = str(re_data.get("mode", "auto")).lower().strip()
+        if raw_mode not in ("auto", "subagent", "engine", "manual"):
+            raw_mode = "auto"
+
+        # 平滑迁移旧版配置：若未显式指定 mode，根据 provider 判断
+        if "mode" not in re_data:
+            if provider_val == "none":
+                effective_mode = "manual"
+            else:
+                effective_mode = "auto"
+        else:
+            effective_mode = raw_mode
+
+        order_val = re_data.get("strategy_order")
+        if isinstance(order_val, list) and order_val:
+            parsed_order = [str(s).lower().strip() for s in order_val if str(s).lower().strip() in ("subagent", "engine", "manual")]
+            strategy_order = parsed_order if parsed_order else ["subagent", "engine", "manual"]
+        else:
+            strategy_order = ["subagent", "engine", "manual"]
+
         reviewer_engine = ReviewerEngineConfig(
-            provider=str(re_data.get("provider", "none")).lower().strip(),
+            mode=effective_mode,
+            strategy_order=strategy_order,
+            provider=provider_val,
             model=str(re_data.get("model", "deepseek-flash")).strip(),
             api_key_env=str(re_data.get("api_key_env", "DEEPSEEK_API_KEY_Quench")).strip(),
             base_url=str(re_data.get("base_url", "https://api.deepseek.com")).strip(),
             thinking=bool(re_data.get("thinking", True)),
             reasoning_effort=str(re_data.get("reasoning_effort", "high")).strip(),
-            timeout_seconds=int(re_data.get("timeout_seconds", 30)),
+            timeout_seconds=int(re_data.get("timeout_seconds", 60)),
             max_retries=int(re_data.get("max_retries", 2)),
             max_tool_hops=int(re_data.get("max_tool_hops", 3)),
         )
     else:
-        reviewer_engine = ReviewerEngineConfig()
+        reviewer_engine = ReviewerEngineConfig(mode="manual", provider="none")
 
     governance_scope_data = data.get("governance_scope")
     if not isinstance(governance_scope_data, dict):

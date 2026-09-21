@@ -201,9 +201,11 @@ class DeepSeekClient:
         return None
 
     def is_available(self) -> bool:
-        """检查 Reviewer 引擎是否就绪。"""
-        if self.config.provider not in ("deepseek", "deepseek-compatible"):
+        """检查 Reviewer 引擎是否就绪。支持通用 OpenAI 兼容端点与本地 Ollama。"""
+        if self.config.provider in ("none", "", False):
             return False
+        if self.config.provider == "ollama":
+            return True
         return bool(self.resolve_api_key())
 
     @staticmethod
@@ -375,3 +377,9 @@ class DeepSeekClient:
         fn = functools.partial(self.complete, messages, timeout, total_deadline_s=total_deadline_s)
         async with _REVIEWER_LIMITER:
             return await anyio.to_thread.run_sync(fn, abandon_on_cancel=True)
+
+
+class ReviewerClient(DeepSeekClient):
+    """Generic OpenAI-compatible Reviewer Client supporting any standard /chat/completions provider."""
+    pass
+

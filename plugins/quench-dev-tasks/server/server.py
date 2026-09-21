@@ -12,7 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal, TypedDict
 from fastmcp import FastMCP
 
 SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
@@ -49,8 +49,8 @@ import functools
 import anyio
 from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
-from project_config import load_project_config
-from reviewer_engine import PromptAssembler, DeepSeekClient
+from project_config import load_project_config, QuenchStackConfig, ReviewerEngineConfig, DispatchStrategy
+from reviewer_engine import PromptAssembler, DeepSeekClient, ReviewerClient
 from schema_validator import validate_task_schema
 from state_machine import (
     ALL_STATUSES,
@@ -666,6 +666,202 @@ def dev_tasks_confirm(
     }
 
 
+DispatchStrategy = Literal["subagent", "engine", "manual"]
+
+
+class ReviewerHandoff(TypedDict, total=False):
+    contract_version: Literal["1.0"]
+    task_id: str
+    task_path: str
+    reason: str  # "batch_complete" | "escalation" | "rework_required"
+    summary: str
+    preferred: DispatchStrategy
+    strategies: list[Dict[str, Any]]
+    legacy_card_markdown: str
+
+
+def _resolve_handoff_envelope(
+    workspace_root: str,
+    config: QuenchStackConfig,
+    task_id: str,
+    task_path: str,
+    reason: str,
+    context_files: Optional[List[str]] = None,
+    host_capabilities: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Pure, side-effect-free envelope builder with zero synchronous network I/O.
+    Enforces R3 invariant: strategies[-1]['strategy'] == 'manual' and available == True.
+    """
+    ws_root = os.path.abspath(workspace_root)
+
+    # Path safety: ensure task_path is normalized and relative to workspace_root
+    if os.path.isabs(task_path):
+        try:
+            rel_task_path = os.path.relpath(task_path, ws_root).replace("\\", "/")
+        except ValueError:
+            rel_task_path = task_path.replace("\\", "/")
+    else:
+        rel_task_path = task_path.replace("\\", "/")
+
+    # Context files safety: restrict to workspace_root, cap at 8 files
+    safe_context_files: List[str] = []
+    if context_files:
+        for cf in context_files[:8]:
+            try:
+                cf_clean = str(cf).strip()
+                if not cf_clean:
+                    continue
+                cf_abs = os.path.normpath(os.path.join(ws_root, cf_clean))
+                # Prevent path traversal outside workspace_root
+                if os.path.commonpath([ws_root, cf_abs]) == ws_root:
+                    rel_cf = os.path.relpath(cf_abs, ws_root).replace("\\", "/")
+                    safe_context_files.append(rel_cf)
+            except Exception:
+                pass
+
+    re_cfg = getattr(config, "reviewer_engine", None)
+    if re_cfg is None:
+        re_cfg = ReviewerEngineConfig()
+
+    client = ReviewerClient(re_cfg)
+    client_available = client.is_available()
+
+    mode = getattr(re_cfg, "mode", "auto") or "auto"
+    if mode not in ("auto", "subagent", "engine", "manual"):
+        mode = "auto"
+
+    configured_order = getattr(re_cfg, "strategy_order", None)
+    if not isinstance(configured_order, list) or not configured_order:
+        configured_order = ["subagent", "engine", "manual"]
+    else:
+        configured_order = [s for s in configured_order if s in ("subagent", "engine", "manual")]
+        if not configured_order:
+            configured_order = ["subagent", "engine", "manual"]
+
+    # 1. subagent strategy
+    subagent_allowed = mode in ("auto", "subagent")
+    if host_capabilities is not None:
+        subagent_supported = "subagent" in host_capabilities
+    else:
+        subagent_supported = True
+
+    subagent_available = subagent_allowed and subagent_supported
+
+    subagent_prompt = (
+        f"Role: Senior Architecture Reviewer (Quench Governance Framework).\n"
+        f"You are invoked to conduct an in-depth, read-only architectural review for Task '{task_id}'.\n"
+        f"Task Path: {rel_task_path}\n"
+        f"Handoff Reason: {reason}\n"
+        f"Reference Files: {', '.join(safe_context_files) if safe_context_files else 'None'}\n\n"
+        f"CRITICAL DISCIPLINE & INSTRUCTIONS:\n"
+        f"1. You are strictly in READ-ONLY mode. Do NOT edit or overwrite any project source code files directly;\n"
+        f"2. Conduct deep causal analysis, evaluate concurrency, anti-patterns, boundary conditions, and test assertions;\n"
+        f"3. On review completion, callback via `dev_tasks_confirm` to transition approved tasks, or provide revision guidance."
+    )
+
+    subagent_strat: Dict[str, Any] = {
+        "strategy": "subagent",
+        "available": subagent_available,
+        "payload": {
+            "agent": "reviewer",
+            "prompt": subagent_prompt,
+            "context_files": safe_context_files,
+            "callback_instruction": "Inspect task specification, conduct read-only review, and callback with dev_tasks_confirm upon approval.",
+        },
+    }
+
+    # 2. engine strategy
+    engine_allowed = mode in ("auto", "engine")
+    engine_available = engine_allowed and client_available
+
+    key_present = bool(client.resolve_api_key()) or (re_cfg.provider == "ollama")
+
+    engine_strat: Dict[str, Any] = {
+        "strategy": "engine",
+        "available": engine_available,
+        "payload": {
+            "provider": re_cfg.provider,
+            "model": re_cfg.model,
+            "api_key_present": key_present,
+            "guidance": "Call dev_tasks_refine_spec to automatically refine, harden, and generate test assertions using the configured Reviewer engine.",
+        },
+    }
+
+    # 3. manual strategy (R3 invariant: ALWAYS True!)
+    manual_strat: Dict[str, Any] = {
+        "strategy": "manual",
+        "available": True,
+        "payload": {
+            "guidance": "Switch to a senior architecture reviewer model in a new clean session, paste the handoff card, and confirm revision before resuming.",
+        },
+    }
+
+    strat_map = {
+        "subagent": subagent_strat,
+        "engine": engine_strat,
+        "manual": manual_strat,
+    }
+
+    ordered_strats: List[Dict[str, Any]] = []
+    for s_name in configured_order:
+        if s_name != "manual" and s_name in strat_map:
+            ordered_strats.append(strat_map[s_name])
+    for s_name in ["subagent", "engine"]:
+        if strat_map[s_name] not in ordered_strats:
+            ordered_strats.append(strat_map[s_name])
+    # R3 Invariant: manual must always be last and available == True
+    ordered_strats.append(manual_strat)
+
+    if mode == "manual":
+        preferred: DispatchStrategy = "manual"
+    elif mode == "subagent" and subagent_strat["available"]:
+        preferred = "subagent"
+    elif mode == "engine" and engine_strat["available"]:
+        preferred = "engine"
+    else:
+        preferred = "manual"
+        for s in ordered_strats:
+            if s["available"]:
+                preferred = s["strategy"]  # type: ignore
+                break
+
+    card_lines = [
+        "================================================================================",
+        "📋 Quench 任务交接卡 / Quench Task Handoff Card",
+        "================================================================================",
+        f"• Task ID / 任务编号:       {task_id}",
+        f"• Task Path / 单据路径:     {rel_task_path}",
+        f"• Handoff Reason / 交接原因: {reason}",
+        f"• Preferred Mode / 推荐模式: {preferred}",
+        "--------------------------------------------------------------------------------",
+        "【核心指引 / Execution Instructions】",
+        "1. [禁止就地切换] 严禁在当前长会话内就地切换大模型（规避数万历史 Token 冗余重传与注意力稀释）；",
+        f"2. [执行交接] 当前推荐采用【{preferred}】策略进行审查与重构：",
+    ]
+    if preferred == "subagent":
+        card_lines.append("   - 宿主支持原生子代理调度：请调起 reviewer 子代理，并下发只读审查提示词；")
+    elif preferred == "engine":
+        card_lines.append(f"   - 审查引擎已就绪 ({re_cfg.provider} / {re_cfg.model})：请调用 dev_tasks_refine_spec 自动强化规约；")
+    else:
+        card_lines.append("   - 终局兜底模式：请在新的纯净会话中切换至高阶架构审查模型，粘贴本卡完成审查。")
+    card_lines.append("================================================================================")
+    legacy_card_markdown = "\n".join(card_lines)
+
+    manual_strat["payload"]["card_markdown"] = legacy_card_markdown
+
+    envelope: ReviewerHandoff = {
+        "contract_version": "1.0",
+        "task_id": task_id,
+        "task_path": rel_task_path,
+        "reason": reason,
+        "summary": f"Reviewer handoff triggered for task '{task_id}' (reason: {reason}, preferred: {preferred})",
+        "preferred": preferred,
+        "strategies": ordered_strats,
+        "legacy_card_markdown": legacy_card_markdown,
+    }
+    return envelope
+
+
 @mcp.tool()
 def dev_tasks_checkout(
     workspace_root: str,
@@ -778,6 +974,19 @@ def dev_tasks_checkout(
                 rework_tasks.append({"file": os.path.basename(f_path), "id": t.id, "title": t.title})
 
     if rework_tasks or pending_tasks:
+        primary_task = rework_tasks[0] if rework_tasks else pending_tasks[0]
+        primary_tid = str(primary_task.get("id", ""))
+        primary_file = str(primary_task.get("file", ""))
+        handoff_reason = "rework_required" if rework_tasks else "batch_complete"
+
+        envelope = _resolve_handoff_envelope(
+            workspace_root=workspace_root,
+            config=config,
+            task_id=primary_tid,
+            task_path=os.path.join(dev_tasks_dir, primary_file),
+            reason=handoff_reason,
+        )
+
         return {
             "task_id": None,
             "batch_finished": True,
@@ -788,6 +997,8 @@ def dev_tasks_checkout(
             "pending_tasks": pending_tasks[:5],
             "rework_tasks": rework_tasks[:5],
             "handoff_recommended": True,
+            "reviewer_handoff": envelope,
+            "handoff_card": envelope["legacy_card_markdown"],
             "instruction": (
                 "[Current Batch Finished / Tasks Pending Review or Rework]\n"
                 "1. If rework/pending tasks exist: Output [Quench Task Handoff Card] to guide user to switch to senior Reviewer model in a new session;\n"
@@ -1153,6 +1364,15 @@ def dev_tasks_escalate(
     except Exception:
         pass
 
+    envelope = _resolve_handoff_envelope(
+        workspace_root=workspace_root,
+        config=config,
+        task_id=task_id,
+        task_path=target_path,
+        reason="escalation",
+        context_files=context_files,
+    )
+
     return {
         "status": "escalated",
         "task_id": task_id,
@@ -1163,6 +1383,8 @@ def dev_tasks_escalate(
         "handoff_required": True,
         "auto_diagnostics": auto_diagnostics,
         "engine": engine_provider,
+        "reviewer_handoff": envelope,
+        "handoff_card": envelope["legacy_card_markdown"],
         "instruction": (
             "[Architectural Review Handoff Triggered] Immediately halt code modifications! "
             "Output [Quench Task Handoff Card] to user and await revision by senior Reviewer model in a new session.\n"
