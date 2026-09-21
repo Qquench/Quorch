@@ -37,3 +37,10 @@ governance_scope:
     - "*.md"
 
 schema_version: "1.0"
+
+reviewer_engine:
+  provider: "deepseek"
+  model: "deepseek-flash"
+  api_key_env: "DEEPSEEK_API_KEY_Quench"
+  thinking: true
+  reasoning_effort: "high"
