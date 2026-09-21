@@ -194,26 +194,93 @@ def dev_tasks_refine_spec(workspace_root: str, draft_task: Dict[str, Any], conte
 
 #### 【缺陷根因与修改目标】
 ```
-根因：当前 dev_tasks_complete 虽然会校验 DoD 文本，但对业务受管代码缺乏物理层面的单测增量强制审计；终端缺乏独立的审查引擎连通性体检入口。目标：强化 dev_tasks_complete 的 Mandatory Assertion Rule；在 cli.py 增加 check-engine 子命令。
+根因：dev_tasks_complete 中的 _audit_test_changes 虽通过 git diff 收集测试变动，但审计结果 passed=False 从未物理阻断 complete，导致 [Mandatory Assertion Rule] 形同软约束，受管代码（is_path_governed 命中的 server/** 等）可在零单测增量的情况下被标记为 ✔️ 已完成；同时终端缺少独立验证 ReviewerEngine 配置/连通性/思考流/缓存状态的入口。
+目标：将单测增量审计升级为物理刚性门禁（无合法豁免即 status='rejected' 且不改状态机），并在 quorch CLI 新增可退出码判定、输出脱敏、可离线 mock 的 check-engine 体检命令，配套 test_dod_guard.py 全量断言覆盖。
 ```
 
 #### 【目标签名与类型契约】
-```
-def _verify_test_increment_and_assertions(workspace_root: str, task: Task) -> Tuple[bool, str]: ...
+```python
+# plugins/quench-dev-tasks/server/server.py
+_EXEMPTION_PATTERN = re.compile(
+    r"\[EXEMPTION:\s*(docs-only|config-only|non-behavioral-refactor)\s*\]",
+    re.IGNORECASE,
+)
+_TEST_FILE_PATTERN = re.compile(r"(^|/)tests?/.*test_.*\.py$|(^|/).*_test\.py$")
+_ASSERTION_MARKERS = ("assert ", "assert(", "pytest.raises")
+
+def _audit_test_changes(
+    workspace_root: str,
+    config: Any,
+    test_evidence: str | None = None,
+) -> Dict[str, Any]:
+    """Return-value contract (backward-compatible, additive keys):
+    {
+      "passed": bool,                       # assertions_found or exempted or degraded
+      "governed_code_changed": list[str],   # rel paths, is_path_governed(hit)
+      "test_files_changed": list[str],      # rel paths, _TEST_FILE_PATTERN hit
+      "assertions_found": bool,             # new/modified test content has marker
+      "detected_markers": list[str],
+      "exempted": bool,
+      "exemption_reason": str | None,
+      "degraded": bool,                     # git missing / not a repo / detached
+      "messages": list[str],
+    }
+    """
+
+# dev_tasks_complete(...) additive return keys:
+#   {"status": "completed" | "rejected", "audit": <_audit_test_changes dict>,
+#    "guidance": str}   # task state UNCHANGED on 'rejected'
+
+# plugins/quench-dev-tasks/server/cli.py
+def _mask_secret(secret: str | None) -> str: ...
+#   None -> "NOT SET"; len<=8 -> "****"; else f"{head4}****{tail4}"
+
+def cmd_check_engine(
+    workspace_root: str,
+    plain: bool = False,
+    as_json: bool = False,
+) -> int:
+    """Exit code: 0 = ok; 1 = not-configured/auth-fail/connect-fail/timeout.
+    --json stdout schema (single JSON object):
+    {
+      "provider": str, "model": str,
+      "api_key_env": str, "api_key_present": bool, "api_key_masked": str,
+      "connectivity_ok": bool, "latency_ms": int | null,
+      "thinking_supported": bool, "thinking_probe": "config" | "live",
+      "exit_code": int
+    }
+    """
+
+# main(argv): subparser 'check-engine' + persistent flag 'check --engine' both
+#   delegate to cmd_check_engine; adds '--json' and honors '--plain'.
 ```
 
 #### 【分步改造指引】
-1. 在 server.py 的 dev_tasks_complete 中强化受管文件改动时的单测增量与断言检测。
-2. 在 cli.py 中新增 check-engine 命令，输出审查引擎配置、连通性与缓存状态报告。
-3. 编写 tests/test_dod_guard.py 验证缺少单测时阻断 complete。
+1. 【审计收集重构】重写 `server.py::_audit_test_changes`：以 `config.is_path_governed()` 为唯一受管判定源，通过 `git -C <root> status --porcelain`、`git diff --name-only`、`git diff --cached --name-only` 三路并集收集变更文件（区分 tracked 与 `??` untracked）。对 tracked 文件仅扫描 diff 新增行（`--unified=0`）以规避历史断言误判；对 untracked 文件直接读取全文；在 `_TEST_FILE_PATTERN` 命中的测试文件中匹配 `_ASSERTION_MARKERS`。所有 git 调用包裹在 try/except（`FileNotFoundError`/`CalledProcessError`/非仓库）→ 置 `degraded=True` 并写入 `messages`，严禁抛出异常。
+2. 【物理门禁硬化】改造 `server.py::dev_tasks_complete`：在既有状态校验之后执行审计；当 `governed_code_changed` 非空 且 `not assertions_found` 且 `not exempted` 且 `not degraded` 时，**不得调用 `transition_task`**，直接返回 `{"status": "rejected", "audit": {...}, "guidance": <分步修复指引>}`（任务保持 `🔨 执行中`），并向 `.agents/.quench_hook.log` 追加审计拒绝记录（复用幂等日志写入）；合法豁免须由 `test_evidence` 参数精确匹配 `_EXEMPTION_PATTERN`，并抽取 `exemption_reason`。
+3. 【CLI 体检实现】在 `cli.py` 新增 `_mask_secret()` 与 `cmd_check_engine()`：经 `load_project_config` 载入配置，实例化 `ReviewerEngineConfig`/`DeepSeekClient`，以 `resolve_api_key()` 判定 `api_key_present` 并掩码；连通性探针复用 `DeepSeekClient.complete` 触发一次极短预算请求（有界超时，默认 ≤5s，可被 `monkeypatch` 注入），记录 `latency_ms`；`thinking_supported` 由 model 名前缀（如 `deepseek-reasoner`/深度思考）静态判定；最终按 `--json` 输出单行结构化 JSON 或 `--plain` 人类可读文本，返回退出码 0/1。
+4. 【子命令接线】在 `cli.py::main` 注册 `check-engine` 子解析器并新增持久参数 `--json`；同时为 `check` 子命令挂载 `--engine` 标志，命中时委托 `cmd_check_engine`。强制 `--json` 模式下禁用 ANSI 颜色（与 `should_enable_color`/`reconfigure` 协同），保证 stdout 为可被 `json.loads` 解析的唯一对象。
+5. 【单测闭环】新建 `tests/test_dod_guard.py`：使用 `tmp_path` + 伪 git 仓库（或 `monkeypatch` 注入 subprocess 结果）覆盖——(a) 受管代码变更且测试无断言 → `passed=False` 且 complete 返回 `status='rejected'` 且任务状态仍为 `🔨 执行中`；(b) `test_evidence` 携带 `[EXEMPTION: config-only]` → 放行；(c) 仅 `docs/**.md` 变更 → `governed_code_changed` 为空自然放行；(d) untracked 新测试文件含 `assert ` → 被识别；(e) `check_engine` 正常分支退出码 0 与异常/缺 Key 分支退出码 1，且 `--json` 输出键完整、API Key 完全脱敏。
 
 #### 【防御与边缘校验】
-- 区分代码与文档：纯文档/配置改动不强制要求单测增量，通过 Dual-Track 引擎豁免
+- 离线/无 Git 降级：git 二进制缺失、非 git 仓库、detached HEAD 或命令非零退出时置 `degraded=True`，不得抛异常阻塞 complete，但必须写入 `messages` 与 hook 日志，便于离线边缘环境复现审计退化。
+- Untracked 反漏：`git diff` 默认不显示 `??` 新增测试文件，必须经 `git status --porcelain` 补采并直接读取全文匹配断言标记，否则本任务自身新增的 `test_dod_guard.py` 将触发自相矛盾的误拒。
+- 豁免严格白名单：`_EXEMPTION_PATTERN` 仅接受 `docs-only|config-only|non-behavioral-refactor` 三类；空串、拼写错误或自由文本一律视为“未豁免”，防止以随意文案绕过物理门禁。
+- 受管边界单调：受管判定必须复用 `config.is_path_governed()`，禁止另行硬编码路径；纯文档/非受管路径（`docs/**`、`*.md`、`archive/**`）应使 `governed_code_changed` 为空从而天然放行，不得误伤。
+- 拒绝只读无副作用：`status='rejected'` 分支严禁申请 FileLock、严禁调用 `_atomic_write_json`/`transition_task`，确保任务状态保持 `🔨 执行中`，且重复调用返回同一拒绝结果（幂等）。
+- 连通性探针有界：`cmd_check_engine` 的网络探针必须受总耗时预算熔断（默认 ≤5s），超时/连接错误统一映射退出码 1，严禁在无 Key 或无网络时挂起 CLI。
+- 脱敏不可逆：`_mask_secret` 对 `None` 返回 `NOT SET`、长度 ≤8 返回全 `****`、否则仅暴露首4+尾4，任何路径（含异常堆栈）都不得回显完整 API Key。
+- Windows 环境穿透：`check-engine` 必须复用 `resolve_api_key()`（含注册表 `_read_windows_env_var` 回退）解析 `DEEPSEEK_API_KEY_Quench`，保证免重启 IDE/终端下的可用性判定一致。
+- 输出纯净性：`--json` 模式下必须强制关闭 ANSI 颜色且 stdout 只含单个可 `json.loads` 的对象，人类可读分支不得污染机器可解析输出，保证跨平台（Windows/Ubuntu）确定性。
+- 断言匹配健壮：标记匹配须同时覆盖 `assert `、`assert(` 与 `pytest.raises`，仅扫描新增/变更行，避免将历史遗留断言误判为本次增量。
 
 #### 【DoD 验证命令】
 ```bash
-.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_dod_guard.py
-.\venv\Scripts\python.exe plugins/quench-dev-tasks/server/cli.py check-engine
+python -m pytest plugins/quench-dev-tasks/server/tests/test_dod_guard.py -v
+python -m pytest plugins/quench-dev-tasks/server/tests/test_dod_guard.py -k "dod_guard or exemption or untracked or governed or check_engine" -v
+python -m pytest plugins/quench-dev-tasks/server/tests/ -q
+python plugins/quench-dev-tasks/server/cli.py check-engine --json
+python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 ```
 
 ---
