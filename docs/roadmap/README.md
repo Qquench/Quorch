@@ -1,13 +1,11 @@
 # Development Roadmaps Index
 
-[English](README.md) | [简体中文](README_zh.md)
-
 > **Overview**:  
 > This directory houses the **stage-based development roadmaps** actively advancing within current project cycles.  
 > Each stage plans and breaks down epic-level tasks, which are subsequently instantiated into task documents under `docs/dev_tasks/`.  
 > Once a stage reaches full closure, its roadmap is moved to `archive/`.  
 > 
-> For **long-term exploratory proposals and prospective architectural research**, please refer to 🚀 [future_roadmap/](../../future_roadmap/README.md).
+> For **long-term exploratory proposals and prospective architectural research**, please refer to 🚀 [docs/future_roadmap_ideas.md](../future_roadmap_ideas.md).
 
 ---
 
@@ -15,7 +13,7 @@
 
 | Stage | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
-| **Stage 5** | 🚀 **TBD** | **Hybrid Reviewer Dynamic Routing & Cross-Language Zoning** | Task-aware semantic routing, red-team cross validation, and four-zone semantic guards (see [future_roadmap/](../../future_roadmap/README.md)) | 💡 **In Planning** |
+| **Stage 5** | 🚀 **TBD** | **Hybrid Reviewer Dynamic Routing & Cross-Language Zoning** | Task-aware semantic routing, red-team cross validation, and four-zone semantic guards (see [docs/future_roadmap_ideas.md](../future_roadmap_ideas.md)) | 💡 **In Planning** |
 
 ---
 

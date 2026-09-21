@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README_zh.md)
 
+> 💡 **文档语言政策**：本项目技术规范、配置手册与变更日志以英文为唯一权威版本 (English as SSOT)。中文 Issue 与 PR 讨论完全欢迎；如需中文查阅，可使用 LLM 辅助按需翻译。
+
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Python: >=3.11](https://img.shields.io/badge/python-3.11+-brightgreen.svg)](https://www.python.org/)
 [![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
@@ -134,7 +136,7 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 
 ## 📖 相关文档
 
-- ⚙️ [docs/configuration_zh.md](docs/configuration_zh.md)：`quench_stack.yaml` 完整配置说明与字段手册。
+- ⚙️ [docs/configuration.md](docs/configuration.md)：`quench_stack.yaml` 完整配置说明与字段手册 (English as SSOT)。
 - 🌐 [CHANGELOG.md](CHANGELOG.md)：版本更新日志与历史架构演进记录。
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md)：开源贡献指南与本地测试规范。
 - ❓ [docs/FAQ.md](docs/FAQ.md)：常见环境问题、编码乱码、企业代理与 Hook 排查手册。

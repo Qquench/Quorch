@@ -1,7 +1,5 @@
 # Quench Configuration Guide (`quench_stack.yaml`)
 
-[English](configuration.md) | [简体中文](configuration_zh.md)
-
 This document provides a comprehensive reference for configuring **Quench Dev-Orchestrator (`quorch`)** in your repository via `.agents/quench_stack.yaml`.
 
 ---

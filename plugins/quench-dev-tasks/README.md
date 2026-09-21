@@ -4,7 +4,7 @@
 
 This directory contains the source implementation of the `quench-dev-tasks` plugin and FastMCP governance server.
 
-- **Architecture & Tooling Specification**: See [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md) (or [`dev_tasks_mcp_specification_zh.md`](../../dev_tasks_mcp_specification_zh.md))
+- **Architecture & Tooling Specification**: See [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)
 - **Project Documentation & Quick Start**: See root [`README.md`](../../README.md)
 - **Configuration Guide**: See [`docs/configuration.md`](../../docs/configuration.md)
 - **Skills & Rules**:

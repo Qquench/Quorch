@@ -1,7 +1,5 @@
 # Changelog
 
-[English](CHANGELOG.md) | [简体中文](CHANGELOG_zh.md)
-
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 

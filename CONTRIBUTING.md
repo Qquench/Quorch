@@ -1,7 +1,5 @@
 # Contributing to Quench Dev-Orchestrator (`quorch`)
 
-[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING_zh.md)
-
 Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We welcome bug fixes, feature enhancements, documentation improvements, and architectural suggestions.
 
 > [!TIP]
@@ -74,6 +72,15 @@ All non-trivial changes should be planned using standard DevTasks containing the
 
 ---
 
+## 🌐 Documentation Language Policy (English as SSOT)
+
+To eliminate ambiguity, prevent semantic drift, and optimize prompt token efficiency for AI agents, **English is the single source of truth (SSOT)** for all technical specifications (`dev_tasks_mcp_specification.md`), configuration manuals (`docs/configuration.md`), FAQs, and CHANGELOG entries.
+
+- **Community Discussions**: Issues, Pull Request descriptions, and community discussions in **both English and Chinese** are warmly welcomed.
+- **Reading Documentation**: Readers who prefer reading in other languages are encouraged to use LLMs or browser translation tools on the canonical English documentation.
+
+---
+
 ## 🚀 Pull Request Workflow
 
 1. Create a descriptive feature branch:
@@ -87,4 +94,4 @@ All non-trivial changes should be planned using standard DevTasks containing the
    $env:PYTHONPATH="plugins/quench-dev-tasks/server"; python -m pytest plugins/quench-dev-tasks/server/tests -v
    ```
 4. Commit your changes using conventional commit messages (e.g., `feat(engine): add ...`, `fix(guard): handle ...`, `docs: update ...`).
-5. Push to your fork and submit a Pull Request to the `master` branch.
+5. Push to your fork and submit a Pull Request to the `main` branch.

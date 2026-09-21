@@ -1,7 +1,5 @@
 # Quench Dev-Orchestrator Task Management
 
-[English](README.md) | [简体中文](README_zh.md)
-
 > This directory follows the **Quench Dual-Model DevTask Management Workflow (Architect Reviewer + Agile Runner)**.  
 > All development conventions (status markers, the six core fields, session initiation protocols, architectural review guidelines, DoD verification standards) are defined in the built-in specifications:
 > - Core Workflow: [`plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md`](../../plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)

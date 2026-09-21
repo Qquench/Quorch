@@ -1,7 +1,5 @@
 # Frequently Asked Questions (FAQ)
 
-[English](FAQ.md) | [简体中文](FAQ_zh.md)
-
 This document collects common issues, troubleshooting tips, and technical questions encountered during the installation, configuration, and daily use of **Quench Dev-Orchestrator (`quorch`)**.
 
 ---

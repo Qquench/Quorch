@@ -1,7 +1,5 @@
 # Quench-DevTasks MCP Service Architecture & Specification (DevTasks Orchestrator Spec)
 
-[English](dev_tasks_mcp_specification.md) | [简体中文](dev_tasks_mcp_specification_zh.md)
-
 > **Version**: v1.4.0 (Implemented & Verified)  
 > **Implementation Status**: ✔️ Fully implemented and verified with 167+ automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, ReviewerClient engine, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
 > **Source Specification**: `dev_tasks_mcp_specification.md`  

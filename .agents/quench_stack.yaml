@@ -33,7 +33,6 @@ governance_scope:
     - "plugins/quench-dev-tasks/agents/**"
   unmanaged_paths:
     - "docs/**"
-    - "future_roadmap/**"
     - "*.md"
 
 schema_version: "1.0"
