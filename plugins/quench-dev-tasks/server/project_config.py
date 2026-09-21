@@ -89,6 +89,19 @@ def _match_glob(target_rel: str, pattern: str) -> bool:
 
 
 @dataclass
+class ReviewerEngineConfig:
+    provider: str = "none"  # "deepseek" | "none"
+    model: str = "deepseek-flash"
+    api_key_env: str = "DEEPSEEK_API_KEY_Quench"
+    base_url: str = "https://api.deepseek.com"
+    thinking: bool = True
+    reasoning_effort: str = "high"
+    timeout_seconds: int = 30
+    max_retries: int = 2
+    max_tool_hops: int = 3
+
+
+@dataclass
 class QuenchStackConfig:
     workspace_root: str
     project_name: str
@@ -102,6 +115,7 @@ class QuenchStackConfig:
     constraints: list[str] = field(default_factory=list)
     fast_track_rules: dict[str, Any] = field(default_factory=dict)
     governance_scope: dict[str, Any] = field(default_factory=dict)
+    reviewer_engine: ReviewerEngineConfig = field(default_factory=ReviewerEngineConfig)
 
     def resolve_path(self, field_name: str) -> str:
         """将相对路径属性解析为基于 workspace_root 的绝对路径"""
@@ -343,6 +357,22 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     if not isinstance(fast_track_data, dict):
         fast_track_data = {}
 
+    re_data = data.get("reviewer_engine")
+    if isinstance(re_data, dict):
+        reviewer_engine = ReviewerEngineConfig(
+            provider=str(re_data.get("provider", "none")).lower().strip(),
+            model=str(re_data.get("model", "deepseek-flash")).strip(),
+            api_key_env=str(re_data.get("api_key_env", "DEEPSEEK_API_KEY_Quench")).strip(),
+            base_url=str(re_data.get("base_url", "https://api.deepseek.com")).strip(),
+            thinking=bool(re_data.get("thinking", True)),
+            reasoning_effort=str(re_data.get("reasoning_effort", "high")).strip(),
+            timeout_seconds=int(re_data.get("timeout_seconds", 30)),
+            max_retries=int(re_data.get("max_retries", 2)),
+            max_tool_hops=int(re_data.get("max_tool_hops", 3)),
+        )
+    else:
+        reviewer_engine = ReviewerEngineConfig()
+
     governance_scope_data = data.get("governance_scope")
     if not isinstance(governance_scope_data, dict):
         governance_scope_data = {}
@@ -360,6 +390,7 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         constraints=data.get("constraints", []) or [],
         fast_track_rules=fast_track_data,
         governance_scope=governance_scope_data,
+        reviewer_engine=reviewer_engine,
     )
 
 

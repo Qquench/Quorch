@@ -13,7 +13,7 @@
 
 ## Task List & Status / 任务清单与状态
 
-### 任务 1 ⬜ 待确认 — Milestone 0: 独立轻量验证脚本与 Thinking / Prompt Cache 探测
+### 任务 1 ✔️ 已完成 — Milestone 0: 独立轻量验证脚本与 Thinking / Prompt Cache 探测
 
 #### 【涉及文件】
 ```
@@ -22,24 +22,51 @@
 
 #### 【缺陷根因与修改目标】
 ```
-根因：在对服务端进行生产级改造前，需要先行独立验证 DeepSeek-V4.1-Flash API 的连通性、Thinking 思考流结构 (reasoning_content) 与 Prompt Cache 计费命中特征，避免在 MCP 服务端进行盲目试错。目标：编写零外部依赖的标准库脚本，提供清晰的连通性诊断、Token 消耗统计与环境变量指引。
+根因：在对服务端进行生产级改造前，需要先行独立验证 DeepSeek 官方 API 连通性、Thinking 思考流结构 (reasoning_content) 与 Prompt Cache 计费命中特征，避免在 MCP 服务端进行盲目试错。
+审查修订目标：
+1. 编写零外部依赖的标准库脚本，提供清晰的连通性诊断、Token 消耗统计与环境变量指引；
+2. 兼容官方模型别名（如 deepseek-flash、deepseek-reasoner、deepseek-chat）及请求体 thinking 字段契约；
+3. 建立“双轮请求测试模式”（Cold Run 写入缓存 -> Warm Run 验证命中），切实探测 prompt_cache_hit_tokens > 0；
+4. 增加 Windows 控制台 UTF-8 输出重定向设防，杜绝 GBK 字符集崩溃。
 ```
 
 #### 【目标签名与类型契约】
-```
-def call_deepseek_api(api_key: str, prompt: str, system_prefix: str = "", model: str = "deepseek-v4.1-flash") -> dict
+```python
+def build_chat_payload(
+    prompt: str,
+    system_prefix: str = "",
+    model: str = "deepseek-flash",
+    enable_thinking: bool = True,
+    reasoning_effort: str = "high",
+) -> dict: ...
+
+def call_deepseek_api(
+    api_key: str,
+    payload: dict,
+    base_url: str = "https://api.deepseek.com",
+    timeout: int = 30,
+) -> dict: ...
+
+def verify_prompt_cache_two_rounds(
+    api_key: str,
+    base_url: str = "https://api.deepseek.com",
+) -> Tuple[dict, dict]: ...
 ```
 
 #### 【分步改造指引】
-1. 读取环境变量 DEEPSEEK_API_KEY，若不存在则打印友好提示和配置说明。
-2. 使用 urllib.request 发送兼容 OpenAI 规范的 chat/completions POST 请求。
-3. 解析响应中的 reasoning_content 与 content，打印 Thinking 思考过程与最终输出。
-4. 提取并打印 usage 中的 prompt_cache_hit_tokens 与 prompt_cache_miss_tokens。
+1. 脚本入口处强制设置 `sys.stdout.reconfigure(encoding="utf-8")` 防御 Windows 终端乱码。
+2. 读取环境变量 `DEEPSEEK_API_KEY`，若不存在则友好打印配置指南并安全退出（退出码 0，不阻塞 CI）。
+3. 实现 `build_chat_payload`，根据 DeepSeek 官方规范封装 `messages`、`model`（默认别名 `deepseek-flash`）、`thinking: {"type": "enabled"}` 与 `reasoning_effort: "high"`。
+4. 使用 `urllib.request.Request` 封装 HTTP POST，携带 `Authorization: Bearer <KEY>` 与 `Content-Type: application/json`。
+5. 第一轮调用（Cold Run）：发送足够长的公共前缀（> 1024 tokens），记录 `prompt_cache_miss_tokens` 与返回的 Thinking 过程。
+6. 第二轮调用（Warm Run）：使用相同公共前缀重复调用，验证并断言 `usage.prompt_cache_hit_tokens > 0`，打印节省比例与缓存命中耗时。
 
 #### 【防御与边缘校验】
-- 凭据安全：严禁将 API Key 硬编码在脚本内，仅从环境变量读取
-- 网络异常防御：捕获 urllib.error.HTTPError / URLError 并给出 HTTP 状态码与详细排查建议
-- 结构兼容防御：兼容 message 字典中存在与不存在 reasoning_content 的双重情形
+- 凭据安全：严禁将 API Key 硬编码在脚本内，仅从环境变量读取；打印日志时掩码脱敏（如 `sk-***1234`）
+- 控制台编码防御：Windows UTF-8 控制台设防，防止中文字符与思考流输出报 `UnicodeEncodeError`
+- HTTP 状态码快速失败：401 (Key失效) 与 400 (参数非法) 立即抛错并输出指引，严禁盲目重试
+- 结构兼容防御：健壮提取 `choices[0].message.reasoning_content`，兼容存在与不存在思考流的双重响应结构
+- 缓存探测可靠性：构造的前缀必须大于 1024 tokens（DeepSeek 触发 Prompt Cache 的硬性物理门槛）
 
 #### 【DoD 验证命令】
 ```bash
@@ -48,7 +75,7 @@ def call_deepseek_api(api_key: str, prompt: str, system_prefix: str = "", model:
 
 ---
 
-### 任务 2 ⬜ 待确认 — Milestone 1: Quench MCP 审查引擎与项目配置解耦接入
+### 任务 2 ✔️ 已完成 — Milestone 1: Quench MCP 审查引擎与项目配置解耦接入
 
 #### 【涉及文件】
 ```
@@ -59,36 +86,63 @@ def call_deepseek_api(api_key: str, prompt: str, system_prefix: str = "", model:
 
 #### 【缺陷根因与修改目标】
 ```
-根因：当前 MCP 服务端缺乏集成的审查模型后端与解耦配置，无法自动唤醒深度思考模型进行 Spec 强化与架构把关。目标：在 project_config 中新增 ReviewerEngineConfig 数据类支持 quench_stack.yaml 声明；实现轻量可靠的 ReviewerEngine（含 DeepSeekClient 与基于 architecture_doc 的静态 PromptAssembler）；配套完整 Mock 单测矩阵确保零破坏性。
+根因：当前 MCP 服务端缺乏集成的审查模型后端与解耦配置，无法自动唤醒深度思考模型进行 Spec 强化与架构把关。
+审查修订目标：
+1. 在 project_config.py 新增 ReviewerEngineConfig 数据类，支持 quench_stack.yaml 声明与向后兼容解析（缺省 provider="none"）；
+2. 实现轻量可靠的 reviewer_engine.py，包含 DeepSeekClient 与 PromptAssembler；
+3. 建立静态 Prompt 缓存前缀纯洁性防线（严禁混入动态时间戳或会话 ID，保障 100% 缓存命中）；
+4. 建立精细化重试策略：400/401/403/404 快速失败，仅对 429 和 5xx 进行最多 2 次指数退避重试；
+5. 编写针对各种网络异常、Thinking 提取、重试与降级的 5 组独立单测，确保全量 105+ 项测试全绿。
 ```
 
 #### 【目标签名与类型契约】
-```
+```python
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List
+
 @dataclass
 class ReviewerEngineConfig:
-    provider: str = "none"  # deepseek | none
-    model: str = "deepseek-v4.1-flash"
+    provider: str = "none"  # "deepseek" | "none"
+    model: str = "deepseek-flash"
     api_key_env: str = "DEEPSEEK_API_KEY"
     base_url: str = "https://api.deepseek.com"
     thinking: bool = True
+    reasoning_effort: str = "high"
     timeout_seconds: int = 30
+    max_retries: int = 2
     max_tool_hops: int = 3
+
+class PromptAssembler:
+    @staticmethod
+    def build_static_system_prefix(workspace_root: str, config: "QuenchStackConfig") -> str:
+        """加载 architecture_doc、constraints 与 dev-tasks-discipline.md 拼接绝对纯净的静态系统提示词（无动态时间戳）"""
+        ...
+
+class DeepSeekClient:
+    def __init__(self, config: ReviewerEngineConfig): ...
+    def is_available(self) -> bool: ...
+    def complete(self, messages: List[Dict[str, str]], timeout: Optional[int] = None) -> Dict[str, Any]: ...
 ```
 
 #### 【分步改造指引】
-1. 在 project_config.py 中定义 ReviewerEngineConfig，并在 load_project_config 中解析 reviewer_engine 节点，默认 provider='none' 实现向后兼容。
-2. 新建 reviewer_engine.py，实现 DeepSeekClient（支持超时、退避重试、无 Key 优雅降级）与 PromptAssembler（加载 architecture_doc 与 dev-tasks-discipline.md 建立稳定前缀）。
-3. 编写 tests/test_reviewer_engine.py，Mock 网络层测试正常解析、Thinking 提取、重试与降级逻辑。
+1. 在 `project_config.py` 中定义 `ReviewerEngineConfig`，在 `load_project_config` 中解析 `reviewer_engine` 字典，默认 `provider="none"` 确保老项目 100% 兼容。
+2. 在 `reviewer_engine.py` 实现 `PromptAssembler.build_static_system_prefix`，严格读取 `architecture_doc` 规范与 `dev-tasks-discipline.md`。
+3. 在 `reviewer_engine.py` 实现 `DeepSeekClient`：
+   - `is_available()`: 检测 `provider == "deepseek"` 且环境变量中密钥存在；
+   - `complete()`: 使用 `urllib.request` 实现带重试机制的 HTTP POST，401/400 快速失败，429/5xx 进行退避重试，解析 `reasoning_content` 与 `content`。
+4. 编写 `plugins/quench-dev-tasks/server/tests/test_reviewer_engine.py`，使用 `unittest.mock` 覆盖 5 种场景（正常解析、401快速报错、429重试成功、网络超时、无Key降级）。
 
 #### 【防御与边缘校验】
-- 零依赖膨胀：优先使用标准库 urllib.request，避免外部重量级 SDK 引起版本冲突
-- 超时死锁防线：网络请求严格设置 timeout（默认 30s），防止 IDE 客户端长时间挂起
-- 向后兼容性：未配置 API Key 或未启用引擎时，必须静默降级，不中断原有本地测试与流转
+- 静态前缀纯洁性：`PromptAssembler` 严禁拼接任何动态时间戳、随机数或会话 ID，确保 System Prompt 字节流 100% 命中缓存
+- 智能非重试防线：遇到 401 Unauthorized 或 400 Bad Request 严禁重试，避免死循环造成延迟
+- 网络超时死锁防御：网络请求硬性设置 `timeout_seconds`（默认 30s），防止 IDE 进程假死
+- 降级幂等性：当 `is_available() == False` 时，调用层直接返回标准结果指示未就绪，绝不抛出未捕获异常中断服务
+- 单测隔离性：单测必须通过 Mock 隔离外网依赖，保证在离线环境下 100% 通过
 
 #### 【DoD 验证命令】
 ```bash
-.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_engine.py
-.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests
+.\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_engine.py -v
+$env:PYTHONPATH="."; ..\..\..\venv\Scripts\python.exe -m pytest tests
 ```
 
 ---
