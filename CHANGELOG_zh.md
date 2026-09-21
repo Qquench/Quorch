@@ -7,6 +7,22 @@
 
 ---
 
+## [2026-09-21] 2026-09-21_model_switching_optimization.md
+
+- **Task 1**: Milestone 0: 独立轻量验证脚本与 Thinking / Prompt Cache 探测
+- **Task 2**: Milestone 1: Quench MCP 审查引擎与项目配置解耦接入
+- **Task 3**: Milestone 2: 任务规约强化与智能升级工具闭环
+- **Task 4**: Milestone 3: 刚性单测门禁与 CLI 终端体检集成
+- **Task 5**: Milestone 4: 多层能力自适应交接协议与模型解耦 (Multi-Tier Adaptive Reviewer Handoff Protocol & Model Decoupling)
+- **Task 6**: Milestone 5: 极简实时思考流落盘与环境自适应进度心跳 (Minimalist Real-time Thinking Log & Adaptive Progress Heartbeat)
+- **Task 7**: Milestone 6: Draft 任务草案态与物理可行性 Lint 闸门 (Draft Task State & Physical Feasibility Lint Gate)
+- **Task 8**: Milestone 7: 架构规约同步与端到端自举验证 (Documentation Sync & E2E Validation)
+- **feat(optimization)**: 完成模型解耦、外置大脑思考流落盘、环境自适应心跳与 Draft 任务物理门禁升级
+  - **审查引擎模型解耦 (`ReviewerClient`)**：建立可插拔抽象架构，支持 DeepSeek (思维链与 Prompt Cache 计费感知)、OpenAI、Ollama 本地全离线、宿主 Subagent 及 Manual 优雅回退链；
+  - **极简实时落盘与低频心跳 (`RotatingFileSink` / `AdaptiveHeartbeatSink`)**：独立落盘至 `.agents/logs/reviewer/`，1024KB 硬封顶安全轮转与跨块流式脱敏；稳健 1.0s 低频进度心跳，100% 保持 FastMCP `sys.stdout` 纯净度；
+  - **Draft 任务草案态与物理可行性 Lint 闸门**：引入 `📝 草案` 状态与待领队列隔离；通过 `lint_task_physical_feasibility` 实施路径穿越、物理文件存在性、覆盖冲突及 pytest dry-run 静态语法校验，`dev_tasks_promote_draft` 文件排他锁原子晋升；
+  - **全量测试套件 167/167 绿灯**：新增 62 项专项高精度单元测试，全套测试 100% 通过无回归。
+
 ## [2026-09-13] 2026-09-13_stage3_cross_tool_cursor_adaptation.md
 
 - **Task 1**: Cursor MCP 一键配置接入与 Git Pre-commit Guard 自动化安装集成
