@@ -83,3 +83,48 @@ fast_track_rules:
 #   unmanaged_paths:
 #     - "docs/**"
 #     - "*.md"
+
+# ==============================================================================
+# Reviewer Engine & External Architect Dispatch (审查模型与外置大脑调度配置)
+# Decouples strategic reasoning from everyday execution.
+# 支持可插拔的多厂商 API（DeepSeek / OpenAI / Ollama 等），实现通用架构分析与规范审查。
+# ==============================================================================
+reviewer_engine:
+  # Dispatch mode: "auto" | "subagent" | "engine" | "manual" (默认: "auto")
+  mode: "auto"
+
+  # Strategy fallback sequence: "subagent" (IDE native) -> "engine" (direct API) -> "manual"
+  strategy_order:
+    - "subagent"
+    - "engine"
+    - "manual"
+
+  # Upstream API Provider: "deepseek" | "openai" | "ollama" | "custom" | "none"
+  provider: "deepseek"
+
+  # Model identifier (e.g. deepseek-flash, deepseek-reasoner, gpt-4o)
+  model: "deepseek-flash"
+
+  # Environment variable name holding the API key
+  # 存放 API 密钥的环境变量名称（严禁在配置文件中硬编码明文密钥）
+  api_key_env: "DEEPSEEK_API_KEY_Quench"
+
+  # Base API URL endpoint
+  base_url: "https://api.deepseek.com"
+
+  # Enable CoT thinking / reasoning content streaming
+  # 是否开启思维链思考流输出 (reasoning_content)
+  thinking: true
+
+  # Reasoning effort budget: "low" | "medium" | "high"
+  reasoning_effort: "high"
+
+  # Network timeout in seconds / 单次请求超时时间（秒）
+  timeout_seconds: 60
+
+  # Max retry attempts on network error / 瞬态网络故障最大重试次数
+  max_retries: 2
+
+  # Max multi-turn tool hops during review refinement / 审查推导最大工具调用轮数
+  max_tool_hops: 3
+

@@ -570,7 +570,7 @@ def lint_task_physical_feasibility(
 
 ---
 
-### 任务 8 ⬜ 待确认 — Milestone 7: 架构规约同步与端到端自举验证 (Documentation Sync & E2E Validation)
+### 任务 8 ✔️ 已完成 — Milestone 7: 架构规约同步与端到端自举验证 (Documentation Sync & E2E Validation)
 
 #### 【涉及文件】
 ```

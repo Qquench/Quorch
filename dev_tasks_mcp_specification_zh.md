@@ -2,8 +2,8 @@
 
 [English](dev_tasks_mcp_specification.md) | [简体中文](dev_tasks_mcp_specification_zh.md)
 
-> **版本**：v1.3.0 (Implemented & Verified)  
-> **实施状态**：✔️ 全功能已落地并完成 105+ 项自动化单测验证（覆盖 Antigravity、Cursor 跨工具适配与统一 CLI 控制台）  
+> **版本**：v1.4.0 (Implemented & Verified)  
+> **实施状态**：✔️ 全功能已落地并完成 167+ 项自动化单测验证（覆盖 Antigravity、Cursor 跨工具适配、ReviewerClient 解耦引擎、RotatingFileSink 流式落盘观测、Draft 草案物理 Lint 门禁与统一 CLI 控制台）  
 > **归属规范**：`dev_tasks_mcp_specification.md`  
 > **设计渊源与规范**：[DevTasks Workflow 规范](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
 > **定位**：面向工程仓库的通用开发任务治理与双模型智能调度 MCP 服务。
@@ -15,42 +15,48 @@
 ### 1.1 对标原型协议溯源
 本 MCP 服务完全继承并机械化实现了 [DevTasks Workflow 规范](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md) 中确立的 **“双模型分工审查工作流”**，将其从依赖大模型自觉遵守的“纯文档软约定”，全面升级为带有硬性拦截、物理状态机、分级质量评分的**代码级外部守护进程（MCP Server）**。
 
-### 1.2 核心分工基调：Flash 常驻主控 + Opus 按需外置大脑
-- **Flash 作为常驻主控与日常执行器（Everyday Co-pilot & Executor）**：
-  - 拥有高额度、毫秒级响应特性，常驻主会话窗口；
+### 1.2 核心分工基调：日常执行模型 (Runner) + 架构审查外置大脑 (Reviewer)
+- **日常执行模型 Runner（Everyday Co-pilot & Executor）**：
+  - 拥有高吞吐、毫秒级响应特性，常驻主会话窗口；
   - 负责 80%+ 的日常人机交互、查看状态、命令行执行、具体代码改动与单元测试回归；
-  - **绝不让高成本模型浪费在日常搬砖与基础排查上**。
-- **Opus 作为“外置大脑增强”（On-Demand Strategic Architect）**：
+  - **绝不让高成本/稀缺推理模型浪费在日常搬砖与基础排查上**。
+- **架构审查外置大脑 Reviewer（On-Demand Strategic Architect）**：
   - 极度克制地消耗稀缺额度，**仅在以下两种情况被唤醒**：
-    1. **用户明确指示**：如用户输入“让 Opus 深度审查当前模块并制定任务单”；
-    2. **Flash 自行决策上报（Self-Escalation）**：当遇到多模块复杂重构、疑难死锁排查、或 Flash 连续 2 次执行测试未通过陷入循环时，Flash 主动调起 Opus 求助。
-  - Opus 完成严密的高质量任务单编写或架构审查后，**立即下线休眠**，由 Flash 接手具体实施。
+    1. **用户明确指示**：如用户输入“让 Reviewer 深度审查当前模块并制定任务单”；
+    2. **Runner 自行决策上报（Self-Escalation）**：当遇到多模块复杂重构、疑难死锁排查、或 Runner 连续 2 次执行测试未通过陷入循环时，Runner 主动调起 Reviewer 求助。
+  - Reviewer 完成严密的高质量任务单编写或架构审查后，**立即下线休眠**，由 Runner 接手具体实施。
 
-### 1.3 模型彻底解耦与逻辑角色映射 (Model Decoupling & Role Aliases)
-MCP 服务本身为独立 Python 进程（基于 FastMCP / JSON-RPC），**完全不硬编码任何具体模型名称**。通过配置层进行逻辑角色别名映射：
+### 1.3 模型彻底解耦与可插拔 ReviewerClient 抽象 (Model Decoupling & Pluggable ReviewerClient)
+MCP 服务本身为独立 Python 进程（基于 FastMCP / JSON-RPC），**完全不硬编码任何具体模型名称**。通过目标项目工作区配置 `.agents/quench_stack.yaml::reviewer_engine` 声明审查后端：
 
 ```yaml
-# config.yaml (角色别名映射示例)
-version: "1.1"
-active_profile: "latest_standard"
+# 工作区 .agents/quench_stack.yaml 配置
+schema_version: "1.0"
+project_name: "MyProject"
 
-roles:
-  # 架构师角色（外置大脑）：默认指向当前可用的最新 Opus
-  PLANNER:
-    provider: "anthropic" # 或通过 IDE 代理
-    model_alias: "latest-opus"
-    temperature: 0.2
-    max_tokens: 8192
-
-  # 执行器角色（常驻主控/打工人）：默认指向当前可用的最新 Flash
-  EXECUTOR:
-    provider: "google"
-    model_alias: "latest-flash"
-    temperature: 0.1
-    max_tokens: 4096
-
-# 未来若接入新产品线或新模型（如 Pro 4、GPT-5），只需在此追加别名，MCP 核心代码零修改
+reviewer_engine:
+  mode: "auto"                    # "auto" | "subagent" | "engine" | "manual"
+  strategy_order:                 # 回退策略链
+    - "subagent"                  # 1. 优先调用 IDE 宿主的原生 Subagent
+    - "engine"                    # 2. 直连上游 API 引擎 (DeepSeek/OpenAI/Ollama)
+    - "manual"                    # 3. 网络与 API 均不可用时优雅降级为交互式引导
+  provider: "deepseek"            # "deepseek" | "openai" | "ollama" | "custom"
+  model: "deepseek-flash"         # 极高性价比思考模型
+  api_key_env: "DEEPSEEK_API_KEY_Quench" # 环境变量名称，杜绝明文凭证硬编码
+  base_url: "https://api.deepseek.com"
+  thinking: true                  # 启用思考流 (reasoning_content) 流式输出
+  reasoning_effort: "high"        # 思考深度配额 ("low" | "medium" | "high")
+  timeout_seconds: 60
+  max_retries: 2
+  max_tool_hops: 3
 ```
+
+上游后端由可扩展的 `ReviewerClient` 统一抽象分发：
+- **`DeepSeekReviewerClient`**：原生支持 CoT 思考流增量输出与 Prompt Cache 缓存命中计费探测；
+- **`OpenAIReviewerClient`**：无缝对接 OpenAI 兼容 Chat Completions 标准接口；
+- **`OllamaReviewerClient`**：支持本地零遥测、全离线工业车间推理；
+- **`SubagentReviewerClient`**：向 IDE 宿主（如 Antigravity / Cursor）委派 Reviewer 智能体；
+- **`ManualFallbackClient`**：在网络全部断连时降级为模板引导开发者直接填写。
 
 ---
 
@@ -104,13 +110,31 @@ roles:
 #### 6. 【DoD 验证命令】 (`dod_commands`) —— **改逻辑必加单测断言**
 - **原则**：必须提供可直接在终端执行的测试验证命令。
 - **核心铁律（Mandatory Assertion Rule）**：
-  凡涉及业务逻辑、计算规则、模型扩展的任务，**必须在验证命令中包含单元测试断言要求**，强制要求在 `backend/tests/` 中添加断言，确保 `run_safe_tests.py` 覆盖。
+  凡涉及业务逻辑、计算规则、模型扩展的任务，**必须在验证命令中包含单元测试断言要求**，强制要求在测试套件中添加断言，确保测试全量覆盖。
+
+### 2.4 零轮询可观测性与 RotatingFileSink 机制
+长耗时架构审查推导过程中，为兼顾开发者实时进度监控与 FastMCP 协议纯净度：
+- **低频 MCP 心跳通知**：以稳健的 ~1.0s 间隔向客户端发送 `progress_pct` 预估百分比与步骤进度通知，严禁高频打扰；
+- **零 stdout 通道污染**：服务端标准输出（`sys.stdout`）严格专用于 JSON-RPC 协议帧封包，全链路杜绝任何裸 print 文本外泄；
+- **RotatingFileSink 独立落盘**：思考过程与思维链增量实时写入 `.agents/.logs/reviewer_live.log`（单文件 10MB，自动保留 3 份历史轮转），开发者可在终端直接通过 `tail -f` 旁路查看；
+- **防死循环中断保护**：设立 32,000 Token 思考软上限与超时强制熔断机制，杜绝模型幻觉无限打转。
+
+### 2.5 Draft 任务草案态与物理可行性 Lint 闸门
+为防止审查模型脑补虚构文件路径或虚构命令直接流入正式队列：
+- **Draft 任务草案态 (`📝 草案`)**：任务标题包含 `(草案)` 或带有 `<!-- quench-task-meta: {"draft": true} -->` 元数据注释；
+- **队列天然隔离**：`dev_tasks_status` 默认设置 `include_drafts=False`，将草案任务隔离至 `draft_queue`，绝不混入正式 `pending_queue`；
+- **物理可行性 Lint 校验 (`lint_task_physical_feasibility`)**：
+  1. *路径穿越设防*：所有受影响文件路径严格锚定在 `workspace_root` 之内，校验 `os.path.commonpath`；
+  2. *物理存在验证*：标记为 `[MODIFY]` 或 `[DELETE]` 的目标文件必须在磁盘物理存在 (`os.path.exists == True`)；
+  3. *覆盖冲突排查*：标记为 `[NEW]` 的目标文件在磁盘严禁预先存在，父目录必须合法；
+  4. *DoD 命令语法安全*：以白名单 dry-run 模式预检单测命令（`pytest --collect-only -q -o pythonpath=.`），拦截危险 Shell 元字符（`;`, `&`, `|`, `$`, `` ` ``, `>`, `<`）；
+- **原子化安全晋升**：`dev_tasks_promote_draft` 在文件排他锁与临时原子替换保障下重新校验物理门禁，全绿自动擦除草案标记晋升为正式 `⬜ 待确认`。
 
 ---
 
-### 2.3 执行模型 Flash 的行为铁律 (原 README §8.4)
+### 2.6 执行模型 Runner 的行为铁律 (原 README §8.4)
 
-当 Flash 检出任务开始执行时，MCP 自动注入并监控以下执行守则：
+当 Runner 检出任务开始执行时，MCP 自动注入并监控以下执行守则：
 1. **严格按指引顺序执行**，不得跨越步骤；
 2. **不得修改任务未涉及的文件**（MCP 可通过 `git status` 监控修改范围，若发现漂移立即告警）；
 3. **保留所有现有注释与文档字符串**，除非任务明确要求修改；
@@ -125,16 +149,18 @@ MCP 充当严密的状态机看门狗，杜绝任何未经业主确认的代码�
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ⬜_待确认: Opus / Flash 生成任务单
-    ⬜_待确认 --> ✅_已确认: 业主明确同意 (confirm_tasks)
-    ⬜_待确认 --> ⏭️_已跳过: 业主决策不实施 (skip_tasks)
+    [*] --> 📝_草案: Reviewer 推导草案 / 物理 Lint 拦截 (refine_spec)
+    📝_草案 --> ⬜_待确认: 物理 Lint 全绿晋升 (promote_draft)
+    [*] --> ⬜_待确认: 直接提单 (propose)
+    ⬜_待确认 --> ✅_已确认: 业主明确同意 (confirm action=confirm)
+    ⬜_待确认 --> ⏭️_已跳过: 业主决策不实施 (confirm action=skip)
     
     state "安全屏障 (Hard Gate)" as Gate {
-        note right of Gate: Flash 无法从未确认的任务中获取执行权限
-        ✅_已确认 --> 🔨_执行中: Flash 检出任务 (checkout_task)
+        note right of Gate: Runner 无法从未确认的任务中获取执行权限
+        ✅_已确认 --> 🔨_执行中: Runner 检出任务 (checkout)
     }
 
-    🔨_执行中 --> ✔️_已完成: Flash 提交且通过 DoD 测试 (complete_task)
+    🔨_执行中 --> ✔️_已完成: Runner 提交且通过物理单测断言审计 (complete)
     🔨_执行中 --> 🔄_需返工: DoD 验证失败或逻辑偏离
     🔄_需返工 --> 🔨_执行中: 重新修改并验证
     
@@ -159,65 +185,70 @@ stateDiagram-v2
 
 ## 五、 MCP 工具接口详细契约 (Tools Specification)
 
-MCP 对外暴露 7 个原子化强类型工具：
+MCP 对外暴露 10 个原子化强类型工具：
 
 ### 1. `dev_tasks_status`
-- **调用者**：Flash / Opus
-- **作用**：探查激活工作区的 `docs/dev_tasks/` 目录，获取当前未闭环任务单的状态分布与阻塞项。
+- **调用者**：Runner / Reviewer
+- **作用**：探查激活工作区的任务单目录，获取当前未闭环任务单的状态分布与阻塞项。支持 `include_drafts` 参数控制草案队列隔离。
 
 ### 2. `dev_tasks_propose`
-- **调用者**：Opus（或具备架构审查权限时的 Flash）
-- **作用**：生成/追加符合六大字段规范的标准任务单（`docs/dev_tasks/YYYY-MM-DD_<desc>.md`）。
+- **调用者**：Reviewer / 业主
+- **作用**：生成/追加符合六大字段规范的标准正式任务单。
 
 ### 3. `dev_tasks_confirm`
-- **调用者**：业主通过自然语言指令由 Flash 调起
-- **作用**：将指定任务推进为 `✅ 已确认` 或 `⏭️ 已跳过`。
+- **调用者**：业主通过自然语言指令调起
+- **作用**：将指定任务推进为 `✅ 已确认` 或 `⏭️ 已跳过`，或置为 `🔄 需返工`。
 
 ### 4. `dev_tasks_checkout`
-- **调用者**：Flash
+- **调用者**：Runner
 - **作用**：获取下一个处于 `✅ 已确认` 状态的任务执行指引，并原子化将其标记为 `🔨 执行中`。若无确认任务，直接抛错拦截。
 
 ### 5. `dev_tasks_complete`
-- **调用者**：Flash
-- **作用**：提交任务完成报告。必须附带 DoD 执行输出日志与新增的断言单测信息。
+- **调用者**：Runner
+- **作用**：提交任务完成报告。通过 `git diff` 针对测试文件与断言标记执行物理审计，全部通过后标记为 `✔️ 已完成`。
 
 ### 6. `dev_tasks_escalate`
-- **调用者**：Flash
-- **作用**：自主唤醒 Opus 外置大脑进行深度架构设计或死锁排查。
+- **调用者**：Runner
+- **作用**：自主唤醒 Reviewer 外置大脑进行深度架构设计或死锁排查。
 
-### 7. `dev_tasks_archive` (原 README §6)
-- **调用者**：自动化 / Flash
-- **作用**：当任务单所有任务均为 `✔️ 已完成` 或 `⏭️ 已跳过`，自动将该文件移入 `docs/dev_tasks/archive/`，并将任务摘要增量同步至项目根目录 `CHANGELOG.md` 与内部设计手册。
+### 7. `dev_tasks_refine_spec`
+- **调用者**：Runner / 外部客户端
+- **作用**：调用 ReviewerClient 后端进行多轮规格审查推导，流式输出思考日志，并接入物理可行性门禁。
+
+### 8. `dev_tasks_promote_draft`
+- **调用者**：Runner / 业主
+- **作用**：运行物理可行性 Lint 闸门校验草案，全绿后原子化抹除草案标记并晋升为正式 `⬜ 待确认`。
+
+### 9. `dev_tasks_archive`
+- **调用者**：自动化 / Runner
+- **作用**：当任务单所有任务均为 `✔️ 已完成` 或 `⏭️ 已跳过`，自动将该文件移入 `docs/dev_tasks/archive/`，并将任务摘要增量同步至项目根目录 `CHANGELOG.md`。
+
+### 10. `dev_tasks_set_bypass`
+- **调用者**：业主授权紧急通道
+- **作用**：管理临时时间窗口快速旁路令牌，附带严格的审计日志记录。
 
 ---
 
-## 六、 供 Opus 模型二次审查的重点课题清单 (Review Checklist for Opus)
+## 六、 落地实现与工程交付注册表 (Implementation Registry)
 
-> **请 Opus 重点对以下 5 个深水区课题进行批判性审查并提出优化建议**：
-> 1. **并发与文件锁冲突**：当 Flash 在快速编辑代码并调用 `complete_task` 时，如何防止 Markdown 任务文件被外部 Git 操作或编辑器并发写入损坏？
-> 2. **Subagent 调度与增量上下文筛选**：Flash 调用 `escalate` 唤醒 Opus 时，如何最经济地筛选传递给 Opus 的上下文（只传相关文件核心片段与报错，避免灌入全量巨型日志消耗 Token）？
-> 3. **单测断言刚性校验 (Mandatory Assertion Rule)**：在 `complete_task` 中，如何确保 Flash 真正添加了单测断言，而非空口虚报？是否应由 MCP 执行一次 `git diff` 针对 `tests/` 目录的物理审计？
-> 4. **异常恢复与孤儿任务处置**：如果 Flash 在 `🔨 执行中` 途中会话意外中断、崩溃或死循环退出，MCP 在下一次启动时如何安全恢复或回滚任务状态？
-> 5. **模型版本热升级平滑度**：当 Antigravity 引入新一代模型矩阵（如 Pro 4、GPT-5）时，配置切换机制是否做到了最大程度的平滑与无感？
-
----
-
-## 七、 落地实现与工程交付注册表 (Implementation Registry)
-
-本规范所定义的全部架构设计与工具链已持续迭代至 **2026-09-13**，完整落地于 `plugins/quench-dev-tasks/`，并通过自动化测试验证（105/105 passed）。
+本规范所定义的全部架构设计与工具链已完整落地于 `plugins/quench-dev-tasks/`，并通过自动化测试验证（167/167 passed）。
 
 | 规范设计章节 | 实际交付文件/模块 | 核心机制与职责 |
 | :--- | :--- | :--- |
 | **§2.1 审查守则** | `rules/dev-tasks-discipline.md`<br>`skills/dev-tasks-review/` | 常驻约束只提任务不碰源码、三级质量弹性分级规范 |
 | **§2.2 状态机** | `server/state_machine.py` | 严格状态枚举单向迁移、`FileLock` 跨进程文件排他锁、Unicode Emoji 兼容正则 |
 | **§2.3 六大字段** | `server/schema_validator.py` | 强制六大段落完整性校验、代码块格式提取、粒度超限告警 |
-| **§2.4 物理守卫** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py`<br>`scripts/git_pre_commit_guard.py` | `PreToolUse` 钩子拦截范围外修改并弹出带理由确认框；`PreInvocation` 注入任务提醒；Git Pre-commit Guard 物理兜底拦截 |
-| **§4.0 项目解耦** | `server/project_config.py`<br>`templates/quench_stack.yaml` | 通过 `.agents/quench_stack.yaml` 读取项目专属配置，核心完全解耦，支持版本迁移 |
-| **§5.0 8 大工具** | `server/server.py` | 暴露 `status` / `propose` / `confirm` / `checkout` / `complete` / `escalate` / `archive` / `set_bypass` |
+| **§2.4 零轮询观测** | `server/observability.py` | `RotatingFileSink` 独立落盘、~1.0s 低频心跳、FastMCP 传输零污染 |
+| **§2.5 草案与物理门禁** | `server/schema_validator.py`<br>`server/server.py` | `[MODIFY]` 物理存在、`[NEW]` 覆盖排查、pytest dry-run 收集、`dev_tasks_promote_draft` |
+| **§1.3 审查引擎** | `server/reviewer_client.py` | 可插拔 DeepSeek (思考流与 Prompt Cache)、OpenAI、Ollama、Subagent 及 Manual 调度 |
+| **§2.6 物理守卫** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py`<br>`scripts/git_pre_commit_guard.py` | `PreToolUse` 钩子拦截范围外修改并弹出带理由确认框；`PreInvocation` 注入任务提醒；Git Pre-commit Guard 物理兜底拦截 |
+| **§4.0 项目解耦** | `server/project_config.py`<br>`templates/quench_stack.yaml` | 通过 `.agents/quench_stack.yaml` 读取项目专属配置与审查后端，核心完全解耦 |
+| **§5.0 10 大工具** | `server/server.py` | 暴露 `status` / `propose` / `confirm` / `checkout` / `complete` / `escalate` / `refine_spec` / `promote_draft` / `archive` / `set_bypass` |
 | **§1.2 外置大脑** | `agents/reviewer/agent.md` | 定义架构审查与任务规划专家 Subagent 角色 |
 | **跨工具适配层** | `server/adapters/` | 单核多适配器架构，支持 Antigravity、Cursor 及通用 CLI 适配器与环境探测 |
 | **规则导出器** | `scripts/rules_exporter.py` | 将纪律手册精炼导出为 `.cursorrules` 与 `.cursor/rules/quench-dev-tasks.mdc` |
 | **统一终端 CLI** | `server/cli.py` | 提供 `quench status/check/init/archive` 纯命令行入口点，ANSI 彩色自适应 |
 | **一键接入脚手架** | `scripts/init_project.py`<br>`scripts/install.py` | 支持 `--ide {antigravity,cursor,all}` 与 `--install-git-hook` 自动化部署与预检 |
-| **测试矩阵** | `server/tests/` (105 项单测) | 覆盖状态机、校验器、工具链、适配器、CLI、Hooks 守卫及导出脚手架，100% 通过 |
+| **测试矩阵** | `server/tests/` (167 项单测) | 覆盖状态机、校验器、工具链、适配器、CLI、Hooks 守卫、观测落盘与草案门禁，100% 通过 |
+
 
