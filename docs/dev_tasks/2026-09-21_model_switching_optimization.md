@@ -285,12 +285,13 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 
 ---
 
-### 任务 5 ⬜ 待确认 — Milestone 4: 双轨工作流自适应与交接卡协议升级 (Dual-Track Workflow & Adaptive Handoff Protocol)
+### 任务 5 ⬜ 待确认 — Milestone 4: 多层能力自适应交接协议与模型解耦 (Multi-Tier Adaptive Reviewer Handoff Protocol & Model Decoupling)
 
 #### 【涉及文件】
 ```
 [MODIFY] plugins/quench-dev-tasks/server/server.py
 [MODIFY] plugins/quench-dev-tasks/server/project_config.py
+[MODIFY] plugins/quench-dev-tasks/server/reviewer_engine.py
 [MODIFY] plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md
 [MODIFY] plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md
 [NEW] plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py
@@ -298,81 +299,103 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 
 #### 【缺陷根因与修改目标】
 ```
-根因：dev_tasks_checkout（批次完工时触发）与 dev_tasks_escalate（卡点升级时触发）硬编码了离线手动交接卡逻辑，假定人类必须复制上下文并在新会话中切换至 Reviewer 模型。在接入外部审查引擎（reviewer_engine.provider='deepseek'）或 IDE subagent 后，该手动切换变成冗余步骤并与自动化流转冲突；但若为此分化两个 Git 分支将导致严重的版本碎片与维护噩梦。
-目标：坚持单一代码库、基于配置驱动的双轨（Dual-Track）自适应协议——provider='none' 保持 100% 经典手动交接卡（字节级向后兼容）；provider='deepseek' 将相同调用点升级为就地自动化决策报告（提供 A/B 方案与执行建议，消除手动切换会话提示）；并在引擎已声明但不可用（无 Key / 离线）时平滑优雅降级回手动交接卡。
+根因：
+1. 现有工具将审查能力与特定模型（DeepSeek）硬编码耦合，但在工程落地中，Reviewer 是一个纯粹的架构审查“角色（Role）”而非具体模型，可由 DeepSeek、Claude、Gemini、本地开源模型（Ollama/vLLM）或人类开发者承担；
+2. 现有 checkout/escalate 的交接逻辑假定只有“手动切会话”和“服务端直连 API”两极，忽略了高级宿主（如 Antigravity / Claude Code）原生支持自主调度 Subagent，以及未来平台原生会话内模型切换（In-session Model Switching / Gemini 4 Pro）的事实，造成工作流割裂；
+3. 若为此分化 Git 分支将导致严重的版本碎片化与维护灾难。
+
+目标：
+1. 架构解耦：将 Reviewer 客户端彻底解耦为通用 OpenAI 兼容协议适配器（ReviewerClient），支持任意第三方服务商或本地 Ollama 端点，DeepSeek 仅作为开箱即用的预置 Provider 之一；
+2. 能力协商信封：在 server.py 引入单一响应信封（reviewer_handoff），实现 Subagent -> Session_Switch -> Engine -> Manual 的四层能力声明与自适应匹配；
+3. 恪守四大红线：零同步阻塞网络 I/O（50ms 治理预算保证）、manual 恒为终局兜底（R3 不变式）、零客户端指纹嗅探、密钥绝不回显；
+4. 100% 向后兼容：所有既有顶级键（status, task_id, instructions, handoff_card 等）完全保留，旧客户端无感兼容。
 ```
 
 #### 【目标签名与类型契约】
 ```python
-# ---- server/project_config.py ----
+# ---- plugins/quench-dev-tasks/server/project_config.py ----
+DispatchStrategy = Literal["subagent", "session_switch", "engine", "manual"]
+
 @dataclass
 class ReviewerEngineConfig:
-    # dual-track selector. Canonical values: "none" (manual track) | "deepseek" (auto track).
-    # Any other/missing value MUST be normalized to "none" (fail-safe, never raise).
-    provider: str = "none"
+    mode: str = "auto"  # "auto" | "subagent" | "session_switch" | "engine" | "manual"
+    strategy_order: list[str] = field(
+        default_factory=lambda: ["subagent", "session_switch", "engine", "manual"]
+    )
+    provider: str = "deepseek"  # "deepseek" | "openai" | "ollama" | "custom" | "none"
+    model: str = "deepseek-flash"
+    api_key_env: str = "DEEPSEEK_API_KEY_Quench"
+    base_url: str = "https://api.deepseek.com"
+    thinking: bool = True
+    reasoning_effort: str = "high"
+    timeout_seconds: int = 60
+    max_retries: int = 2
+    max_tool_hops: int = 3
 
-# ---- server/server.py ----
-HandoffMode = Literal["manual", "auto"]
+# ---- plugins/quench-dev-tasks/server/server.py ----
+class ReviewerHandoff(TypedDict, total=False):
+    contract_version: Literal["1.0"]
+    task_id: str
+    task_path: str
+    reason: str  # "batch_complete" | "escalation" | "rework_required"
+    summary: str
+    preferred: DispatchStrategy
+    strategies: list[Dict[str, Any]]
+    legacy_card_markdown: str
 
-def _resolve_handoff_mode(config: Any) -> tuple[HandoffMode, Optional[str]]:
-    """Return (handoff_mode, degraded_reason).
-    'auto'   -> reviewer_engine.provider is a KNOWN live engine (e.g. 'deepseek') AND its
-                credentials are present (is_available()==True).
-    'manual' -> provider is 'none'/missing/unknown, OR engine declared but unavailable.
-    PURITY GUARANTEE: pure, side-effect-free, NO network I/O; credential presence check only.
-    degraded_reason is non-None ONLY when 'auto' was requested but fell back to 'manual'.
+def _resolve_handoff_envelope(
+    workspace_root: str,
+    config: QuenchStackConfig,
+    task_id: str,
+    task_path: str,
+    reason: str,
+    context_files: Optional[List[str]] = None,
+    host_capabilities: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Pure, side-effect-free envelope builder with zero synchronous network I/O.
+    Enforces R3 invariant: strategies[-1]['strategy'] == 'manual' and available == True.
     """
 
-def _render_handoff_payload(mode: HandoffMode, legacy_card: str, context: dict) -> dict:
-    """Adaptive handoff object.
-    mode='manual' -> {'mode': 'manual', 'card_markdown': <legacy_card>}  (identical legacy output)
-    mode='auto'   -> {'mode': 'auto',
-                      'options': [{'id': 'A', 'summary': str, 'next_action': str},
-                                  {'id': 'B', 'summary': str, 'next_action': str}],
-                      'suggested_action': str}
-                     (manual session-switch instructions SUPPRESSED)
-    """
-
-# ---- ADDITIVE response schema (backward compatible) for dev_tasks_checkout / dev_tasks_escalate ----
-# {
-#   ...ALL existing keys preserved unchanged (status, task_id, instructions, handoff_card, ...)...,
-#   "handoff_mode": "manual" | "auto",            # NEW - additive
-#   "handoff": { ...adaptive payload above... },  # NEW - additive
-#   "degraded_reason": Optional[str]              # NEW - present only on auto->manual fallback
-# }
+# ---- plugins/quench-dev-tasks/server/reviewer_engine.py ----
+# Generic alias decoupling ReviewerClient from DeepSeek
+class ReviewerClient(DeepSeekClient):
+    """Generic OpenAI-compatible Reviewer Client supporting any standard /chat/completions provider."""
+    pass
 ```
 
 #### 【分步改造指引】
-1. 在 `project_config.py` 中规范 `ReviewerEngineConfig.provider` 的归一化解析，将非 {'none','deepseek'}（包括 None、空串或缺失）安全归一化为字面量 `"none"`，发出 warning 而不 raise，保证未配置工作区 100% 保持经典手动轨行为。
-2. 在 `server.py` 实现两个纯函数（Pure Helpers）：`_resolve_handoff_mode(config) -> (mode, degraded_reason)`，仅做本地凭据存在性检测（无网络 I/O，50ms 工具响应预算保证）；`_render_handoff_payload(mode, legacy_card, context)` 构建自适应结构体。
-3. 重构 `dev_tasks_checkout`（批次完工且存在待确认/返工任务分支）：保留现有状态迁移与全部已有返回字段，计算 `(mode, degraded_reason) = _resolve_handoff_mode(config)` 并增量附加 `handoff_mode`、`handoff` 与 `degraded_reason`。`mode == 'manual'` 时保持原交接卡内容完全一致；`mode == 'auto'` 时生成具体 A/B 方案与 `suggested_action`，消除切会话提示。
-4. 重构 `dev_tasks_escalate`：统一使用相同的 helper 生成自适应交接对象。确保状态机 `FileLock` 在渲染交接负载前已完全释放，杜绝持有锁期间组装数据。
-5. 更新 `skills/dev-tasks-workflow/SKILL.md` 与 `skills/dev-tasks-review/SKILL.md`，记录双轨协议（provider='none' -> 经典手动交接卡；provider='deepseek' -> 就地自动化决策报告与 A/B 方案）以及自动降级规则。编写 `tests/test_handoff_protocol.py` 覆盖双轨判定、降级防护与历史字段兼容性。
+1. 【模型解耦与配置归一化】：在 `project_config.py` 中重构 `ReviewerEngineConfig`，支持 `mode`（默认 `"auto"`）与 `strategy_order`；在 `reviewer_engine.py` 将客户端抽象升级为模型无关的 `ReviewerClient`（保留 `DeepSeekClient` 作为完全兼容别名），依赖标准 OpenAI 协议参数（`base_url`, `model`, `api_key_env`）；在配置加载时自动平滑迁移老配置（`provider: none` -> `mode: manual`；`provider: deepseek` -> `mode: engine`）。
+2. 【信封构造纯函数实现】：在 `server.py` 实现 `_resolve_handoff_envelope` 纯函数。严禁任何网络 I/O；依据本地配置与凭据存在性按优先级组装：
+   - `subagent` 载荷：注入只读审查 Prompt、受管文件上下文与 `dev_tasks_confirm` 回调指示；
+   - `session_switch` 载荷：注入会话内升级至 REVIEWER 角色的执行指引；
+   - `engine` 载荷：登记 provider/model 与 `api_key_present: bool`（严禁输出密钥明文），指引调用 `dev_tasks_refine_spec`；
+   - `manual` 载荷：输出 100% 经典的 Markdown 交接卡，并强制设为终局兜底（`available: True`）。
+3. 【工具挂载与并发安全】：重构 `dev_tasks_checkout`（批次完工分支）与 `dev_tasks_escalate`，确保在状态机 `FileLock` 释放后再调用 `_resolve_handoff_envelope`；在现有返回字典上增量挂载 `reviewer_handoff` 键，将顶层 `handoff_card` 与 `legacy_card_markdown` 保持严格字节一致。
+4. 【技能文档规范同步】：更新 `skills/dev-tasks-workflow/SKILL.md` 与 `skills/dev-tasks-review/SKILL.md`，记录四层能力协商信封契约、宿主 Agent 优先取用第一条 `available` 策略的自治指引、以及模型中立的 Reviewer 审查职责。
+5. 【单测刚性闭环】：编写 `tests/test_handoff_protocol.py`，覆盖 15 项核心测试（R3 manual 兜底不变式、未知 mode 自动回落 manual、provider 自动迁移映射、旧客户端字段 100% 存在、密钥零序列化泄露、路径穿越防御、以及零阻塞网络 I/O 验证）。
 
 #### 【防御与边缘校验】
-- 缺省保全防线：未配置或空 `reviewer_engine` 块必须静默解析为 'manual'，绝不抛出未捕获异常。
-- 未知 provider 防线：未知 provider 值（如拼写错误）必须降级为 'manual' 并仅记录 warning。
-- 离线/缺 Key 降级防线：provider='deepseek' 但 `is_available() == False` 时必须平滑降级为 'manual'，并明确赋值 `degraded_reason`。
-- 零同步网络 I/O：`_resolve_handoff_mode` 严禁发起 HTTP 网络探测，确保纯本地判定维持 50ms 治理预算。
-- 历史契约绝对兼容：所有既有顶级字段（`status`, `task_id`, `instruction`, `prompt_hint` 等）在 manual 模式下保持原有字节级语义。
-- 并发锁安全防线：严禁在持有 `FileLock` 时进行复杂字符串与字典装配，必须遵循“先释锁、后渲染”。
-- 单任务执行不变量：重构严禁破坏“全工作区最多一个 `🔨 执行中` 任务”的硬性不变量。
-- 跨进程 JSON 序列化：返回对象必须为纯 JSON-safe 类型（严禁残留 Enum 或 Dataclass 实例）。
-- 确定性与易测性：`_resolve_handoff_mode` 行为纯粹由配置决定，可在单测中脱敏测试。
+- R3 终局兜底不变式：`strategies` 列表末尾恒为 `strategy == "manual"` 且 `available is True`，从结构上彻底杜绝“策略集为空”或降级断裂。
+- 密钥绝对安全防护：序列化结果中严禁出现真实 API 密钥内容，仅暴露 `api_key_present: bool`；`api_key_env` 变量名必须匹配 `^[A-Z][A-Z0-9_]*$` 正则。
+- 零同步阻塞网络（50ms 预算）：信封组装全过程为纯内存运算，严禁发起 HTTP 网络探测或外部进程轮询。
+- 路径穿越与读取边界：`task_path` 与 `context_files` 严格限制在 `workspace_root` 之内；上下文摘要读取实行流式截断（≤4096 字符，最多 8 个文件），防止大文件 OOM。
+- 幂等与锁释放：状态机跃迁完成后立即释放 `FileLock`，再行组装信封，杜绝持锁期间字符串拼接导致死锁。
+- 子代理只读防越权：`subagent` 载荷的 Prompt 中必须明确声明“只读审查，严禁直接修改源码，审查结论必须通过 dev_tasks_confirm 回调流转”。
+- 零客户端嗅探：严禁检测特定宿主环境变量，能力仅由配置与显式参数声明。
 
 #### 【DoD 验证命令】
 ```bash
-# 1. 验证双轨协议新增单测（覆盖双轨选择、经典卡片对齐、未知降级与无 Key 降级）
+# 1. 验证多层自适应与模型解耦专项单测（15 项核心断言）
 cd plugins/quench-dev-tasks/server && python -m pytest tests/test_handoff_protocol.py -v
 
-# 2. 全量零回归验证
-cd plugins/quench-dev-tasks/server && python -m pytest tests/ -v
+# 2. 全量回归验证（确保已有 126 项单测 100% 通过）
+cd plugins/quench-dev-tasks/server && python -m pytest tests/ -q
 
 # 3. 语法与导入完整性校验
-cd plugins/quench-dev-tasks/server && python -c "import ast; ast.parse(open('server.py', encoding='utf-8').read()); ast.parse(open('project_config.py', encoding='utf-8').read()); print('AST OK')"
+cd plugins/quench-dev-tasks/server && python -c "import ast; ast.parse(open('server.py', encoding='utf-8').read()); ast.parse(open('reviewer_engine.py', encoding='utf-8').read()); print('AST OK')"
 
-# 4. 向后兼容冒烟测试：缺省 provider 必须解析为 manual
-cd plugins/quench-dev-tasks/server && python -c "from project_config import ReviewerEngineConfig; c=ReviewerEngineConfig(); assert getattr(c,'provider','none')=='none'; print('manual-default OK')"
+# 4. 模型解耦向后兼容验证：Generic ReviewerClient 能够正常无缝实例化
+cd plugins/quench-dev-tasks/server && python -c "from reviewer_engine import ReviewerClient, DeepSeekClient; assert issubclass(ReviewerClient, DeepSeekClient); print('Client Decoupling OK')"
 ```
 
 ---
