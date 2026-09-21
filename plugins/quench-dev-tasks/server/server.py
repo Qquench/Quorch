@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import filelock
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Literal, TypedDict
@@ -58,7 +59,13 @@ from reviewer_engine import (
     RotatingFileSink,
     AdaptiveHeartbeatSink,
 )
-from schema_validator import validate_task_schema
+from schema_validator import (
+    validate_task_schema,
+    lint_task_physical_feasibility,
+    LintIssue,
+    PhysicalLintResult,
+    _parse_task_markdown_sections,
+)
 from state_machine import (
     ALL_STATUSES,
     STATUS_COMPLETED,
@@ -67,6 +74,7 @@ from state_machine import (
     STATUS_PENDING,
     STATUS_REWORK,
     STATUS_SKIPPED,
+    TASK_HEADER_PATTERN,
     TaskItem,
     get_status_summary,
     parse_task_file,
@@ -102,13 +110,22 @@ def _render_task_markdown(task: Dict[str, Any]) -> str:
     task_id = task.get("id") or task.get("task_id") or "1.0"
     title = task.get("title") or "未命名任务"
     status = task.get("status") or STATUS_PENDING
+    is_draft = bool(task.get("draft"))
 
-    lines = [
-        f"### 任务 {task_id} {status} — {title}\n",
-        "\n",
-        "#### 【涉及文件】\n",
-        "```\n",
-    ]
+    if is_draft:
+        lines = [
+            f"### 任务 {task_id} {status} (草案) — {title}\n",
+            "<!-- quench-task-meta: {\"draft\": true} -->\n\n",
+            "#### 【涉及文件】\n",
+            "```\n",
+        ]
+    else:
+        lines = [
+            f"### 任务 {task_id} {status} — {title}\n",
+            "\n",
+            "#### 【涉及文件】\n",
+            "```\n",
+        ]
     affected = task.get("affected_files", [])
     if isinstance(affected, list):
         for af in affected:
@@ -428,13 +445,17 @@ def _get_recent_hook_logs(workspace_root: str, max_lines: int = 10) -> List[str]
 # ==============================================================================
 
 @mcp.tool()
-def dev_tasks_status(workspace_root: str) -> Dict[str, Any]:
+def dev_tasks_status(
+    workspace_root: str,
+    include_drafts: bool = False,
+) -> Dict[str, Any]:
     """Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks.
 
-    [中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。
+    [中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务。
 
     Args:
         workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        include_drafts: Whether to include draft tasks in pending queue (default False) / 是否在待领队列中包含草案任务（默认隔离）。
     """
     try:
         config = load_project_config(workspace_root)
@@ -504,11 +525,40 @@ def dev_tasks_status(workspace_root: str) -> Dict[str, Any]:
         try:
             summary = get_status_summary(f_path)
             tasks = parse_task_file(f_path)
+
+            raw_file_text = ""
+            try:
+                with open(f_path, "r", encoding="utf-8", errors="ignore") as rf:
+                    raw_file_text = rf.read()
+            except Exception:
+                pass
+
+            draft_ids = set()
+            for dm in re.finditer(r"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\s*.*?(?:\(草案\)|\(Draft\)|\(draft\))", raw_file_text, re.MULTILINE):
+                draft_ids.add(dm.group(1).strip())
+            for dm in re.finditer(r"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)[\s\S]*?<!--\s*quench-task-meta:\s*({.*?})\s*-->", raw_file_text, re.MULTILINE):
+                try:
+                    meta = json.loads(dm.group(2))
+                    if meta.get("draft"):
+                        draft_ids.add(dm.group(1).strip())
+                except Exception:
+                    pass
+
             confirmed_q = [t.id for t in tasks if t.status == STATUS_CONFIRMED]
             rework_q = [t.id for t in tasks if t.status == STATUS_REWORK]
-            pending_q = [t.id for t in tasks if t.status == STATUS_PENDING]
+            draft_q = [t.id for t in tasks if t.id in draft_ids]
+
+            if not include_drafts:
+                pending_q = [t.id for t in tasks if t.status == STATUS_PENDING and t.id not in draft_ids]
+            else:
+                pending_q = [t.id for t in tasks if t.status == STATUS_PENDING]
+
             in_prog_q = [t.id for t in tasks if t.status == STATUS_IN_PROGRESS]
             completed_q = [t.id for t in tasks if t.status == STATUS_COMPLETED]
+
+            if draft_q:
+                summary["📝 草案"] = len(draft_q)
+
             file_records.append(
                 {
                     "name": basename,
@@ -519,6 +569,7 @@ def dev_tasks_status(workspace_root: str) -> Dict[str, Any]:
                         "confirmed_queue": confirmed_q,
                         "rework_queue": rework_q,
                         "pending_queue": pending_q,
+                        "draft_queue": draft_q,
                         "in_progress": in_prog_q,
                         "completed_count": len(completed_q),
                     },
@@ -1112,67 +1163,125 @@ def dev_tasks_complete(
         return {"status": "rejected", "reason": f"Failed to transition task to completed / 流转为已完成失败: {e}"}
 
 
-def _parse_task_markdown_sections(text: str) -> Dict[str, Any]:
-    """从 Markdown 文本或 JSON 格式中提取六大核心字段字典。"""
-    clean_text = text.strip()
-    if clean_text.startswith("```json") and clean_text.endswith("```"):
-        clean_text = clean_text[7:-3].strip()
-    elif clean_text.startswith("```") and clean_text.endswith("```"):
-        first_nl = clean_text.find("\n")
-        if first_nl != -1:
-            clean_text = clean_text[first_nl + 1:-3].strip()
+@mcp.tool()
+def dev_tasks_promote_draft(
+    workspace_root: str,
+    task_file: str,
+    task_id: str,
+) -> Dict[str, Any]:
+    """Validate physical feasibility of a draft task and promote it to formal [Pending] state.
 
-    try:
-        data = json.loads(clean_text)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
+    [中文对照] 运行物理可行性 Lint 闸门校验任务草案。通过后抹除草案标记晋升为正式 ⬜ 待确认 待领任务；未通过则拦截并列出物理冲突。
 
-    result: Dict[str, Any] = {}
-    header_m = re.search(r"^###\s+(?:任务|Task)\s+([^\s—\-]+)\s*.*?[—\-]\s*(.*)$", text, re.MULTILINE)
-    if header_m:
-        result["id"] = header_m.group(1).strip()
-        result["title"] = header_m.group(2).strip()
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        task_file: Task file name or path / 任务单文件名或相对路径。
+        task_id: Task ID to promote (e.g. '3.1') / 待晋升的草案任务ID。
+    """
+    f_path = _resolve_task_file_path(workspace_root, task_file)
+    if not os.path.isfile(f_path):
+        return {
+            "status": "rejected",
+            "task_id": task_id,
+            "error": f"Task file not found / 任务单文件不存在: {f_path}",
+            "promoted": False,
+        }
 
-    sections = [
-        ("affected_files", r"####\s+【?(?:涉及文件|Affected Files)】?"),
-        ("root_cause_and_goal", r"####\s+【?(?:缺陷根因与修改目标|Root Cause & Goal|Root Cause and Goal)】?"),
-        ("type_contracts", r"####\s+【?(?:目标签名与类型契约|Type Contracts)】?"),
-        ("steps", r"####\s+【?(?:分步改造指引|Step-by-Step Instructions|Steps)】?"),
-        ("defensive_checks", r"####\s+【?(?:防御与边缘校验|Defensive Checks|Defensive and Edge Checks)】?"),
-        ("dod_commands", r"####\s+【?(?:DoD 验证命令|DoD Verification Commands|dod_commands)】?"),
-    ]
+    lock_path = f_path + ".lock"
+    lock = filelock.FileLock(lock_path, timeout=5.0)
 
-    for idx, (field_name, pattern) in enumerate(sections):
-        m = re.search(pattern, text, re.IGNORECASE)
-        if not m:
-            continue
-        start_pos = m.end()
-        next_pos = len(text)
-        for _, next_pat in sections[idx + 1:]:
-            next_m = re.search(next_pat, text[start_pos:], re.IGNORECASE)
-            if next_m:
-                next_pos = start_pos + next_m.start()
-                break
+    with lock:
+        with open(f_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
 
-        sec_content = text[start_pos:next_pos].strip()
-        if sec_content.startswith("```") and sec_content.endswith("```"):
-            inner = sec_content.splitlines()
-            if len(inner) >= 2:
-                sec_content = "\n".join(inner[1:-1]).strip()
+        task_start = -1
+        task_end = len(lines)
+        target_id_str = str(task_id).strip()
+        for idx, line in enumerate(lines):
+            m_header = re.match(r"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\b", line.strip(), re.IGNORECASE)
+            if m_header:
+                cur_id = m_header.group(1).strip()
+                if cur_id == target_id_str:
+                    task_start = idx
+                elif task_start != -1:
+                    task_end = idx
+                    break
 
-        if field_name == "affected_files":
-            files = [l.strip() for l in sec_content.splitlines() if l.strip() and not l.strip().startswith("```")]
-            result["affected_files"] = files
-        elif field_name == "steps":
-            result["steps"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
-        elif field_name == "defensive_checks":
-            result["defensive_checks"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
-        else:
-            result[field_name] = sec_content
+        if task_start == -1:
+            return {
+                "status": "rejected",
+                "task_id": task_id,
+                "error": f"Task {task_id} not found in {task_file} / 任务单中未找到任务 {task_id}",
+                "promoted": False,
+            }
 
-    return result
+        task_block_text = "".join(lines[task_start:task_end])
+        lint_res = lint_task_physical_feasibility(workspace_root, task_block_text)
+
+        if not lint_res.passed:
+            return {
+                "status": "rejected",
+                "task_id": task_id,
+                "task_file": f_path,
+                "promoted": False,
+                "lint_passed": False,
+                "issues": [
+                    {"severity": i.severity, "field": i.field, "message": i.message}
+                    for i in lint_res.issues
+                ],
+                "guidance": (
+                    "【物理可行性 Lint 未通过 / Physical Lint Failed】\n"
+                    "检测到目标文件物理不存在、重名冲突或命令语法错误。请修正草案中的 [Affected Files] 与 [DoD Verification Commands] 后重试。"
+                ),
+            }
+
+        # 全绿：抹除 (草案) / (Draft) 与 quench-task-meta 标记，晋升为正式 ⬜ 待确认
+        new_lines: List[str] = []
+        for idx, line in enumerate(lines):
+            if idx == task_start:
+                # 规范化 Header 行：抹除 (草案) / (Draft)
+                cleaned_header = re.sub(
+                    r"\s*\((?:草案|Draft|draft)\)",
+                    "",
+                    line,
+                    flags=re.IGNORECASE,
+                )
+                if not any(st in cleaned_header for st in ALL_STATUSES):
+                    cleaned_header = re.sub(
+                        r"^(###\s+(?:任务|Task)\s+[0-9a-zA-Z\._\-]+)",
+                        rf"\1 {STATUS_PENDING}",
+                        cleaned_header,
+                    )
+                new_lines.append(cleaned_header)
+            elif task_start < idx < task_end and "<!-- quench-task-meta:" in line:
+                # 抹除 draft 元数据行
+                continue
+            else:
+                new_lines.append(line)
+
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f_path), suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as tf:
+                tf.writelines(new_lines)
+            os.replace(tmp_path, f_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
+
+        return {
+            "status": "promoted",
+            "task_id": task_id,
+            "task_file": f_path,
+            "promoted": True,
+            "lint_passed": True,
+            "validated_files": lint_res.validated_files,
+            "issues": [
+                {"severity": i.severity, "field": i.field, "message": i.message}
+                for i in lint_res.issues
+            ],
+            "message": f"任务草案 {task_id} 物理可行性 Lint 全绿，已成功晋升为正式待领单状态 (⬜ 待确认)。",
+        }
 
 
 @mcp.tool()
@@ -1299,13 +1408,25 @@ async def dev_tasks_refine_spec(
         parsed_dict["status"] = STATUS_PENDING
 
         val_res = validate_task_schema(parsed_dict)
+        lint_res = lint_task_physical_feasibility(workspace_root, parsed_dict)
+        if not lint_res.passed:
+            parsed_dict["draft"] = True
         rendered_markdown = _render_task_markdown(parsed_dict)
 
         return {
             "ok": True,
-            "degraded": not val_res.is_valid,
+            "degraded": not val_res.is_valid or not lint_res.passed,
             "task_id": task_id,
             "title": title,
+            "draft": not lint_res.passed,
+            "physical_lint": {
+                "passed": lint_res.passed,
+                "issues": [
+                    {"severity": i.severity, "field": i.field, "message": i.message}
+                    for i in lint_res.issues
+                ],
+                "validated_files": lint_res.validated_files,
+            },
             "session_id": session_id,
             "log_file": file_sink.log_file,
             "truncated": res.get("truncated", False),

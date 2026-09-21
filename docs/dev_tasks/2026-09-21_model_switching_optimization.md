@@ -500,7 +500,7 @@ class TelemetryRecord(TypedDict):
 
 ---
 
-### 任务 7 ⬜ 待确认 — Milestone 6: Draft 任务草案态与物理可行性 Lint 闸门 (Draft Task State & Physical Feasibility Lint Gate)
+### 任务 7 ✔️ 已完成 — Milestone 6: Draft 任务草案态与物理可行性 Lint 闸门 (Draft Task State & Physical Feasibility Lint Gate)
 
 #### 【涉及文件】
 ```

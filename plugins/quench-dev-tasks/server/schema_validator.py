@@ -1,8 +1,16 @@
+# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+# If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 from __future__ import annotations
 
+import json
+import os
 import re
+import shlex
+import subprocess
+import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, NamedTuple, Optional, Union
 
 REQUIRED_FIELDS = [
     "affected_files",
@@ -46,6 +54,95 @@ class ValidationResult:
     warnings: List[str] = field(default_factory=list)
 
 
+class LintIssue(NamedTuple):
+    severity: Literal["error", "warning"]
+    field: str
+    message: str
+
+
+class PhysicalLintResult(NamedTuple):
+    passed: bool
+    issues: List[LintIssue]
+    validated_files: List[str]
+
+
+def _parse_task_markdown_sections(text: str) -> Dict[str, Any]:
+    """从 Markdown 文本或 JSON 格式中提取六大核心字段字典。"""
+    clean_text = text.strip()
+    if clean_text.startswith("```json") and clean_text.endswith("```"):
+        clean_text = clean_text[7:-3].strip()
+    elif clean_text.startswith("```") and clean_text.endswith("```"):
+        first_nl = clean_text.find("\n")
+        if first_nl != -1:
+            clean_text = clean_text[first_nl + 1:-3].strip()
+
+    try:
+        data = json.loads(clean_text)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    result: Dict[str, Any] = {}
+    header_m = re.search(r"^###\s+(?:任务|Task)\s+([^\s—\-]+)\s*.*?[—\-]\s*(.*)$", text, re.MULTILINE)
+    if header_m:
+        result["id"] = header_m.group(1).strip()
+        result["title"] = header_m.group(2).strip()
+
+    # 提取 draft 元数据标识
+    meta_m = re.search(r"<!--\s*quench-task-meta:\s*({.*?})\s*-->", text)
+    if meta_m:
+        try:
+            meta_obj = json.loads(meta_m.group(1))
+            if isinstance(meta_obj, dict) and meta_obj.get("draft") is not None:
+                result["draft"] = bool(meta_obj["draft"])
+        except Exception:
+            pass
+    if "draft" not in result:
+        header_sample = text[:300]
+        if "(草案)" in header_sample or "(Draft)" in header_sample or "(draft)" in header_sample or "draft: true" in header_sample.lower():
+            result["draft"] = True
+
+    sections = [
+        ("affected_files", r"####\s+【?(?:涉及文件|Affected Files)】?"),
+        ("root_cause_and_goal", r"####\s+【?(?:缺陷根因与修改目标|Root Cause & Goal|Root Cause and Goal)】?"),
+        ("type_contracts", r"####\s+【?(?:目标签名与类型契约|Type Contracts)】?"),
+        ("steps", r"####\s+【?(?:分步改造指引|Step-by-Step Instructions|Steps)】?"),
+        ("defensive_checks", r"####\s+【?(?:防御与边缘校验|Defensive Checks|Defensive and Edge Checks)】?"),
+        ("dod_commands", r"####\s+【?(?:DoD 验证命令|DoD Verification Commands|dod_commands)】?"),
+    ]
+
+    for idx, (field_name, pattern) in enumerate(sections):
+        m = re.search(pattern, text, re.IGNORECASE)
+        if not m:
+            continue
+        start_pos = m.end()
+        next_pos = len(text)
+        for _, next_pat in sections[idx + 1:]:
+            next_m = re.search(next_pat, text[start_pos:], re.IGNORECASE)
+            if next_m:
+                next_pos = start_pos + next_m.start()
+                break
+
+        sec_content = text[start_pos:next_pos].strip()
+        if sec_content.startswith("```") and sec_content.endswith("```"):
+            inner = sec_content.splitlines()
+            if len(inner) >= 2:
+                sec_content = "\n".join(inner[1:-1]).strip()
+
+        if field_name == "affected_files":
+            files = [l.strip() for l in sec_content.splitlines() if l.strip() and not l.strip().startswith("```")]
+            result["affected_files"] = files
+        elif field_name == "steps":
+            result["steps"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
+        elif field_name == "defensive_checks":
+            result["defensive_checks"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
+        else:
+            result[field_name] = sec_content
+
+    return result
+
+
 def validate_task_schema(task: Dict[str, Any]) -> ValidationResult:
     """Validate completeness and quality of the six core fields for a single task. / 校验单条任务数据的六大字段完整性与内容质量。"""
     errors: List[str] = []
@@ -76,7 +173,7 @@ def validate_task_schema(task: Dict[str, Any]) -> ValidationResult:
                 if not isinstance(item, str):
                     errors.append(f"Field 'affected_files' contains non-string element: {item} / affected_files 包含非字符串元素: {item}")
                     continue
-                s_item = item.strip()
+                s_item = re.sub(r"^[\s\-\*\+\d\.\>\#]+\s*", "", item).strip().strip("`'\" ")
                 if not any(s_item.startswith(prefix) for prefix in VALID_AFFECTED_PREFIXES):
                     warnings.append(
                         f"File item '{s_item}' does not use recommended prefixes [MODIFY]/[NEW]/[DELETE]/[RENAME] / 文件项 '{s_item}' 未使用推荐的操作标记 [MODIFY]/[NEW]/[DELETE]/[RENAME]"
@@ -153,3 +250,260 @@ def validate_task_schema(task: Dict[str, Any]) -> ValidationResult:
 
     is_valid = len(errors) == 0
     return ValidationResult(is_valid=is_valid, errors=errors, warnings=warnings)
+
+
+def lint_task_physical_feasibility(
+    workspace_root: str,
+    task_content: Union[str, Dict[str, Any]],
+) -> PhysicalLintResult:
+    """Validate physical sanity:
+    1. [MODIFY]/[DELETE] files must physically exist on disk (Path.exists() == True).
+    2. [NEW] target file must NOT already exist, but parent directory must exist or be within workspace.
+    3. DoD pytest commands must pass `pytest --collect-only -q` dry-run (exit code in {0, 5}).
+    """
+    ws_root = os.path.abspath(workspace_root)
+    if isinstance(task_content, str):
+        task_dict = _parse_task_markdown_sections(task_content)
+    elif isinstance(task_content, dict):
+        task_dict = task_content
+    else:
+        return PhysicalLintResult(
+            passed=False,
+            issues=[LintIssue("error", "task_content", "Invalid task content format / 无效的任务内容格式")],
+            validated_files=[],
+        )
+
+    issues: List[LintIssue] = []
+    validated_files: List[str] = []
+
+    # 1. 扫描受影响文件
+    affected = task_dict.get("affected_files") or []
+    if isinstance(affected, str):
+        affected = [l.strip() for l in affected.splitlines() if l.strip()]
+
+    new_declared_files: List[str] = []
+
+    for raw_item in affected:
+        item = str(raw_item).strip()
+        if not item or item.startswith("```"):
+            continue
+
+        # 剥除前导列表符号 (- , * , + ) 与反引号
+        clean_item = re.sub(r"^[\s\-\*\+\d\.\>\#]+\s*", "", item).strip()
+        clean_item = clean_item.strip("`'\" ")
+
+        # 匹配操作标记与文件路径
+        m = re.match(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*(.*)$", clean_item, re.IGNORECASE)
+        if not m:
+            continue
+
+        action = m.group(1).upper()
+        target_str = m.group(2).strip()
+
+        # 剥除 Markdown 超链接与反引号
+        m_link = re.search(r"\[.*?\]\((.*?)\)", target_str)
+        if m_link:
+            target_path = m_link.group(1).strip()
+        else:
+            target_path = target_str
+
+        target_path = target_path.strip("`'\" ")
+        if target_path.startswith("file:///"):
+            target_path = target_path[8:].lstrip("/\\")
+
+        if action == "RENAME":
+            parts = [p.strip("`'\" ") for p in target_path.split("->")]
+            if len(parts) != 2:
+                issues.append(
+                    LintIssue("error", "affected_files", f"[RENAME] 格式无效，必须为 'old -> new': {item}")
+                )
+                continue
+            old_rel, new_rel = parts
+            check_items = [("DELETE", old_rel), ("NEW", new_rel)]
+        else:
+            check_items = [(action, target_path)]
+
+        for act, rel in check_items:
+            # 路径穿越防线
+            target_abs = os.path.normpath(os.path.join(ws_root, rel))
+            try:
+                common = os.path.commonpath([ws_root, target_abs])
+                if common != ws_root:
+                    issues.append(
+                        LintIssue(
+                            "error",
+                            "affected_files",
+                            f"路径穿越安全违规: '{rel}' 超出工作区根目录",
+                        )
+                    )
+                    continue
+            except Exception:
+                issues.append(
+                    LintIssue("error", "affected_files", f"非法文件路径: '{rel}'")
+                )
+                continue
+
+            if act in ("MODIFY", "DELETE"):
+                if not os.path.exists(target_abs):
+                    issues.append(
+                        LintIssue(
+                            "error",
+                            "affected_files",
+                            f"[{act}] 目标文件在磁盘上物理不存在: '{rel}'",
+                        )
+                    )
+                else:
+                    validated_files.append(rel)
+
+            elif act == "NEW":
+                if os.path.exists(target_abs):
+                    issues.append(
+                        LintIssue(
+                            "error",
+                            "affected_files",
+                            f"[NEW] 目标文件已存在于磁盘，存在覆盖冲突风险: '{rel}'",
+                        )
+                    )
+                else:
+                    parent_dir = os.path.dirname(target_abs)
+                    try:
+                        common_parent = os.path.commonpath([ws_root, os.path.abspath(parent_dir)])
+                        if common_parent != ws_root:
+                            issues.append(
+                                LintIssue(
+                                    "error",
+                                    "affected_files",
+                                    f"[NEW] 父目录超出工作区根目录: '{rel}'",
+                                )
+                            )
+                        else:
+                            validated_files.append(rel)
+                            new_declared_files.append(rel)
+                    except Exception:
+                        issues.append(
+                            LintIssue(
+                                "error",
+                                "affected_files",
+                                f"[NEW] 目标父路径无效: '{rel}'",
+                            )
+                        )
+
+    # 2. 校验 DoD 验证命令 (单测 dry-run 与命令注入防线)
+    dod = task_dict.get("dod_commands") or []
+    if isinstance(dod, str):
+        dod_lines = [l.strip() for l in dod.splitlines() if l.strip()]
+    elif isinstance(dod, list):
+        dod_lines = [str(l).strip() for l in dod if str(l).strip()]
+    else:
+        dod_lines = []
+
+    for cmd_line in dod_lines:
+        if cmd_line.startswith("```") or not cmd_line or cmd_line.startswith("#"):
+            continue
+        # 命令注入防线：拦截危险 Shell 字符
+        if any(c in cmd_line for c in (";", "&", "|", "$", "`", ">", "<")):
+            issues.append(
+                LintIssue(
+                    "error",
+                    "dod_commands",
+                    f"DoD 命令包含危险 shell 元字符，已拦截: '{cmd_line}'",
+                )
+            )
+            continue
+
+        # 匹配 pytest 命令执行静态 Dry-run
+        m_pytest = re.search(
+            r"(?:python(?:\.exe)?\s+(?:-m\s+)?pytest|pytest(?:\.exe)?)\s*(.*)",
+            cmd_line,
+            re.IGNORECASE,
+        )
+        if m_pytest:
+            args_str = m_pytest.group(1).strip()
+            try:
+                raw_args = shlex.split(args_str, posix=(sys.platform != "win32"))
+            except Exception as e:
+                issues.append(
+                    LintIssue("error", "dod_commands", f"pytest 参数解析失败: {e}")
+                )
+                continue
+
+            # 过滤掉交互式或破坏性参数
+            safe_args = [a for a in raw_args if a not in ("-s", "--capture=no", "--pdb")]
+            dry_cmd = [
+                sys.executable,
+                "-m",
+                "pytest",
+                *safe_args,
+                "--collect-only",
+                "-q",
+                "-o",
+                "pythonpath=.",
+            ]
+
+            try:
+                proc = subprocess.run(
+                    dry_cmd,
+                    cwd=ws_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                )
+                comb_out = (proc.stdout + "\n" + proc.stderr).strip()
+
+                if proc.returncode in (0, 5):
+                    # 0: collected ok; 5: no tests collected (normal for new files)
+                    pass
+                else:
+                    # 检查是否为 [NEW] 声明的新建测试文件不存在导致的单测收集未就绪
+                    missing_expected_new = False
+                    if "file or directory not found" in comb_out.lower():
+                        for nf in new_declared_files:
+                            if os.path.basename(nf) in comb_out:
+                                missing_expected_new = True
+                                break
+
+                    if missing_expected_new or "no tests collected" in comb_out.lower():
+                        pass
+                    elif "error: unrecognized arguments" in comb_out.lower():
+                        issues.append(
+                            LintIssue(
+                                "error",
+                                "dod_commands",
+                                f"pytest 命令包含未知参数: {comb_out[:180]}",
+                            )
+                        )
+                    elif "syntaxerror" in comb_out.lower() or "indentationerror" in comb_out.lower():
+                        issues.append(
+                            LintIssue(
+                                "error",
+                                "dod_commands",
+                                f"pytest 收集命中语法错误: {comb_out[:180]}",
+                            )
+                        )
+                    elif proc.returncode == 4:
+                        issues.append(
+                            LintIssue(
+                                "error",
+                                "dod_commands",
+                                f"pytest 用法错误 (exit code 4): {comb_out[:180]}",
+                            )
+                        )
+                    else:
+                        issues.append(
+                            LintIssue(
+                                "error",
+                                "dod_commands",
+                                f"pytest dry-run 收集失败 (code {proc.returncode}): {comb_out[:180]}",
+                            )
+                        )
+            except subprocess.TimeoutExpired:
+                issues.append(
+                    LintIssue("warning", "dod_commands", "pytest dry-run 收集超时 (8s)")
+                )
+            except Exception as e:
+                issues.append(
+                    LintIssue("warning", "dod_commands", f"pytest dry-run 执行异常: {e}")
+                )
+
+    passed = not any(i.severity == "error" for i in issues)
+    return PhysicalLintResult(passed=passed, issues=issues, validated_files=validated_files)
