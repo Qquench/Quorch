@@ -13,6 +13,8 @@ This document collects common issues, troubleshooting tips, and technical questi
 4. [Directory Renaming & File Handle Locks (PermissionError)](#4-directory-renaming--file-handle-locks-permissionerror)
 5. [Windows MAX_PATH Path Length Warning](#5-windows-max_path-path-length-warning)
 6. [Dual-Model Logical Roles & LLM Selection](#6-dual-model-logical-roles--llm-selection)
+7. [Reviewer Engine API Setup, Proxy & Diagnostics](#7-reviewer-engine-api-setup-proxy--diagnostics)
+8. [Draft Task State & Physical Feasibility Lint Gate](#8-draft-task-state--physical-feasibility-lint-gate)
 
 ---
 
@@ -95,3 +97,30 @@ This document collects common issues, troubleshooting tips, and technical questi
   - **Reviewer (Architect)**: Any model with strong reasoning, system architecture capabilities, and big-picture context can serve in this role (e.g., Claude 3.7 Sonnet, OpenAI GPT-4.5 / o1, DeepSeek R1).
   - **Runner (Agile Executor)**: Any fast, cost-effective, high-instruction-following model can serve in this role (e.g., Gemini 2.0 Flash, GPT-4o-mini, Claude 3.5 Haiku).
 - You can freely switch models in your IDE's model picker dropdown at any time.
+
+---
+
+### 7. Reviewer Engine API Setup, Proxy & Diagnostics
+
+#### Q: How do I configure external API reasoning models (DeepSeek, OpenAI, Ollama) for Reviewer?
+- **Configuration**: Edit `.agents/quench_stack.yaml` under the `reviewer_engine` section. Set `provider: "deepseek"`, `api_key_env: "DEEPSEEK_API_KEY"`, and export your key in your environment.
+- **Corporate Proxy & Resilient Networking**: The engine respects standard environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) with automated SSL context handling.
+- **Testing Connectivity**: Run the dedicated CLI diagnostic tool:
+  ```bash
+  quench check --reviewer
+  ```
+  This command tests provider initialization, API key presence, upstream connection, and latency without modifying any files.
+- **Where are the thoughts stored?**: Streaming reasoning thoughts are written directly to `.agents/logs/reviewer/thinking.log` with automated 1024KB safe rotation and token redaction.
+
+---
+
+### 8. Draft Task State & Physical Feasibility Lint Gate
+
+#### Q: What is the `📝 Draft` (`📝 草案`) state and how does it protect the project?
+- **Purpose**: When proposing speculative or complex architecture tasks, tasks can be marked with `is_draft=True`. Draft tasks are strictly segregated from the confirmed execution queue so that Runner models never accidentally checkout unready tasks.
+- **Physical Feasibility Lint Gate**: Before promoting a draft via `dev_tasks_promote_draft`, the lint gate automatically verifies:
+  1. No path traversal attacks (`../`) in Affected Files;
+  2. Modified files actually exist on disk;
+  3. Pre-flight check against file overwrite collisions;
+  4. Non-executing syntax check (`pytest --collect-only`) to catch syntax errors before opening the task to execution.
+

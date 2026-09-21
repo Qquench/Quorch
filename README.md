@@ -60,6 +60,10 @@ While AI-assisted coding tools have transformed modern software development, eng
 ### Key Capabilities
 
 - **Dual-Model Role Decoupling**: 90% of implementation is performed by cost-effective agile models (`Runner`). High-order reasoning models (`Reviewer`) are invoked only during task planning, architectural review, or conflict escalation.
+- **Pluggable Multi-Provider Reviewer Engine (`ReviewerClient`)**: Supports direct API connections to DeepSeek (with real-time Thinking streams and Prompt Cache token detection), OpenAI standard endpoints, local offline Ollama, IDE native subagents, and graceful manual fallback.
+- **AST Codebase Explorer & Spec Refiner (`dev_tasks_refine_spec`)**: Extracts precise AST symbols and call-chains without dumping whole codebases, automatically upgrading draft specifications into hardened six-field contracts.
+- **Observable Thinking Stream & Low-Frequency Heartbeats**: Dedicated streaming logs under `.agents/logs/reviewer/thinking.log` with a 1024KB hard-cap safe rotation, cross-boundary pre-write redaction, and ~1.0s low-frequency progress notifications to keep MCP stdio JSON-RPC transport pristine.
+- **Draft Task State & Physical Feasibility Lint Gate (`📝 Draft`)**: Isolates unready architectural ideas; enforces path traversal defenses, physical file existence checks, overwrite hazard prevention, and pytest dry-run syntax verification before task promotion.
 - **Physical PreToolUse Guard**: Intercepts any file modifications outside the active task's `【Affected Files】` whitelist, prompting interactive user confirmation before any out-of-scope edit is permitted.
 - **Atomic State Machine**: Backed by cross-process `filelock`, strictly enforcing single-active-task execution, preventing multi-subagent race conditions.
 - **Six-Core-Field Contract**: Every task must define Affected Files, Root Cause & Target, Type Contracts, Step-by-Step Instructions, Defensive Checks, and Executable DoD Verification Commands.
@@ -74,7 +78,7 @@ While AI-assisted coding tools have transformed modern software development, eng
 Clone this repository and run the cross-platform installer:
 
 ```bash
-git clone https://github.com/your-org/quorch.git
+git clone https://github.com/Qquench/Quorch.git
 cd quorch
 python scripts/install.py
 ```
@@ -95,23 +99,25 @@ python <path-to-quorch>/plugins/quench-dev-tasks/scripts/init_project.py <path-t
 
 This creates:
 - `.agents/plugins.json`: Registers the `quench-dev-tasks` plugin;
-- `.agents/quench_stack.yaml`: Custom project boundaries, constraints, and test runners;
+- `.agents/quench_stack.yaml`: Custom project boundaries, constraints, test runners, and reviewer configuration;
 - `docs/dev_tasks/`: Dedicated directory for devtask lifecycle workflows.
 
 ---
 
 ## 🛠️ MCP Tools & Capabilities
 
-The `quench-dev-tasks` MCP Server provides a suite of specialized tools:
+The `quench-dev-tasks` MCP Server provides a suite of 10 specialized tools:
 
 | Tool | Purpose | Typical Invocation |
 | :--- | :--- | :--- |
-| `dev_tasks_status` | Query active task overview, queue distributions, and hook audit logs | At session startup or after completing milestones |
-| `dev_tasks_propose` | Propose new tasks adhering to the six-field schema (`⬜ Pending`) | During architecture planning or backlog triage |
+| `dev_tasks_status` | Query active task overview, queue distributions (`include_drafts`), and hook audit logs | At session startup or after completing milestones |
+| `dev_tasks_propose` | Propose new tasks adhering to the six-field schema (`⬜ Pending` or `📝 Draft`) | During architecture planning or backlog triage |
+| `dev_tasks_refine_spec` | Refine a task spec with AST codebase symbol analysis & Reviewer reasoning | Upgrading draft tasks into executable contracts |
+| `dev_tasks_promote_draft`| Lint physical feasibility (path defenses, dry-run) and promote draft to pending | Promoting verified drafts to the execution queue |
 | `dev_tasks_confirm` | Transition task states (`confirm`, `rework`, `skip`, `revoke`) | After Reviewer verification before execution |
 | `dev_tasks_checkout` | Check out confirmed tasks and set status to `🔨 In Progress` | Runner claiming the next verified task |
 | `dev_tasks_complete` | Complete a task with DoD test output audit (`✔️ Completed`) | Runner upon passing all automated DoD commands |
-| `dev_tasks_escalate` | Escalate a stuck task and generate a Reviewer Handoff Card | Runner encountering design deadlocks or regressions |
+| `dev_tasks_escalate` | Escalate a stuck task and generate a multi-tier Reviewer Handoff Card | Runner encountering design deadlocks or regressions |
 | `dev_tasks_set_bypass`| Activate time-bounded, session-locked fast-track bypass | Light touch edits (e.g. documentation, typos) |
 | `dev_tasks_archive` | Archive closed tasks and append to `CHANGELOG.md` | Once all tasks in a file are completed |
 
@@ -120,7 +126,7 @@ The `quench-dev-tasks` MCP Server provides a suite of specialized tools:
 > **Note from the Author / Transparency Notice**  
 > This project originated from my personal workflow and real-world engineering needs while building software on **Windows using Google Antigravity IDE**. The core state machine, task governance engine, and Antigravity hook integration have been thoroughly developed, battle-tested, and verified locally.
 > 
-> However, extending this framework to other developer tools (such as **Cursor**, Windsurf, etc.) or cross-platform operating systems was generated by AI models based on the existing architecture abstractions, as I do not have personal development experience with those environments. While comprehensive automated unit test suites (105+ tests) are in place, real-world edge cases or platform quirks may still surface.
+> However, extending this framework to other developer tools (such as **Cursor**, Windsurf, etc.) or cross-platform operating systems was generated by AI models based on the existing architecture abstractions, as I do not have personal development experience with those environments. While comprehensive automated unit test suites (167+ tests) are in place, real-world edge cases or platform quirks may still surface.
 > 
 > Community feedback, bug reports, and Pull Requests from experienced users of Cursor and non-Windows platforms are warmly appreciated to help test and harden these integrations!
 
@@ -128,9 +134,10 @@ The `quench-dev-tasks` MCP Server provides a suite of specialized tools:
 
 ## 📖 Documentation Directory
 
+- ⚙️ [docs/configuration.md](docs/configuration.md): Complete configuration reference for `quench_stack.yaml`.
 - 🌐 [CHANGELOG.md](CHANGELOG.md): Historical releases and evolution milestones.
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines and testing instructions.
-- ❓ [docs/FAQ.md](docs/FAQ.md): Troubleshooting common environment, path, and encoding questions.
+- ❓ [docs/FAQ.md](docs/FAQ.md): Troubleshooting common environment, path, proxy, and encoding questions.
 - 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md): Technical architecture specification.
 - 📜 [LICENSE](LICENSE): Mozilla Public License 2.0 (MPL-2.0).
 

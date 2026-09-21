@@ -60,6 +60,10 @@ AI 编程助手显著提升了编码效率，但在复杂的真实工程实践�
 ### 核心特性
 
 - **双模型逻辑角色解耦**：90% 的日常编码由轻量高敏捷模型（`Runner`）执行；高阶推理模型（`Reviewer`）仅在任务规划、架构复核与遇到重大冲突时委派介入，大幅节省旗舰算力配额。
+- **可插拔多厂商审查引擎 (`ReviewerClient`)**：支持直连 DeepSeek（支持流式思维链与 Prompt Cache 计费感知）、OpenAI 标准端点、Ollama 本地全离线模型、宿主 IDE 内置子代理及 Manual 优雅回退链。
+- **AST 代码探查与规约强化 (`dev_tasks_refine_spec`)**：精准提取 AST 符号与依赖切片，无需全量 Dump 代码库，自动将粗粒度草案升级为严密的六大字段任务契约。
+- **极简实时思考流落盘与低频心跳**：思维链实时分块写入 `.agents/logs/reviewer/thinking.log`，具备 1024KB 硬封顶安全轮转与跨块正则流式脱敏；1.0s 低频进度心跳，100% 保持 MCP stdio JSON-RPC 纯净度。
+- **Draft 任务草案态与物理可行性 Lint 门禁 (`📝 草案`)**：安全隔离未经充分推演的架构想法；晋升前硬性核验路径防穿越、物理文件存在性、覆盖冲突防范与 pytest dry-run 静态语法校验。
 - **PreToolUse 物理拦截层**：真正基于 Hook 拦截当前任务【涉及文件】白名单之外的修改行为，在未授权修改前弹出交互确认框，把终审权交还给开发者。
 - **跨进程排他锁状态机**：基于 `filelock` 实现单核互斥状态机，严格保障同一时刻仅单任务执行，彻底杜绝多 Subagent 协作冲突与竞态。
 - **六大核心字段契约**：每项任务必须明确【涉及文件】、【缺陷根因与修改目标】、【目标签名与类型契约】、【分步改造指引】、【防御与边缘校验】和【DoD 验证命令】。
@@ -74,7 +78,7 @@ AI 编程助手显著提升了编码效率，但在复杂的真实工程实践�
 克隆本仓库并运行跨平台安装引导脚本：
 
 ```bash
-git clone https://github.com/your-org/quorch.git
+git clone https://github.com/Qquench/Quorch.git
 cd quorch
 python scripts/install.py
 ```
@@ -95,23 +99,25 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 
 脚本将自动在目标项目中生成：
 - `.agents/plugins.json`：注册 `quench-dev-tasks` 插件；
-- `.agents/quench_stack.yaml`：定制项目规范约束、测试命令与边界；
+- `.agents/quench_stack.yaml`：定制项目规范约束、测试命令、边界与 Reviewer 调度配置；
 - `docs/dev_tasks/`：任务生命周期流转管理工作区。
 
 ---
 
 ## 🛠️ MCP 工具字典与功能速查
 
-`quench-dev-tasks` MCP Server 提供以下专用工具：
+`quench-dev-tasks` MCP Server 提供以下 10 个专用工具：
 
 | 工具名称 | 核心作用 | 典型使用时机 |
 | :--- | :--- | :--- |
-| `dev_tasks_status` | 查询任务总览、批次排队与 Hook 审计日志 | 会话启动自检、完成里程碑后 |
-| `dev_tasks_propose` | 提交符合六大字段契约的标准开发任务提案 (`⬜ 待确认`) | 架构设计或需求梳理时 |
+| `dev_tasks_status` | 查询任务总览、批次排队（支持 `include_drafts`）与 Hook 审计日志 | 会话启动自检、完成里程碑后 |
+| `dev_tasks_propose` | 提交符合六大字段契约的标准开发任务提案 (`⬜ 待确认` 或 `📝 草案`) | 架构设计或需求梳理时 |
+| `dev_tasks_refine_spec` | 基于 AST 代码探查与高阶推理大脑强化任务规约 | 将粗粒度草案升级为可执行契约 |
+| `dev_tasks_promote_draft`| 实施物理可行性 Lint 门禁（防路径穿越、语法 dry-run）并晋升为待执行 | 将推演完毕的草案纳入待领队列 |
 | `dev_tasks_confirm` | 调整任务状态 (`confirm`, `rework`, `skip`, `revoke`) | 架构审查完成、准许开工前 |
 | `dev_tasks_checkout` | 领单检出已确认任务，置为 `🔨 执行中` 并下发指引 | 执行模型按序或定向领取任务 |
 | `dev_tasks_complete` | 提交任务完成报告并审计单测断言 (`✔️ 已完成`) | 物理执行全部 DoD 命令通过后 |
-| `dev_tasks_escalate` | 升级遇到冲突的任务并生成架构审查交接卡 | 遇到方案冲突、死锁或回归缺陷时 |
+| `dev_tasks_escalate` | 升级遇到冲突的任务并生成多层能力审查交接卡 | 遇到方案冲突、死锁或回归缺陷时 |
 | `dev_tasks_set_bypass`| 开启附带物理会话锁与过期倒计时的快速通道旁路 | 进行极轻量修补（如单点样式、错别字） |
 | `dev_tasks_archive` | 归档已闭环的任务单并自动追加记录至 `CHANGELOG.md` | 当前任务单全量完成闭环后 |
 
@@ -120,7 +126,7 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 > **作者说明与诚挚提示**  
 > 本项目源于我个人在 **Windows 环境下使用 Google Antigravity IDE** 进行日常开发时的实际工程痛点与治理需求。其底层核心状态机、治理引擎与 Antigravity 拦截链路已在本地经过充分实战跑通与验证。
 > 
-> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然已编写了全量自动化单元测试（105+ 项单测覆盖），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
+> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然已编写了全量自动化单元测试（167+ 项单测覆盖），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
 > 
 > 诚挚欢迎广大社区开发者提出 Issue、反馈实际使用体验或提交 PR，共同完善和加固各客户端适配层！
 
@@ -128,9 +134,10 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 
 ## 📖 相关文档
 
+- ⚙️ [docs/configuration_zh.md](docs/configuration_zh.md)：`quench_stack.yaml` 完整配置说明与字段手册。
 - 🌐 [CHANGELOG.md](CHANGELOG.md)：版本更新日志与历史架构演进记录。
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md)：开源贡献指南与本地测试规范。
-- ❓ [docs/FAQ.md](docs/FAQ.md)：常见环境问题、编码乱码与 Hook 排查手册。
+- ❓ [docs/FAQ.md](docs/FAQ.md)：常见环境问题、编码乱码、企业代理与 Hook 排查手册。
 - 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md)：技术架构与规范设计说明书。
 - 📜 [LICENSE](LICENSE)：Mozilla Public License 2.0 (MPL-2.0)。
 

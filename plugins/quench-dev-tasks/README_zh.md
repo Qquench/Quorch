@@ -13,7 +13,7 @@
    - **日常执行器 (Runner)**：日常敏捷推进、领单执行与微小缺陷修复，节省高阶推理模型配额。
    - **架构审查器 (Reviewer)**：遇到重大分歧、深层架构重构或执行遇阻时，由用户自选的高阶推理模型进行审查诊断并生成标准任务单。
 2. **状态机强约束**：
-   - 包含 `⬜ 待确认` ➔ `✅ 已确认` ➔ `🔨 执行中` ➔ `✔️ 已完成`（支持 `🔄 需返工` 与 `⏭️ 跳过`）的单向严密状态流转。
+   - 包含 `📝 草案` ➔ `⬜ 待确认` ➔ `✅ 已确认` ➔ `🔨 执行中` ➔ `✔️ 已完成`（支持 `🔄 需返工` 与 `⏭️ 跳过`）的单向严密状态流转。
    - **单核执行原则**：全局限制同一时间仅允许一个任务处于 `🔨 执行中`。
    - **多进程文件锁保障**：防止并发或并行 Subagent 写入造成 Markdown 损坏。
 3. **物理拦截层 (PreToolUse Hook Guard & Git Pre-commit Guard)**：
@@ -46,15 +46,17 @@ quench-dev-tasks/
 ├── agents/                     # 专业子代理
 │   └── reviewer/
 ├── server/                     # FastMCP 服务端实现
-│   ├── server.py               # 8 个核心治理工具
+│   ├── server.py               # 10 个核心治理工具
+│   ├── reviewer_engine.py      # 可插拔 ReviewerClient 与思维链落盘
+│   ├── code_explorer.py        # AST 代码库探查器
 │   ├── state_machine.py        # 任务状态机引擎 + 文件锁
-│   ├── schema_validator.py     # 六大字段规范校验器
-│   ├── project_config.py       # 项目清单解析器
+│   ├── schema_validator.py     # 六大字段规范校验器与草案物理可行性 Lint 门禁
+│   ├── project_config.py       # 项目清单解析器与版本平滑迁移
 │   ├── changelog_writer.py     # CHANGELOG 归档日志同步
-│   ├── cli.py                  # 统一终端 CLI 控制台
+│   ├── cli.py                  # 统一终端 CLI 控制台 (`quench status/check/archive`)
 │   ├── adapters/               # 跨客户端适配层 (Antigravity, Cursor, Generic CLI)
 │   ├── hooks/                  # PreToolUse 守卫与上下文注入
-│   └── tests/                  # 完整单元测试套件 (105/105 passed)
+│   └── tests/                  # 完整单元测试套件 (167/167 passed)
 ├── scripts/                    # 实用脚本
 │   ├── init_project.py         # 新项目一键接入脚手架
 │   ├── git_pre_commit_guard.py # Git 物理硬拦截守护脚本
@@ -93,12 +95,14 @@ python scripts/init_project.py /path/to/your/project --ide cursor --install-git-
 
 | 工具名称 | 描述 |
 | :--- | :--- |
-| `dev_tasks_status` | 查询任务状态概览、活跃会话旁路、当前执行任务与统计批次 |
-| `dev_tasks_propose` | 提交新任务提案（状态为 `⬜ 待确认`），强制六大字段合规性校验 |
-| `dev_tasks_confirm` | 确认任务单（支持 `confirm`, `rework`, `skip` 等多向流转） |
+| `dev_tasks_status` | 查询任务状态概览（支持 `include_drafts`）、活跃会话旁路、当前执行任务与统计批次 |
+| `dev_tasks_propose` | 提交新任务提案（支持 `⬜ 待确认` 或 `📝 草案`），强制六大字段合规性校验 |
+| `dev_tasks_refine_spec` | 基于 AST 代码符号探查与高阶推理模型智能强化任务规约 |
+| `dev_tasks_promote_draft`| 实施物理可行性门禁（防路径穿越、语法 dry-run）并将草案晋升为待确认状态 |
+| `dev_tasks_confirm` | 确认任务单（支持 `confirm`, `rework`, `skip`, `revoke` 等多向流转） |
 | `dev_tasks_checkout` | 领取任务进行开发（进入 `🔨 执行中`，单核互斥锁 + 批次完工感应） |
 | `dev_tasks_complete` | 标记任务完成（进入 `✔️ 已完成`，强制要求 DoD 验证通过） |
-| `dev_tasks_escalate` | 将陷入困境的任务升级委派给高阶架构模型深度审查 |
+| `dev_tasks_escalate` | 将陷入困境的任务生成多层能力协商信封并委派审查 |
 | `dev_tasks_archive` | 将已全量闭环的任务文件归档并自动同步至 CHANGELOG.md |
 | `dev_tasks_set_bypass`| 用户授权的快速会话旁路工具（样式/文档等临时免检，防 Agent 私自滥用） |
 

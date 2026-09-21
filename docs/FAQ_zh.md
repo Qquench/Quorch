@@ -13,6 +13,8 @@
 4. [目录更名与句柄锁定 (PermissionError)](#4-目录更名与句柄锁定-permissionerror)
 5. [Windows MAX_PATH 路径长度警告](#5-windows-max_path-路径长度警告)
 6. [双模型角色与实际大模型映射](#6-双模型角色与实际大模型映射)
+7. [审查引擎 API 接入、企业代理与一键体检](#7-审查引擎-api-接入企业代理与一键体检)
+8. [Draft 任务草案态与物理可行性 Lint 门禁](#8-draft-任务草案态与物理可行性-lint-门禁)
 
 ---
 
@@ -95,3 +97,30 @@
   - **Reviewer（架构审查师）**：任何具备强逻辑推理、擅长系统架构与大局观的模型皆可充当（如 Claude 3.7 Sonnet, OpenAI GPT-4.5 / o1, DeepSeek R1）；
   - **Runner（日常执行器）**：任何遵循度高、响应敏捷且成本低廉的模型皆可充当（如 Gemini 2.0 Flash, GPT-4o-mini, Claude 3.5 Haiku）。
 - 您只需在 IDE 的模型选择下拉菜单中自由切换即可。
+
+---
+
+### 7. 审查引擎 API 接入、企业代理与一键体检
+
+#### Q: 如何接入外部 API 推理模型（如 DeepSeek、OpenAI、本地 Ollama）充当 Reviewer？
+- **配置方式**：编辑 `.agents/quench_stack.yaml` 中的 `reviewer_engine` 块，配置 `provider: "deepseek"`, `api_key_env: "DEEPSEEK_API_KEY"`，并在操作系统或终端中导出对应的环境变量。
+- **企业内网代理**：引擎原生支持并尊重 `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` 环境变量，内置 SSL 上下文自适应与连接超时熔断。
+- **一键测试连通性**：通过 Quench CLI 提供的专用诊断工具：
+  ```bash
+  quench check --reviewer
+  ```
+  该命令将安全检测上游 API 连通性、密钥有效性与往返延迟，绝不产生多余的文件变更。
+- **思考流日志在哪里查看？**：思维链实时分块落盘至 `.agents/logs/reviewer/thinking.log`，内置 1024KB 安全硬轮转与凭据正则脱敏。
+
+---
+
+### 8. Draft 任务草案态与物理可行性 Lint 门禁
+
+#### Q: 什么是 `📝 Draft`（`📝 草案`）状态？它如何防止模型空转与误伤代码？
+- **核心定位**：在构思高风险重构或复杂特性时，可通过 `is_draft=True` 提交草案任务。Draft 状态任务与待执行队列严格隔离，Runner 模型绝不会越级领单。
+- **物理可行性 Lint 门禁**：在调用 `dev_tasks_promote_draft` 晋升任务前，系统硬性核验：
+  1. 【涉及文件】是否存在路径穿越（`../`）漏洞；
+  2. 声明的文件在磁盘上是否真实物理存在；
+  3. 目标覆盖冲突安全检测；
+  4. 静态语法 dry-run（如 `pytest --collect-only`），在允许开工前提前排查文件语法崩溃。
+
