@@ -306,7 +306,7 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 
 目标：
 1. 架构解耦：将 Reviewer 客户端彻底解耦为通用 OpenAI 兼容协议适配器（ReviewerClient），支持任意第三方服务商或本地 Ollama 端点，DeepSeek 仅作为开箱即用的预置 Provider 之一；
-2. 能力协商信封：在 server.py 引入单一响应信封（reviewer_handoff），实现 Subagent -> Session_Switch -> Engine -> Manual 的四层能力声明与自适应匹配；
+2. 纯净上下文能力协商信封：在 server.py 引入单一响应信封（reviewer_handoff），实现 Subagent -> Engine -> Manual 的三层纯净上下文策略匹配；坚决杜绝在冗长旧会话内就地切模型（彻底规避 5万~10万+ 冗余历史 Token 重新提交造成的巨大浪费与注意力稀释）；
 3. 恪守四大红线：零同步阻塞网络 I/O（50ms 治理预算保证）、manual 恒为终局兜底（R3 不变式）、零客户端指纹嗅探、密钥绝不回显；
 4. 100% 向后兼容：所有既有顶级键（status, task_id, instructions, handoff_card 等）完全保留，旧客户端无感兼容。
 ```
@@ -314,13 +314,13 @@ python plugins/quench-dev-tasks/server/cli.py check --engine --plain
 #### 【目标签名与类型契约】
 ```python
 # ---- plugins/quench-dev-tasks/server/project_config.py ----
-DispatchStrategy = Literal["subagent", "session_switch", "engine", "manual"]
+DispatchStrategy = Literal["subagent", "engine", "manual"]
 
 @dataclass
 class ReviewerEngineConfig:
-    mode: str = "auto"  # "auto" | "subagent" | "session_switch" | "engine" | "manual"
+    mode: str = "auto"  # "auto" | "subagent" | "engine" | "manual"
     strategy_order: list[str] = field(
-        default_factory=lambda: ["subagent", "session_switch", "engine", "manual"]
+        default_factory=lambda: ["subagent", "engine", "manual"]
     )
     provider: str = "deepseek"  # "deepseek" | "openai" | "ollama" | "custom" | "none"
     model: str = "deepseek-flash"
@@ -364,14 +364,13 @@ class ReviewerClient(DeepSeekClient):
 ```
 
 #### 【分步改造指引】
-1. 【模型解耦与配置归一化】：在 `project_config.py` 中重构 `ReviewerEngineConfig`，支持 `mode`（默认 `"auto"`）与 `strategy_order`；在 `reviewer_engine.py` 将客户端抽象升级为模型无关的 `ReviewerClient`（保留 `DeepSeekClient` 作为完全兼容别名），依赖标准 OpenAI 协议参数（`base_url`, `model`, `api_key_env`）；在配置加载时自动平滑迁移老配置（`provider: none` -> `mode: manual`；`provider: deepseek` -> `mode: engine`）。
+1. 【模型解耦与配置归一化】：在 `project_config.py` 中重构 `ReviewerEngineConfig`，支持 `mode`（默认 `"auto"`）与 `strategy_order`（默认 `["subagent", "engine", "manual"]`）；在 `reviewer_engine.py` 将客户端抽象升级为模型无关的 `ReviewerClient`（保留 `DeepSeekClient` 作为完全兼容别名），依赖标准 OpenAI 协议参数（`base_url`, `model`, `api_key_env`）；在配置加载时自动平滑迁移老配置（`provider: none` -> `mode: manual`；`provider: deepseek` -> `mode: engine`）。
 2. 【信封构造纯函数实现】：在 `server.py` 实现 `_resolve_handoff_envelope` 纯函数。严禁任何网络 I/O；依据本地配置与凭据存在性按优先级组装：
    - `subagent` 载荷：注入只读审查 Prompt、受管文件上下文与 `dev_tasks_confirm` 回调指示；
-   - `session_switch` 载荷：注入会话内升级至 REVIEWER 角色的执行指引；
    - `engine` 载荷：登记 provider/model 与 `api_key_present: bool`（严禁输出密钥明文），指引调用 `dev_tasks_refine_spec`；
    - `manual` 载荷：输出 100% 经典的 Markdown 交接卡，并强制设为终局兜底（`available: True`）。
 3. 【工具挂载与并发安全】：重构 `dev_tasks_checkout`（批次完工分支）与 `dev_tasks_escalate`，确保在状态机 `FileLock` 释放后再调用 `_resolve_handoff_envelope`；在现有返回字典上增量挂载 `reviewer_handoff` 键，将顶层 `handoff_card` 与 `legacy_card_markdown` 保持严格字节一致。
-4. 【技能文档规范同步】：更新 `skills/dev-tasks-workflow/SKILL.md` 与 `skills/dev-tasks-review/SKILL.md`，记录四层能力协商信封契约、宿主 Agent 优先取用第一条 `available` 策略的自治指引、以及模型中立的 Reviewer 审查职责。
+4. 【技能文档规范同步】：更新 `skills/dev-tasks-workflow/SKILL.md` 与 `skills/dev-tasks-review/SKILL.md`，记录三层纯净上下文能力协商信封契约、宿主 Agent 优先取用第一条 `available` 策略的自治指引、以及模型中立的 Reviewer 审查职责。
 5. 【单测刚性闭环】：编写 `tests/test_handoff_protocol.py`，覆盖 15 项核心测试（R3 manual 兜底不变式、未知 mode 自动回落 manual、provider 自动迁移映射、旧客户端字段 100% 存在、密钥零序列化泄露、路径穿越防御、以及零阻塞网络 I/O 验证）。
 
 #### 【防御与边缘校验】
