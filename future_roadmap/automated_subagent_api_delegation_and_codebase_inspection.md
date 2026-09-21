@@ -1,14 +1,15 @@
-# Stage 4: 基于独立 API 的全自动 Subagent 委派与代码库动态探查架构规划 (已交付归档)
-(Archived Stage 4: Automated Subagent Delegation & Dynamic Codebase Inspection Roadmap)
+# [已执行归档 / Archived & Executed] 全自动 Subagent 委派与代码库动态探查架构规划
 
-> **归档状态**: ✔️ 已完全交付并验证 (Delivered in v0.2.0, 2026-09-21)  
-> **实施任务单**: `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md`  
-> **交付物**:
-> - `ReviewerClient` 多厂商解耦架构 (`plugins/quench-dev-tasks/server/reviewer_engine.py`)，支持 DeepSeek (思维链 + Prompt Cache 计费感知)、OpenAI、Ollama 本地全离线、宿主 Subagent 及 Manual 优雅回退；
-> - `CodeExplorer` AST 符号解析器与 `dev_tasks_refine_spec` 智能规约生成闭环 (`plugins/quench-dev-tasks/server/code_explorer.py`)；
-> - `RotatingFileSink` 实时思考流脱敏落盘与 1.0s 低频进度心跳 (`plugins/quench-dev-tasks/server/reviewer_engine.py`)；
-> - `Draft` 任务草案态与 `lint_task_physical_feasibility` 物理可行性门禁；
-> - 全量 167/167 自动化单测覆盖。
+> [!NOTE]
+> **状态变更通知 (Status: Delivered in v0.2.0)**  
+> 本规划文档所提议的架构体系在 Quench v0.2.0 (2026-09-21) 中已**全部执行并交付闭环**：
+> - 外部大模型 API 委派已实现为通用可插拔的 `ReviewerClient`（支持 DeepSeek、OpenAI、本地 Ollama 离线模型与宿主原生 Subagent 自动回退）；
+> - 代码库静态分析与符号检索已实现为 `CodeExplorer` AST 代码探查器；
+> - 自动强化任务单闭环已实现为 `dev_tasks_refine_spec` 与 `dev_tasks_escalate`；
+> - 实时思维链审计流已由 `RotatingFileSink` 落盘至 `.agents/logs/reviewer/thinking.log`。
+>
+> 📁 **正式归档路径**: [docs/roadmap/archive/stage4_automated_subagent_delegation_and_codebase_inspection.md](../docs/roadmap/archive/stage4_automated_subagent_delegation_and_codebase_inspection.md)  
+> 📋 **对应开发任务单**: [docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md](../docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md)
 
 ---
 
@@ -16,7 +17,7 @@
 
 在 Quench MCP 套件的日常开发实践中，形成了典型的“执行 Agent 快速执行 + Reviewer 深度架构规划”的双模型协作预期。然而，在基于 IDE 客户端图形界面的早期方案中，面临两大痛点：
 1. **人肉切换心智负担**：开发者必须在多会话之间频繁往返，打断了连续的“无感编程流”。
-2. **单一会话上下文污染**：如果在同一个长会话中途切换高智力模型，由于 IDE 机制会将前面包含代码变更、构建日志的全量历史（可能达 5 万~10 万+ Token）无差别发送，造成极其高昂且不必要的配额浪费。
+2. **单一会话上下文污染**：如果在同一个长会话中途切换高智力审查模型，由于 IDE 机制会将前面包含代码变更、构建日志的全量历史无差别发送，造成极其高昂且不必要的配额浪费。
 
 ---
 
@@ -74,9 +75,3 @@ sequenceDiagram
 ### 3.3 严格的角色权限隔离 (Read-Only Guard)
 - 在给审查者开放的探查工具集中，**绝对不包含任何修改/写入文件的工具**。
 - 审查者只能输出分析结论与 Quench 标准任务规范，确保代码修改权始终牢牢掌握在主控执行器与测试验证环节。
-
----
-
-## 4. 交付总结 (Delivery Summary)
-
-本规划于 2026-09-21 伴随 Quench v0.2.0 正式交付闭环，相关逻辑全部合入 `main` 分支。

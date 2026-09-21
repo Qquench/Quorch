@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Quench Reviewer Engine: 深度思考审查模型客户端与 Prompt 组装器.
 
-负责连接高阶推理模型 (DeepSeek-Flash / Reasoner)，组装高命中率的静态架构上下文缓存前缀，
+负责连接高阶推理审查模型 (Reviewer)，组装高命中率的静态架构上下文缓存前缀，
 并为任务规约强化 (Spec Refine) 与架构疑难升级 (Escalate) 提供确定性分析能力。
 具备非阻塞异步线程卸载 (acomplete)、企业网络异常防御与总耗时预算熔断。
 """

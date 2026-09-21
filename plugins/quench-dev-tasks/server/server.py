@@ -1096,7 +1096,7 @@ def dev_tasks_complete(
 ) -> Dict[str, Any]:
     """Submit task completion report. Performs physical auditing on test files and assertions via git diff; marks task as '✔️ 已完成' upon full verification.
 
-    [中文对照] Flash 提交任务完成报告。通过 git diff 审计测试文件与断言，全部通过后标记为 ✔️ 已完成。
+    [中文对照] 执行 Agent 提交任务完成报告。通过 git diff 审计测试文件与断言，全部通过后标记为 ✔️ 已完成。
 
     Args:
         workspace_root: Root path of the target workspace / 项目根目录绝对路径。

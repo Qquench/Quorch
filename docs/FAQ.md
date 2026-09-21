@@ -90,13 +90,13 @@ This document collects common issues, troubleshooting tips, and technical questi
 
 ---
 
-### 6. Dual-Model Logical Roles & LLM Selection
+### 6. Dual-Model Logical Roles & Universal Decoupling Design
 
-#### Q: I don't have access to Claude 3.7 / Opus or Gemini Flash. Can I use other models?
-- **Absolutely**: Quench employs a **model-decoupled logical role architecture**:
-  - **Reviewer (Architect)**: Any model with strong reasoning, system architecture capabilities, and big-picture context can serve in this role (e.g., Claude 3.7 Sonnet, OpenAI GPT-4.5 / o1, DeepSeek R1).
-  - **Runner (Agile Executor)**: Any fast, cost-effective, high-instruction-following model can serve in this role (e.g., Gemini 2.0 Flash, GPT-4o-mini, Claude 3.5 Haiku).
-- You can freely switch models in your IDE's model picker dropdown at any time.
+#### Q: How does the decoupled architecture between Reviewer and Executor Agent (Runner) work? Are specific models required?
+- **No specific models are required**: Quench is engineered around a **model-decoupled logical role architecture**:
+  - **Reviewer (Architectural Review)**: Any model with strong reasoning, system architecture capabilities, and big-picture context (supports external reasoning APIs, local offline Ollama models, or IDE-native subagents);
+  - **Executor Agent (Agile Runner)**: Any fast, cost-effective, high-instruction-following model for day-to-day coding.
+- The two roles communicate via the MCP state machine and the six-core-field task contract, allowing developers to configure any combination tailored to their codebase and budget.
 
 ---
 

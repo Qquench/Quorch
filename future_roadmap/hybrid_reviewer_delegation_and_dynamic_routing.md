@@ -11,7 +11,7 @@
 
 随着开发工具链的演进，开发者工作区常同时并存多种审查能力：
 1. **宿主原生 Subagent**：如 Antigravity / Claude Code 内置的 Reviewer 子代理，具备极佳的宿主环境亲和力（可直接访问 IDE 内部状态、DevTools、仿真器），且零额外 API Key 开销；
-2. **外部/本地深度推理 API**：如 DeepSeek V4.1 Flash、OpenAI o3-mini、本地 Ollama 部署的 DeepSeek-R1 / Qwen-2.5-Coder，具备强大的分支推演与死锁挖掘能力。
+2. **外部/本地深度推理 API**：如外部 Thinking 深度推理 API 或本地 Ollama 部署的开源大模型，具备强大的分支推演与死锁挖掘能力。
 
 在现有 Task 5 的实现中，系统通过 `strategy_order: ["subagent", "engine", "manual"]` 进行静态优先级瀑布匹配。然而，面对更复杂的现实需求，开发者需要**根据任务性质自适应分流、甚至多方协同审阅的更灵活机制**。
 
@@ -35,14 +35,14 @@
      【UI / 视觉 / 交互类任务】                       【并发 / 状态机 / 算法核心】
                 │                                               │
                 ▼                                               ▼
-     调度: 宿主原生 Subagent                           调度: 外部 Thinking 深度推理 API
+     调度: 宿主原生 Subagent                           调度: 外部 Thinking 深度推理 Reviewer
      - 调取 DevTools / 浏览器仿真                      - 展开 Thinking 思考流穷举分支
      - 视觉回归与无障碍审核                            - 并发竞态与状态机跳步设防
 ```
 
 ### 2.1 任务感知型智能分流策略 (Task-Aware Routing)
 - **UI / 前端 / 渲染类任务**：自动将 `preferred` 标定为 `subagent`，利用宿主平台的截图、DOM 树读取与浏览器子代理能力进行验收；
-- **核心状态机 / 并发锁 / 跨模块通信**：自动将 `preferred` 标定为 `engine`（如 DeepSeek-Flash），利用其百倍性价比与强大的 Thinking 模式穷举边界条件；
+- **核心状态机 / 并发锁 / 跨模块通信**：自动将 `preferred` 标定为 `engine`（外部深度推理引擎），利用其强大的 Thinking 模式穷举边界条件；
 - **配置 / 构建清单 / 纯文档类**：自动快速放行或标记为极轻量审查。
 
 ### 2.2 双模交叉核验模式 (Cross-Validation / Red-Team Duel)

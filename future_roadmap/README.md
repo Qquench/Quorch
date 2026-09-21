@@ -20,6 +20,15 @@
 
 ---
 
+## Completed & Executed Proposals
+
+| Proposal Document | Original Theme | Execution & Delivery in v0.2.0 | Archived Location |
+| :--- | :--- | :--- | :---: |
+| ✔️ **[automated_subagent_api_delegation_and_codebase_inspection.md](./automated_subagent_api_delegation_and_codebase_inspection.md)** | **Automated Subagent API Delegation & Dynamic Codebase Inspection** | Implemented via `ReviewerClient` multi-tier decoupling, AST `CodeExplorer`, and `dev_tasks_refine_spec`. | [Archived Stage 4](../docs/roadmap/archive/stage4_automated_subagent_delegation_and_codebase_inspection.md) |
+
+
+---
+
 ## Active & Archived Stage Roadmaps
 
 If you are looking for current engineering stages and immediate task breakdowns, please visit:  
