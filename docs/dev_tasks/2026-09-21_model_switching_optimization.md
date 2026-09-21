@@ -416,10 +416,10 @@ class ReviewerClient(DeepSeekClient):
 3. 遥测先行方案若完全取消 Token 硬顶，单次死循环在归档剪枝前可无限写入直接填满磁盘 (B1 盲区)；且多会话并发共用 latest.log 会发生撕裂写 (B2 盲区)；跨块密钥脱敏存在截断漏脱隐患 (B3 盲区)。
 
 目标：
-1. 单一真理源落盘 (FileSink)：全量思考流仅写入本地日志（.agents/logs/reviewer/latest-<session_id>.log），建立写入期 512KB 硬字节封顶（超限改记心跳，B1）、Session 并发文件隔离（B2）、写入期流式脱敏 + 64B 跨块滑动结转缓冲区（B3）；归档实行 50MB / 50文件 / 30天上限剪枝；
+1. 单一真理源落盘 (FileSink)：全量思考流仅写入本地日志（.agents/logs/reviewer/latest-<session_id>.log），建立写入期 1024KB (1MB) 硬字节封顶（超限改记心跳，B1）、Session 并发文件隔离（B2）、写入期流式脱敏 + 64B 跨块滑动结转缓冲区（B3）；归档实行 50MB / 50文件 / 30天上限剪枝；
 2. 进度脉冲降维与环境自适应：彻底放弃全文信道转播，仅发轻量进度心跳（[Reviewer 思考中: 420 tokens | 6.5s]）。判定优先级定死为：mcp_context (progress) > isatty (stderr 单行动态覆写) > 静默（B5）；非 tty 环境严禁输出 \r 避免垃圾字符；
 3. 低频节流心跳：按用户指示将 MCP 心跳降频至 1.0s 一次（默认 1000ms，可选 500ms 即 1~2Hz），彻底消解信道洪泛；
-4. 宽松软天花板与标准化 JSONL 遥测：纠偏“HTTP超时兜底”逻辑误述，设置 32,000 tokens / 300s 宽松软天花板，超限时标记 truncated=true 保留部分结果转交互确认，不粗暴中断（B6）；遥测日志标准化为 JSONL（schema: 1，含事件标记与数值化 repetition_score，B7）。
+4. 宽松软天花板与标准化 JSONL 遥测：纠偏“HTTP超时兜底”逻辑误述，设置 64,000 tokens / 600s 宽松软天花板（实测深层红队推演思考+输出可达 25k~30k tokens），超限时标记 truncated=true 保留部分结果转交互确认，不粗暴中断（B6）；遥测日志标准化为 JSONL（schema: 1，含事件标记与数值化 repetition_score，B7）。
 ```
 
 #### 【目标签名与类型契约】
@@ -441,7 +441,7 @@ class RotatingFileSink:
         self,
         log_dir: str,
         session_id: str,
-        max_bytes: int = 512 * 1024,
+        max_bytes: int = 1024 * 1024,
         carry_over_bytes: int = 64,
         flush_interval_s: float = 0.5,
     ): ...
@@ -468,24 +468,24 @@ class TelemetryRecord(TypedDict):
 ```
 
 #### 【分步改造指引】
-1. 【流式落盘与写入期硬封顶】：在 `reviewer_engine.py` 实现 `RotatingFileSink`，启动时在 `.agents/logs/reviewer/` 下创建或清空 `latest-<session_id>.log`；维护 `written_bytes` 计数，严格约束 $\le 512\text{ KB}$，超限后写入 `[... TRUNCATED AT 512KB ...]` 并转为仅记 token 计数；每 0.5s 或 16KB 批量刷盘，保障崩溃时尾部完整性。
+1. 【流式落盘与写入期硬封顶】：在 `reviewer_engine.py` 实现 `RotatingFileSink`，启动时在 `.agents/logs/reviewer/` 下创建或清空 `latest-<session_id>.log`；维护 `written_bytes` 计数，严格约束 $\le 1024\text{ KB}$ (1MB)，超限后写入 `[... TRUNCATED AT 1024KB ...]` 并转为仅记 token 计数；每 0.5s 或 16KB 批量刷盘，保障崩溃时尾部完整性。
 2. 【写入期跨块流式脱敏】：在 `RotatingFileSink.write` 中建立 64 字节 carry-over 缓冲，每次将前次残留末尾与本次 chunk 拼接后再执行正则脱敏替换（`sk-[A-Za-z0-9_-]{20,}` $\to$ `[REDACTED]`），彻底杜绝跨网络包截断导致的密钥泄漏。
 3. 【环境自适应低频心跳】：实现 `AdaptiveHeartbeatSink`，判定逻辑锁死为：若 `mcp_context` 存在且支持 progress，调用 progress 接口；若 `stderr.isatty()` 为真且非 server 模式，向 `sys.stderr`（严禁 stdout）写入 `\r[Reviewer 思考中: {tokens} tokens | {elapsed:.1f}s]...`；否则静默。内部引入时间节流器，强制触发间隔 $\ge 1000\text{ ms}$（支持配置 500ms）。
-4. 【宽松软天花板与 JSONL 遥测】：在流式迭代器中累加 tokens，设置软天花板（默认 32,000 tokens / 300s）；达到软天花板时置 `truncated=True`，保留已生成文本并追加 warning 提示；同时向 `.agents/logs/reviewer/telemetry.jsonl` 追加标准化遥测事件。
-5. 【server.py 接线与单测闭环】：将 `AdaptiveHeartbeatSink` 与 `RotatingFileSink` 接入 `dev_tasks_refine_spec` 与 `dev_tasks_escalate`；编写 `tests/test_reviewer_observability.py` 全面断言 stdout 绝对纯净、跨块密钥脱敏成功、写入期 512KB 硬截断生效、心跳低频节流生效。
+4. 【宽松软天花板与 JSONL 遥测】：在流式迭代器中累加 tokens，设置软天花板（默认 64,000 tokens / 600s）；达到软天花板时置 `truncated=True`，保留已生成文本并追加 warning 提示；同时向 `.agents/logs/reviewer/telemetry.jsonl` 追加标准化遥测事件。
+5. 【server.py 接线与单测闭环】：将 `AdaptiveHeartbeatSink` 与 `RotatingFileSink` 接入 `dev_tasks_refine_spec` 与 `dev_tasks_escalate`；编写 `tests/test_reviewer_observability.py` 全面断言 stdout 绝对纯净、跨块密钥脱敏成功、写入期 1024KB 硬截断生效、心跳低频节流生效。
 
 #### 【防御与边缘校验】
-- B1 写入期磁盘硬顶：单次调用写入字节数由代码实时校验，`current_size() <= max_bytes` 恒成立，不依赖事后归档。
-- B2 会话并发隔离：日志命名包含 `session_id`，杜绝多任务/多会话并发执行时日志交错撕裂。
-- B3 跨块脱敏防漏：通过 64B carry-over buffer 解决跨数据包拆分的 API 密钥匹配问题。
-- B4 低频心跳防洪：心跳间隔强制 $\ge 500\text{ms}$（默认 $1000\text{ms}$），禁止逐 Token 产生 RPC 消息。
+- B1 写入期磁盘硬顶与滚动轮转：单次调用写入字节数由代码实时校验，`current_size() <= max_bytes` 恒成立；达 1024KB (1MB) 硬上限时执行安全轮转（`.1.log`），禁止原地截断破坏 JSONL 尾部行完整性（T6-2 澄清）。
+- B2 会话并发与命名空间隔离：日志命名包含 `session_id`；落盘路径收归独立命名空间 `.agents/logs/reviewer/`，与后续缓存目录绝对隔离（T6-1 澄清）。
+- B3 写入期跨块流式脱敏（Pre-Write Redaction）：通过 64B carry-over buffer 解决跨数据包拆分的 API 密钥匹配问题；脱敏动作必须在物理写盘前完成，严禁先写后脱敏（T6-3 澄清）。
+- B4 低频心跳防洪与异步无阻：心跳间隔强制 $\ge 500\text{ms}$（默认 $1000\text{ms}$），使用 `time.monotonic()` 计时并加入微扰 (jitter)，禁止逐 Token 产生 RPC 消息且绝不阻塞主处理循环（T6-4 澄清）。
 - B5 环境优先级与终端字符保护：`mcp_context > isatty(stderr) > 静默`；非 tty 环境严禁输出 `\r`，严禁向 `stdout` 输出任何字符。
-- B6 软天花板非暴力截断：32k tokens 超限时不抛异常、不中断进程，保留已产出内容并标记 `truncated=True`。
-- B7 遥测标准化：固定 `schema: 1`，为后续模型死循环自动熔断算法提供可回放的高质量样本。
+- B6 软天花板非暴力截断与状态无损：64k tokens / 600s 超限时不抛异常、不中断进程，仅停止追加心流并标记 `truncated=True`，任务状态机数据绝不丢失（T6-5 澄清）。
+- B7 遥测标准化与独立失败策略：固定 `schema: 1` 为后续分析提供高质量回放样本；遥测系统实行 fail-open（日志异常不阻塞业务），与治理系统严格的 fail-closed 形成绝对隔离（T6 附带硬化）。
 
 #### 【DoD 验证命令】
 ```bash
-# 1. 验证可观测性与心跳安全专项单测（含 stdout 纯净、跨块脱敏、512KB 封顶、节流断言）
+# 1. 验证可观测性与心跳安全专项单测（含 stdout 纯净、跨块脱敏、1024KB 封顶、节流断言）
 .\venv\Scripts\python.exe -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py -v
 
 # 2. 模拟跨块密钥脱敏断言
@@ -599,7 +599,7 @@ def lint_task_physical_feasibility(
 
 ## Future Roadmap / 未来演进路线图
 
-> 本章节记录已完成架构论证、预备在后续里程碑中实施的高级特性（暂不纳入当前施工任务）：
+> 本章节记录已完成架构论证、预备在后续独立里程碑中实施的高级特性（暂不挤占当前施工批次）：
 
 1. **动态四级自适应路由（L0~L3 Tiering）**：
    - `L0 bypass`（纯文档/注释，0s 延迟）
@@ -611,3 +611,21 @@ def lint_task_physical_feasibility(
    - 变更文件数 $>3$、AST 公开签名 diff、返工次数 $\ge 2$ 时强制锁定 L3，用户降级必须显式走 `dev_tasks_set_bypass` 审计通道。
 3. **推测性预热（Speculative Pre-warm）**：
    - 意图澄清后半段异步打包 Evidence Pack 提前建立推理连接，抵消网络握手延迟。
+4. **Milestone 8: 跨语言分区治理与防退化守卫 (Cross-Language Zoning Governance & Anti-Degradation Guards)**：
+   - **元治理中立性**：Quench 作为跨语言治理中枢，自身实现与被治理目标的语言彻底解耦。
+   - **通用四分区抽象 + 冻土叠加层**：
+     - `Z-KERNEL`（纯逻辑微内核）：纯算法与状态转移，允许重构但错误处理/边界断言数不得下降；
+     - `Z-CONTRACT`（抽象契约）：类型与接口签名，变更必须提供契约测试凭证；
+     - `Z-TEST`（对抗性测试）：允许增改测试，严禁削弱断言强度；
+     - `Z-GLUE`（环境粘合）：允许接线，禁止未受控的逻辑膨胀；
+     - `⊕ FROZEN`（冻土叠加）：生成文件/锁文件，完全不可变（任何写操作直接 `DENY`）。
+   - **可插拔适配器架构 (`LanguageZoningAdapter`)**：
+     - `PythonZoningAdapter`（AST 语法深度审计）；
+     - `TypeScriptZoningAdapter`（TS 类型声明与轻量分析）；
+     - `GenericLexicalAdapter`（行级启发式与括号深度通用回退，适配 Rust/Go 等任何语言）。
+   - **声明式配置与预设继承**：
+     - 策略收归目标项目 `.agents/quench_stack.yaml::quench_zoning`；开箱即用 Presets 继承与防循环依赖。
+   - **防退化守卫 (Runner-Side Paste Guard)**：
+     - `PreToolUse` 钩子基于 MinHash Jaccard 相似度对比，拦截大段未经本地消化的无脑粘贴；全量覆写强制检查信号守恒比。
+   - **8 项刚性防御条款**：编码归一化、有界解析（超限 fail-closed）、缓存一致性、并发安全、配置 safe_load、版本协商、50ms 缓存预算、遥测审计。
+   - **子任务拆分**：Z1（核抽象与适配器契约）、Z2（适配器实现与规则引擎）、Z3（防退化 Paste Guard）、Z4（跨语言配置与 TypeScript 扩展）。
