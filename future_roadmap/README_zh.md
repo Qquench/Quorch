@@ -20,15 +20,6 @@
 
 ---
 
-## 已交付并执行归档提案
-
-| 提案文档 | 原始构想主题 | v0.2.0 落地成果 | 正式归档路径 |
-| :--- | :--- | :--- | :---: |
-| ✔️ **[automated_subagent_api_delegation_and_codebase_inspection.md](./automated_subagent_api_delegation_and_codebase_inspection.md)** | **基于独立 API 的全自动 Subagent 委派与代码库动态探查** | 已通过 `ReviewerClient` 多厂商解耦、AST `CodeExplorer` 与 `dev_tasks_refine_spec` 闭环交付。 | [已归档阶段四](../docs/roadmap/archive/stage4_automated_subagent_delegation_and_codebase_inspection.md) |
-
-
----
-
 ## 正在进行的阶段任务？
 
 若您需要查阅当前阶段正在施工或已完成归档的工程开发任务，请前往：
