@@ -183,56 +183,202 @@ def _extract_task_detail(filepath: str, task_id: str) -> Dict[str, Any]:
     }
 
 
-def _audit_test_changes(workspace_root: str, config: Any) -> Dict[str, Any]:
-    """Physically audit test directory for added tests and assertions via git diff. / 通过 git diff 物理扫描测试目录是否包含新增测试与断言。"""
-    test_dir = config.resolve_path("test_dir")
+_EXEMPTION_PATTERN = re.compile(
+    r"\[EXEMPTION:\s*(docs-only|config-only|non-behavioral-refactor)\s*\]",
+    re.IGNORECASE,
+)
+_TEST_FILE_PATTERN = re.compile(r"(^|/)tests?/.*test_.*\.py$|(^|/).*_test\.py$")
+_ASSERTION_MARKERS = ("assert ", "assert(", "pytest.raises")
+
+
+def _append_hook_log(workspace_root: str, message: str) -> None:
+    """向 .agents/.quench_hook.log 安全追加单条日志（多进程幂等安全）。"""
     try:
-        res = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=workspace_root,
+        from hooks.file_scope_guard import get_hook_logger
+        logger = get_hook_logger(workspace_root)
+        logger.info(message)
+    except Exception:
+        try:
+            agents_dir = os.path.join(workspace_root, ".agents")
+            os.makedirs(agents_dir, exist_ok=True)
+            log_file = os.path.join(agents_dir, ".quench_hook.log")
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"{now_str} [INFO] {message}\n")
+        except Exception:
+            pass
+
+
+def _audit_test_changes(
+    workspace_root: str,
+    config: Any,
+    test_evidence: str | None = None,
+) -> Dict[str, Any]:
+    """Physically audit test directory for added tests and assertions via git diff. / 通过 git 物理扫描测试目录是否包含新增测试与断言。"""
+    tracked_files: set[str] = set()
+    untracked_files: set[str] = set()
+    degraded = False
+    messages: list[str] = []
+
+    # 1. 运行 git status --porcelain -u 捕获所有变更与未跟踪文件（精确展开子文件）
+    try:
+        res_status = subprocess.run(
+            ["git", "-C", workspace_root, "status", "--porcelain", "-u"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="ignore",
             check=False,
         )
-        if res.returncode != 0:
-            return {"audit_performed": False, "reason": "Not a valid git repository or git command execution failed / 非有效 git 仓库或 git 命令执行失败"}
+        if res_status.returncode != 0:
+            degraded = True
+            messages.append(f"git status exited with code {res_status.returncode}: {res_status.stderr.strip()}")
+        else:
+            for line in res_status.stdout.splitlines():
+                if not line.strip():
+                    continue
+                code = line[:2]
+                filepath = line[2:].strip().strip('"')
+                if " -> " in filepath:
+                    filepath = filepath.split(" -> ")[-1].strip().strip('"')
+                norm_p = filepath.replace("\\", "/")
+                if code == "??":
+                    if norm_p.endswith("/"):
+                        abs_dir = os.path.join(workspace_root, norm_p)
+                        if os.path.isdir(abs_dir):
+                            for r, _, fnames in os.walk(abs_dir):
+                                for fn in fnames:
+                                    rel_sub = os.path.relpath(os.path.join(r, fn), workspace_root).replace("\\", "/")
+                                    untracked_files.add(rel_sub)
+                    else:
+                        untracked_files.add(norm_p)
+                else:
+                    tracked_files.add(norm_p)
+    except (FileNotFoundError, subprocess.CalledProcessError, Exception) as e:
+        degraded = True
+        messages.append(f"git status check failed: {e}")
 
-        changed_files = [
-            line.strip().split()[-1]
-            for line in res.stdout.splitlines()
-            if line.strip()
-        ]
+    # 2. 补采 git diff --name-only 与 git diff --cached --name-only
+    if not degraded:
+        for diff_cmd in (
+            ["git", "-C", workspace_root, "diff", "--name-only"],
+            ["git", "-C", workspace_root, "diff", "--cached", "--name-only"],
+        ):
+            try:
+                res_diff = subprocess.run(
+                    diff_cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    check=False,
+                )
+                if res_diff.returncode == 0:
+                    for line in res_diff.stdout.splitlines():
+                        p = line.strip().strip('"')
+                        if p:
+                            tracked_files.add(p.replace("\\", "/"))
+            except Exception as e:
+                messages.append(f"git diff name-only failed: {e}")
 
-        # Check if changes exist in test_dir / 检查是否有在 test_dir 范围内的变动
-        test_rel = os.path.relpath(test_dir, workspace_root).replace("\\", "/")
-        test_changes = [
-            f for f in changed_files if f.replace("\\", "/").startswith(test_rel)
-        ]
+    # 3. 归类受管生产代码与测试文件
+    all_changed = tracked_files | untracked_files
+    governed_code_changed: list[str] = []
+    test_files_changed: list[str] = []
 
-        # Further detect assert if test files changed / 如果有测试文件变动，进一步检测是否包含 assert
-        assertions_found = False
-        diff_res = subprocess.run(
-            ["git", "diff", "HEAD"],
-            cwd=workspace_root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-            check=False,
+    for f in sorted(all_changed):
+        norm_f = f.replace("\\", "/")
+        if _TEST_FILE_PATTERN.search(norm_f):
+            test_files_changed.append(norm_f)
+        elif hasattr(config, "is_path_governed") and config.is_path_governed(norm_f):
+            governed_code_changed.append(norm_f)
+
+    # 4. 扫描测试文件中的断言标记
+    assertions_found = False
+    detected_markers: list[str] = []
+
+    if not degraded and test_files_changed:
+        for tf in test_files_changed:
+            if tf in untracked_files:
+                # 未跟踪测试文件：直接读取全文
+                abs_tf = os.path.join(workspace_root, tf)
+                if os.path.isfile(abs_tf):
+                    try:
+                        with open(abs_tf, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        for marker in _ASSERTION_MARKERS:
+                            if marker in content:
+                                assertions_found = True
+                                if marker not in detected_markers:
+                                    detected_markers.append(marker)
+                    except Exception as e:
+                        messages.append(f"Failed to read untracked test file {tf}: {e}")
+            else:
+                # 已跟踪测试文件：仅扫描 diff 新增行 (--unified=0)
+                for diff_cmd in (
+                    ["git", "-C", workspace_root, "diff", "-U0", "--", tf],
+                    ["git", "-C", workspace_root, "diff", "--cached", "-U0", "--", tf],
+                ):
+                    try:
+                        res = subprocess.run(
+                            diff_cmd,
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="ignore",
+                            check=False,
+                        )
+                        if res.returncode == 0:
+                            for line in res.stdout.splitlines():
+                                if line.startswith("+") and not line.startswith("+++"):
+                                    added_content = line[1:]
+                                    for marker in _ASSERTION_MARKERS:
+                                        if marker in added_content:
+                                            assertions_found = True
+                                            if marker not in detected_markers:
+                                                detected_markers.append(marker)
+                    except Exception as e:
+                        messages.append(f"Failed to diff test file {tf}: {e}")
+
+    # 5. 豁免判定
+    exempted = False
+    exemption_reason = None
+    if test_evidence:
+        match = _EXEMPTION_PATTERN.search(test_evidence)
+        if match:
+            exempted = True
+            exemption_reason = match.group(1).lower()
+
+    # 6. 最终判定
+    if degraded:
+        passed = True
+        _append_hook_log(
+            workspace_root,
+            f"[DOD GUARD DEGRADED] Test audit degraded due to git environment: {'; '.join(messages)}",
         )
-        if "assert " in diff_res.stdout or "def test_" in diff_res.stdout:
-            assertions_found = True
+    elif len(governed_code_changed) == 0:
+        passed = True
+    elif exempted:
+        passed = True
+    elif assertions_found:
+        passed = True
+    else:
+        passed = False
 
-        return {
-            "audit_performed": True,
-            "test_changes": test_changes,
-            "assertions_found": assertions_found,
-            "passed": len(test_changes) > 0 and assertions_found,
-        }
-    except Exception as e:
-        return {"audit_performed": False, "reason": str(e)}
+    return {
+        "passed": passed,
+        "governed_code_changed": governed_code_changed,
+        "test_files_changed": test_files_changed,
+        "assertions_found": assertions_found,
+        "detected_markers": detected_markers,
+        "exempted": exempted,
+        "exemption_reason": exemption_reason,
+        "degraded": degraded,
+        "messages": messages,
+        # Backward-compatible keys
+        "audit_performed": not degraded,
+        "test_changes": test_files_changed,
+    }
 
 
 def _get_recent_hook_logs(workspace_root: str, max_lines: int = 10) -> List[str]:
@@ -696,11 +842,6 @@ def dev_tasks_complete(
     except Exception as e:
         return {"status": "rejected", "reason": f"Configuration error / 配置错误: {e}"}
 
-    # 执行测试变更物理审计
-    audit = _audit_test_changes(workspace_root, config)
-
-    # 如果在 git 仓库中，且没有测试变更，但用户明确提供了 test_evidence 或纯文档任务则做豁免评估
-    # 否则若 audit.audit_performed 为 True 且 passed 为 False，给予严肃拒绝
     tasks = parse_task_file(target_path)
     cur_task = next((t for t in tasks if str(t.id).strip() == str(task_id).strip()), None)
     if not cur_task:
@@ -710,6 +851,33 @@ def dev_tasks_complete(
         return {
             "status": "rejected",
             "reason": f"Task {task_id} status is '{cur_task.status}', not '🔨 执行中', cannot mark as completed / 任务 {task_id} 当前状态为 '{cur_task.status}'，非 '🔨 执行中'，无法标记完成",
+        }
+
+    # 执行测试变更物理审计（含未跟踪测试文件、diff新增行与合法豁免）
+    audit = _audit_test_changes(workspace_root, config, test_evidence=test_evidence)
+
+    # 刚性门禁拦截：当受管生产代码发生变更且未通过单测断言审计（且未豁免/未降级）时，物理阻断且不流转状态
+    if audit.get("governed_code_changed") and not audit.get("passed"):
+        _append_hook_log(
+            workspace_root,
+            f"[DOD GUARD REJECTED] Task {task_id} completion blocked: governed code modified ({len(audit['governed_code_changed'])} files) but no test assertions found and no valid exemption.",
+        )
+        guidance = (
+            "【DoD 物理门禁拦截 / Rigid DoD Test Guard Rejection】\n"
+            "检测到受管生产代码被修改，但未检测到新增或变更的有效单测断言 (assert / pytest.raises)。\n"
+            "修复指引 (Remediation Guidance):\n"
+            "1. 新增/补充测试：在 tests/ 目录下编写针对本次变更的单元测试，并包含 assert 或 pytest.raises 断言；\n"
+            "2. 若确系免测场景（如纯文档/配置/无行为变更重构），请在 test_evidence 参数中提供显式豁免标记：\n"
+            "   - [EXEMPTION: docs-only]\n"
+            "   - [EXEMPTION: config-only]\n"
+            "   - [EXEMPTION: non-behavioral-refactor]\n"
+            "3. 补充测试或声明豁免后重新调用 dev_tasks_complete。"
+        )
+        return {
+            "status": "rejected",
+            "audit": audit,
+            "guidance": guidance,
+            "reason": "Governed code changed without new test assertions or valid exemption / 受管代码发生变更但缺少单测断言且未提供合法豁免",
         }
 
     try:

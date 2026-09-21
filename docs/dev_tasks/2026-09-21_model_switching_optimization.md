@@ -183,7 +183,7 @@ def dev_tasks_refine_spec(workspace_root: str, draft_task: Dict[str, Any], conte
 
 ---
 
-### 任务 4 ⬜ 待确认 — Milestone 3: 刚性单测门禁与 CLI 终端体检集成
+### 任务 4 ✔️ 已完成 — Milestone 3: 刚性单测门禁与 CLI 终端体检集成
 
 #### 【涉及文件】
 ```

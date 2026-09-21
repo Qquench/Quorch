@@ -70,6 +70,22 @@ def should_enable_color(plain: bool = False) -> bool:
     return True
 
 
+def _mask_secret(secret: Optional[str]) -> str:
+    """对敏感凭据（如 API Key）进行不可逆安全脱敏展示。
+    - None 或空串 -> 'NOT SET'
+    - 长度 <= 8 -> '****'
+    - 否则保留前 4 位和后 4 位，中间使用 '****' 脱敏
+    """
+    if not secret:
+        return "NOT SET"
+    s = str(secret).strip()
+    if not s:
+        return "NOT SET"
+    if len(s) <= 8:
+        return "****"
+    return f"{s[:4]}****{s[-4:]}"
+
+
 def cmd_status(workspace_root: str, plain: bool = False) -> int:
     """终端渲染任务看板。"""
     c = Colors(should_enable_color(plain))
@@ -150,6 +166,122 @@ def cmd_check(workspace_root: str) -> int:
     except Exception as e:
         print(f"❌ 环境体检执行失败: {e}", file=sys.stderr)
         return 1
+
+
+def cmd_check_engine(
+    workspace_root: str,
+    plain: bool = False,
+    as_json: bool = False,
+) -> int:
+    """检查外部 ReviewerEngine 连通性、凭据可用性与思考流支持。
+
+    Exit code: 0 = 连通正常且配置完备; 1 = 未配置/认证失败/网络异常/超时。
+    """
+    import json
+    import time
+    from project_config import load_project_config
+    from reviewer_engine import DeepSeekClient
+
+    ws = os.path.abspath(workspace_root)
+    c = Colors(should_enable_color(plain and not as_json))
+
+    provider = "none"
+    model = "none"
+    api_key_env = "DEEPSEEK_API_KEY_Quench"
+    api_key_present = False
+    api_key_masked = "NOT SET"
+    connectivity_ok = False
+    latency_ms: Optional[int] = None
+    thinking_supported = False
+    thinking_probe = "config"
+    error_msg: Optional[str] = None
+
+    try:
+        cfg = load_project_config(ws)
+        re_cfg = cfg.reviewer_engine
+        provider = re_cfg.provider
+        model = re_cfg.model
+        api_key_env = re_cfg.api_key_env
+
+        m_lower = model.lower()
+        thinking_supported = (
+            re_cfg.thinking
+            or "reasoner" in m_lower
+            or "deepseek-r1" in m_lower
+            or "思考" in m_lower
+        )
+
+        client = DeepSeekClient(re_cfg)
+        raw_key = client.resolve_api_key()
+        api_key_present = bool(raw_key and raw_key.strip())
+        api_key_masked = _mask_secret(raw_key)
+
+        if provider == "none":
+            error_msg = "ReviewerEngine provider is set to 'none' / 未启用外部审查引擎"
+        elif not api_key_present:
+            error_msg = f"API Key environment variable '{api_key_env}' is not set / 未配置环境变量"
+        else:
+            # 执行极短超时连通性探针 (≤5s)
+            start_t = time.perf_counter()
+            try:
+                probe_res = client.complete(
+                    [{"role": "user", "content": "ping"}],
+                    timeout=5,
+                    total_deadline_s=5.0,
+                )
+                latency_ms = max(1, int((time.perf_counter() - start_t) * 1000))
+                connectivity_ok = True
+                if probe_res.get("thinking_content") or probe_res.get("reasoning_content"):
+                    thinking_probe = "live"
+            except Exception as pe:
+                latency_ms = max(1, int((time.perf_counter() - start_t) * 1000))
+                connectivity_ok = False
+                error_msg = f"Probe connection failed / 探针连接失败: {pe}"
+    except Exception as e:
+        error_msg = f"Configuration error / 配置读取失败: {e}"
+
+    exit_code = 0 if (provider != "none" and api_key_present and connectivity_ok) else 1
+
+    result = {
+        "provider": provider,
+        "model": model,
+        "api_key_env": api_key_env,
+        "api_key_present": api_key_present,
+        "api_key_masked": api_key_masked,
+        "connectivity_ok": connectivity_ok,
+        "latency_ms": latency_ms,
+        "thinking_supported": thinking_supported,
+        "thinking_probe": thinking_probe,
+        "exit_code": exit_code,
+    }
+
+    if as_json:
+        # JSON 模式下保证 stdout 输出单行纯净 JSON
+        print(json.dumps(result, ensure_ascii=False))
+        return exit_code
+
+    # 人类可读终端模式
+    print(c.bold("\n======================================================="))
+    print(c.bold("  Quench ReviewerEngine 体检报告"))
+    print(c.bold("======================================================="))
+    print(f"⚙️  Provider       : {c.cyan(provider)}")
+    print(f"🤖 Model          : {c.cyan(model)}")
+    print(f"🔑 API Key Env    : {api_key_env}")
+    status_key = c.green(f"已配置 ({api_key_masked})") if api_key_present else c.red("未配置 (NOT SET)")
+    print(f"🔒 Key Status     : {status_key}")
+
+    think_desc = c.green(f"支持 ({thinking_probe})") if thinking_supported else c.dim("未开启/不支持")
+    print(f"🧠 Thinking Mode  : {think_desc}")
+
+    if connectivity_ok:
+        print(f"🌐 Connectivity   : {c.green('✅ 连通正常')} (耗时: {latency_ms} ms)")
+    else:
+        print(f"🌐 Connectivity   : {c.red('❌ 连接失败')}")
+        if error_msg:
+            print(f"   {c.red(error_msg)}")
+
+    print(f"-------------------------------------------------------\n")
+    return exit_code
 
 
 def cmd_init(
@@ -240,6 +372,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="禁用彩色输出，使用普通纯文本格式",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="以单行纯净 JSON 格式输出机器可解析数据",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="可用子命令")
 
@@ -255,8 +392,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_check.add_argument(
         "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
     )
+    p_check.add_argument(
+        "--engine", action="store_true", help="检查外部审查模型引擎连通性与配置体检"
+    )
+    p_check.add_argument("--plain", action="store_true", help="禁用彩色输出")
+    p_check.add_argument("--json", action="store_true", help="以单行 JSON 输出")
 
-    # 3. init
+    # 3. check-engine
+    p_check_engine = subparsers.add_parser("check-engine", help="检查外部审查模型引擎连通性与体检")
+    p_check_engine.add_argument(
+        "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
+    )
+    p_check_engine.add_argument("--plain", action="store_true", help="禁用彩色输出")
+    p_check_engine.add_argument("--json", action="store_true", help="以单行 JSON 输出")
+
+    # 4. init
     p_init = subparsers.add_parser("init", help="初始化目标项目接入 Quench 治理体系")
     p_init.add_argument(
         "project_root", nargs="?", default=".", help="目标项目目录（默认当前目录）"
@@ -279,7 +429,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--force", action="store_true", help="强制覆盖已有的配置文件"
     )
 
-    # 4. archive
+    # 5. archive
     p_archive = subparsers.add_parser("archive", help="归档已完工的任务单据至 archive/ 并同步 CHANGELOG")
     p_archive.add_argument(
         "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
@@ -295,12 +445,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ws = getattr(args, "workspace", ".") or "."
     plain = getattr(args, "plain", False)
+    as_json = getattr(args, "json", False)
 
     try:
         if args.command == "status" or args.command is None:
             return cmd_status(ws, plain=plain)
         elif args.command == "check":
+            if getattr(args, "engine", False):
+                return cmd_check_engine(ws, plain=plain, as_json=as_json)
             return cmd_check(ws)
+        elif args.command == "check-engine":
+            return cmd_check_engine(ws, plain=plain, as_json=as_json)
         elif args.command == "init":
             effective_ide = "cursor" if args.cursor else args.ide
             return cmd_init(
