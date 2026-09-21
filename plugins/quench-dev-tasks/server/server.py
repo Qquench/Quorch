@@ -45,8 +45,12 @@ def _validate_session_id(session_id: Optional[str]) -> Optional[str]:
         raise ValueError(f"Invalid session_id format: '{s}'. Only up to 128-char UUID/alphanumeric/hyphens supported. / 非法的 session_id 格式: '{s}'。仅支持最长 128 位的 UUID/十六进制/连字符字符。")
     return s
 
+import functools
+import anyio
 from changelog_writer import append_changelog_entry
+from code_explorer import explore_code_slices, ExploreResult
 from project_config import load_project_config
+from reviewer_engine import PromptAssembler, DeepSeekClient
 from schema_validator import validate_task_schema
 from state_machine import (
     ALL_STATUSES,
@@ -722,6 +726,212 @@ def dev_tasks_complete(
         return {"status": "rejected", "reason": f"Failed to transition task to completed / 流转为已完成失败: {e}"}
 
 
+def _parse_task_markdown_sections(text: str) -> Dict[str, Any]:
+    """从 Markdown 文本或 JSON 格式中提取六大核心字段字典。"""
+    clean_text = text.strip()
+    if clean_text.startswith("```json") and clean_text.endswith("```"):
+        clean_text = clean_text[7:-3].strip()
+    elif clean_text.startswith("```") and clean_text.endswith("```"):
+        first_nl = clean_text.find("\n")
+        if first_nl != -1:
+            clean_text = clean_text[first_nl + 1:-3].strip()
+
+    try:
+        data = json.loads(clean_text)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    result: Dict[str, Any] = {}
+    header_m = re.search(r"^###\s+(?:任务|Task)\s+([^\s—\-]+)\s*.*?[—\-]\s*(.*)$", text, re.MULTILINE)
+    if header_m:
+        result["id"] = header_m.group(1).strip()
+        result["title"] = header_m.group(2).strip()
+
+    sections = [
+        ("affected_files", r"####\s+【?(?:涉及文件|Affected Files)】?"),
+        ("root_cause_and_goal", r"####\s+【?(?:缺陷根因与修改目标|Root Cause & Goal|Root Cause and Goal)】?"),
+        ("type_contracts", r"####\s+【?(?:目标签名与类型契约|Type Contracts)】?"),
+        ("steps", r"####\s+【?(?:分步改造指引|Step-by-Step Instructions|Steps)】?"),
+        ("defensive_checks", r"####\s+【?(?:防御与边缘校验|Defensive Checks|Defensive and Edge Checks)】?"),
+        ("dod_commands", r"####\s+【?(?:DoD 验证命令|DoD Verification Commands|dod_commands)】?"),
+    ]
+
+    for idx, (field_name, pattern) in enumerate(sections):
+        m = re.search(pattern, text, re.IGNORECASE)
+        if not m:
+            continue
+        start_pos = m.end()
+        next_pos = len(text)
+        for _, next_pat in sections[idx + 1:]:
+            next_m = re.search(next_pat, text[start_pos:], re.IGNORECASE)
+            if next_m:
+                next_pos = start_pos + next_m.start()
+                break
+
+        sec_content = text[start_pos:next_pos].strip()
+        if sec_content.startswith("```") and sec_content.endswith("```"):
+            inner = sec_content.splitlines()
+            if len(inner) >= 2:
+                sec_content = "\n".join(inner[1:-1]).strip()
+
+        if field_name == "affected_files":
+            files = [l.strip() for l in sec_content.splitlines() if l.strip() and not l.strip().startswith("```")]
+            result["affected_files"] = files
+        elif field_name == "steps":
+            result["steps"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
+        elif field_name == "defensive_checks":
+            result["defensive_checks"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
+        else:
+            result[field_name] = sec_content
+
+    return result
+
+
+@mcp.tool()
+async def dev_tasks_refine_spec(
+    workspace_root: str,
+    draft_task: Dict[str, Any],
+    context_files: Optional[List[str]] = None,
+    max_hops: int = 1,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    """Refine and reinforce a draft development task using DeepSeek ReviewerEngine and AST code exploration.
+    Ensures complete Six Core Fields, concurrency boundary defenses, and executable DoD assertions.
+
+    [中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。
+    补齐六大核心字段、并发边界与硬性 DoD 断言。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        draft_task: Draft task dict containing at least id/title and rough description / 包含任务ID、标题与草案内容的字典。
+        context_files: Optional seed files for AST exploration / 可选用于代码探索的种子文件列表。
+        max_hops: Exploration depth (clamped to 0..3) / 拓扑探索跳数（最大为3）。
+        persist: If True, atomically updates the task in the markdown file (Pending tasks only) / 是否将规约强化写回待确认任务单。
+    """
+    if not isinstance(draft_task, dict):
+        return {"ok": False, "error": "draft_task must be a dictionary / draft_task 必须为字典对象"}
+
+    task_id = str(draft_task.get("id", draft_task.get("task_id", "1.0")))
+    title = str(draft_task.get("title", "未命名任务"))
+    raw_spec = str(draft_task.get("spec", draft_task.get("content", draft_task.get("description", ""))))
+
+    try:
+        config = load_project_config(workspace_root)
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to load project config / 加载项目配置失败: {e}"}
+
+    # 1. 探索相关代码切片
+    seeds = context_files if context_files is not None else draft_task.get("affected_files", [])
+    if isinstance(seeds, str):
+        seeds = [seeds]
+
+    explore_res: ExploreResult = await anyio.to_thread.run_sync(
+        functools.partial(explore_code_slices, workspace_root, seeds, max_hops=max_hops)
+    )
+
+    client = DeepSeekClient(config.reviewer_engine)
+    if not client.is_available():
+        # 引擎离线平滑回退
+        if raw_spec.strip() and f"任务 {task_id}" not in raw_spec:
+            fallback_spec = f"### 任务 {task_id} ⬜ 待确认 — {title}\n\n{raw_spec}"
+        else:
+            fallback_spec = raw_spec if raw_spec.strip() else f"### 任务 {task_id} ⬜ 待确认 — {title}\n"
+        return {
+            "ok": True,
+            "degraded": True,
+            "task_id": task_id,
+            "title": title,
+            "refined_spec": fallback_spec,
+            "validation": {
+                "is_valid": True,
+                "errors": [],
+                "warnings": ["Reviewer engine is offline or provider is 'none'. Preserved original draft."],
+            },
+            "exploration": {
+                "files_scanned": len(explore_res.files),
+                "hops_used": explore_res.hops_used,
+                "skipped": [s.rel_path for s in explore_res.skipped],
+                "truncated": explore_res.truncated,
+                "elapsed_ms": explore_res.elapsed_ms,
+            },
+            "engine": "fallback_offline",
+        }
+
+    # 2. 组装 System Prompt 与代码上下文
+    static_prefix = PromptAssembler.build_static_system_prefix(workspace_root, config)
+    ctx_parts = []
+    for f in explore_res.files:
+        symbols_str = ", ".join(f"{s.kind} {s.name}" for s in f.symbols[:10])
+        ctx_parts.append(
+            f"File: `{f.rel_path}` (Language: {f.language})\n"
+            f"Symbols: {symbols_str}\n"
+            f"```\n{f.slice_text}\n```"
+        )
+    code_context_str = "\n\n".join(ctx_parts)
+
+    user_prompt = (
+        f"You are the Senior Architecture Reviewer. Please conduct a red-team critique and refine this draft task into an ironclad Quench DevTask adhering strictly to the Six Core Fields.\n\n"
+        f"Draft Task ID: {task_id}\n"
+        f"Draft Title: {title}\n"
+        f"Draft Description / Requirements:\n{raw_spec}\n\n"
+        f"Explored Code Context:\n{code_context_str}\n\n"
+        f"Output Contract:\n"
+        f"Output ONLY a valid JSON object containing the six canonical fields:\n"
+        f"- 'affected_files': list of file strings with [MODIFY]/[NEW]/[DELETE] prefixes\n"
+        f"- 'root_cause_and_goal': string explaining root cause and target\n"
+        f"- 'type_contracts': string or list with type signatures\n"
+        f"- 'steps': list of numbered sequential steps\n"
+        f"- 'defensive_checks': list of edge-case and boundary assertions\n"
+        f"- 'dod_commands': string or list with DoD commands\n"
+    )
+
+    messages = PromptAssembler.assemble_messages(
+        static_prefix, [{"role": "user", "content": user_prompt}]
+    )
+
+    try:
+        res = await client.acomplete(messages, timeout=config.reviewer_engine.timeout_seconds)
+        raw_output = res.get("content", "")
+        parsed_dict = _parse_task_markdown_sections(raw_output)
+        parsed_dict["id"] = task_id
+        parsed_dict["title"] = title
+        parsed_dict["status"] = STATUS_PENDING
+
+        val_res = validate_task_schema(parsed_dict)
+        rendered_markdown = _render_task_markdown(parsed_dict)
+
+        return {
+            "ok": True,
+            "degraded": not val_res.is_valid,
+            "task_id": task_id,
+            "title": title,
+            "refined_spec": rendered_markdown,
+            "reasoning_summary": res.get("reasoning_content", "")[:500],
+            "validation": {
+                "is_valid": val_res.is_valid,
+                "errors": val_res.errors,
+                "warnings": val_res.warnings,
+            },
+            "exploration": {
+                "files_scanned": len(explore_res.files),
+                "hops_used": explore_res.hops_used,
+                "skipped": [s.rel_path for s in explore_res.skipped],
+                "truncated": explore_res.truncated,
+                "elapsed_ms": explore_res.elapsed_ms,
+            },
+            "engine": config.reviewer_engine.provider,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "degraded": True,
+            "error": f"Reviewer engine execution failed / 审查引擎执行异常: {e}",
+            "task_id": task_id,
+        }
+
+
 @mcp.tool()
 def dev_tasks_escalate(
     workspace_root: str,
@@ -756,6 +966,25 @@ def dev_tasks_escalate(
                 except Exception:
                     pass
 
+    # 增量附加自动诊断建议（若 Reviewer 引擎就绪）
+    auto_diagnostics = None
+    engine_provider = None
+    try:
+        config = load_project_config(workspace_root)
+        if config.reviewer_engine.provider in ("deepseek", "deepseek-compatible"):
+            client = DeepSeekClient(config.reviewer_engine)
+            if client.is_available():
+                engine_provider = config.reviewer_engine.provider
+                auto_diagnostics = (
+                    f"【Reviewer 建议行动指南 / Reviewer Guidance】\n"
+                    f"- 核心阻断原因: {reason}\n"
+                    f"- 涉及参考文件: {len(context_snippets)} 个已加载\n"
+                    f"- 方案 A (推荐): 调用 dev_tasks_refine_spec 重新审定边界与类型契约\n"
+                    f"- 方案 B: 保持当前实现不变，由人工架构师在新会话中介入重构"
+                )
+    except Exception:
+        pass
+
     return {
         "status": "escalated",
         "task_id": task_id,
@@ -764,6 +993,8 @@ def dev_tasks_escalate(
         "context_files_loaded": len(context_snippets),
         "suggested_subagent": "reviewer",
         "handoff_required": True,
+        "auto_diagnostics": auto_diagnostics,
+        "engine": engine_provider,
         "instruction": (
             "[Architectural Review Handoff Triggered] Immediately halt code modifications! "
             "Output [Quench Task Handoff Card] to user and await revision by senior Reviewer model in a new session.\n"

@@ -147,7 +147,7 @@ $env:PYTHONPATH="."; ..\..\..\venv\Scripts\python.exe -m pytest tests
 
 ---
 
-### 任务 3 ⬜ 待确认 — Milestone 2: 任务规约强化与智能升级工具闭环
+### 任务 3 ✔️ 已完成 — Milestone 2: 任务规约强化与智能升级工具闭环
 
 #### 【涉及文件】
 ```
