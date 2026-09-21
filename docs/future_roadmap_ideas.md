@@ -59,3 +59,61 @@ File-path whitelists alone do not prevent semantic degradation inside allowed fi
 - **`Z-GLUE` (Glue & Wiring)**: CLI wiring, adapter glue. Rule: business logic expansion inside glue code is intercepted.
 - **`⊕ FROZEN` (Frozen Overlay)**: Machine-generated code, lockfiles. Rule: immutable, any write triggers physical DENY.
 - **Pluggable Adapters (`LanguageZoningAdapter`)**: AST-based auditing for Python and TypeScript, with lexical fallback for Go, Rust, and C++.
+
+---
+
+## 2026-09-21 — Cross-Host Hard Interception Bridge & Universal Hook Proxy (跨宿主硬性拦截桥接与通用 Hook 代理)
+
+### 1. Motivation & Background (背景与契机)
+当前在 Antigravity 宿主环境下，系统借助原生 `PreToolUse` Hook 实现了针对未授权文件修改的真实交互式弹窗阻断（`force_ask`）。然而在 Cursor, Windsurf, Claude Code 等外部 IDE 环境中，目前主要退化为依托 `.cursorrules` / `.mdc` 等提示词软约束与 Git 提交前的后置防护 (`git_pre_commit_guard.py`)。缺乏跨编辑器的统一中途物理拦截能力，导致不同客户端用户的安全防护体验存在非均质性。
+
+### 2. Why not now? (为什么当期不做)
+- Antigravity 是当前核心且深度实战验证的主力研发环境，现有方案已满足日常生产闭环。
+- 各大 AI 编辑器的拦截与插件生态规范仍在剧烈迭代（例如 Cursor 尚未开放对等的外部进程实时 Tool Call 阻断 Hook），过早深入私有逆向会导致巨大的兼容性负担与脆弱维护成本。
+
+### 3. Key Architecture & Preconditions (核心构想与前置条件)
+- **Universal Pre-Tool Proxy / LSP Shim**:
+  - 构建轻量级本地文件代理层或语言服务器（LSP）拦截 Shim，在任何外部工具触发写入前透明捕获 I/O 事件并向 `FileScopeGuard` 请求鉴权。
+- **Host Extension Bridge**:
+  - 开发通用的轻量 VS Code / Cursor 扩展插件，通过 IPC 与本地 Quench FastMCP 进程心跳同步，将文件越界事件投递至编辑器原生 Modal 确认窗口。
+- **前置依赖**: 跨平台进程间通信 (IPC) 协议抽象与低开销文件系统监听机制。
+
+---
+
+## 2026-09-21 — DAG-Based Concurrency & Multi-Task State Machine (基于有向无环图的并发任务状态机与资源隔离)
+
+### 1. Motivation & Background (背景与契机)
+当前 `state_machine.py` 严格基于 `filelock` 实现跨进程单核排他锁，硬性保证“同一时刻全项目仅有一项任务处于 `In_Progress`”。对于单开发者结对编程而言，这构成了极强的心智防线；但在大型企业协作场景或多 Subagent 树状并行开发（如前端、后端、数据模型互不依赖的模块同时推进）时，该串行设计构成了自动化吞吐瓶颈。
+
+### 2. Why not now? (为什么当期不做)
+- 现阶段重心是单兵作战的“防翻车”与“零越界”，全局互斥锁能够杜绝所有死锁与状态竞态，可靠性收益最高。
+- 引入并发任务依赖管理将显著复杂化状态转移矩阵与冲突回滚逻辑。
+
+### 3. Key Architecture & Preconditions (核心构想与前置条件)
+- **Disjoint File Set Locking (不相交文件集合锁)**:
+  - 检出任务时计算任务间 `[Affected Files]` 的交集。若两个已确认任务的作用域集合不重叠（$S_A \cap S_B = \emptyset$），允许不同的 Worker 子代理并行 Checkout 执行。
+- **DAG Dependency Graph & Conflict Detection**:
+  - 任务元数据支持声明 `depends_on: [Task_ID]`，构建严格拓扑序的有向无环图执行流水线。
+- **Phase Merge Gate (阶段合并门禁)**:
+  - 当并行分支任务汇合时，触发统一的回归测试与 Git 冲突消解门禁。
+
+---
+
+## 2026-09-21 — Minimal Governance Tier & One-Click Distribution (分级治理门槛与单命令分发包)
+
+### 1. Motivation & Background (背景与契机)
+Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、签名契约、步骤指引、边缘校验、DoD命令）极大保障了高风险复杂业务的交付质量，但对初阶开源使用者和日常极小粒度修补（如修复单点文本、调整常量值）而言，门槛较高、流程偏重，容易在开源社区初次体验阶段产生认知摩擦。
+
+### 2. Why not now? (为什么当期不做)
+- 治理套件首要目标是立规矩，先树立“绝对严谨、无死角防御”的技术标杆，避免因过早放松校验而削弱防御护城河。
+- 模板与脚手架需等待底层各适配器（Adapters）进一步稳定后再行固化。
+
+### 3. Key Architecture & Preconditions (核心构想与前置条件)
+- **Progressive Governance Tier (渐进式治理级别)**:
+  - 在 `quench_stack.yaml` 中支持配置治理模式：
+    - `strict`: 完整六大字段 + 刚性 DoD 断言审计 + AST 探查；
+    - `minimal`: 仅强制约束 `[Affected Files]` 白名单与 `[DoD Verification Commands]`，其余字段转为选填，降低轻度任务负担。
+- **One-Click Package Distribution (开箱即用分发)**:
+  - 自动化构建并发布至 PyPI，允许外部开发者直接执行 `uvx quorch --init` 或 `pipx run quorch init` 一键初始化任何第三方技术栈项目。
+- **Interactive TUI / CLI Wizard**:
+  - 增强 `quorch` CLI 交互式向导，支持通过键盘方向键与问答一键生成符合规范的标准任务草案。

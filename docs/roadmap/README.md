@@ -13,7 +13,7 @@
 
 | Stage | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
-| **Stage 5** | 🚀 **TBD** | **Hybrid Reviewer Dynamic Routing & Cross-Language Zoning** | Task-aware semantic routing, red-team cross validation, and four-zone semantic guards (see [docs/future_roadmap_ideas.md](../future_roadmap_ideas.md)) | 💡 **In Planning** |
+| **Stage 5** | 🚀 **[stage5_vendor_neutral_reviewer_and_adhoc_consultation.md](./stage5_vendor_neutral_reviewer_and_adhoc_consultation.md)** | **Vendor-Neutral Reviewer, Ad-Hoc Consultation (`dev_reviewer_consult`) & Anti-Role-Playing Governance** | Clean vendor-specific hardcoding, ad-hoc architectural inquiry without DevTasks, stream thinking sink, and strict anti-impersonation rules | 🔨 **In Progress** |
 
 ---
 
