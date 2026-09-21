@@ -107,7 +107,7 @@
 - **企业内网代理**：引擎原生支持并尊重 `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` 环境变量，内置 SSL 上下文自适应与连接超时熔断。
 - **一键测试连通性**：通过 Quench CLI 提供的专用诊断工具：
   ```bash
-  quench check --reviewer
+  quench check-engine
   ```
   该命令将安全检测上游 API 连通性、密钥有效性与往返延迟，绝不产生多余的文件变更。
 - **思考流日志在哪里查看？**：思维链实时分块落盘至 `.agents/logs/reviewer/thinking.log`，内置 1024KB 安全硬轮转与凭据正则脱敏。

@@ -107,7 +107,7 @@ This document collects common issues, troubleshooting tips, and technical questi
 - **Corporate Proxy & Resilient Networking**: The engine respects standard environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) with automated SSL context handling.
 - **Testing Connectivity**: Run the dedicated CLI diagnostic tool:
   ```bash
-  quench check --reviewer
+  quench check-engine
   ```
   This command tests provider initialization, API key presence, upstream connection, and latency without modifying any files.
 - **Where are the thoughts stored?**: Streaming reasoning thoughts are written directly to `.agents/logs/reviewer/thinking.log` with automated 1024KB safe rotation and token redaction.

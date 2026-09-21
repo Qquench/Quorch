@@ -157,5 +157,5 @@ reviewer_engine:
 quench check
 
 # 专项体检 Reviewer 引擎 API 连通性、密钥有效性与网络延迟
-quench check --reviewer
+quench check-engine
 ```

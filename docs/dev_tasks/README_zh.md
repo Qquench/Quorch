@@ -21,20 +21,8 @@
 
 ---
 
-## 当前活跃任务单 (Active Dev Task)
+## 活跃任务与归档记录
 
-> 当前暂无进行中任务单（所有阶段性开发任务均已闭环并移入归档区）。  
-> 新任务可通过调用 `dev_tasks_propose` 或在 `docs/roadmap/` 阶段路线图指引下创建。
-
----
-
-## 归档记录 (Archive History)
-
-| 归档任务单 | 核心交付内容 | 任务数 | 闭环状态 |
-| :--- | :--- | :---: | :---: |
-| [`archive/2026-09-13_stage3_cross_tool_cursor_adaptation.md`](./archive/2026-09-13_stage3_cross_tool_cursor_adaptation.md) | 跨工具 Cursor 适配与轻量统一 CLI 工具集（MDC 导出/链式 Git Hook） | 3 | ✔️ 100% 闭环 |
-| [`archive/2026-09-13_stage2_antigravity_community_ready.md`](./archive/2026-09-13_stage2_antigravity_community_ready.md) | Antigravity 社区开源就绪（动态渲染/自愈脚手架/门面资产） | 4 | ✔️ 100% 闭环 |
-| [`archive/2026-09-13_fix_external_hooks_and_diagnostics.md`](./archive/2026-09-13_fix_external_hooks_and_diagnostics.md) | 外部项目 Hook 闭环生成与 Windows cmd 引号保护 | 2 | ✔️ 100% 闭环 |
-| [`archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`](./archive/2026-09-13_stage1_scaffolding_observability_and_migration.md) | 可观测性日志/配置平滑升级/模板中立化 | 3 | ✔️ 100% 闭环 |
-| [`archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md`](./archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md) | 治理引擎深化（旁路锁+双轨边界）与开源跨工具适配 | 4 | ✔️ 100% 闭环 |
-| [`archive/2026-09-11_plugin_development.md`](./archive/2026-09-11_plugin_development.md) | quench-dev-tasks 插件全量核心机制开发（Phase 1 ~ Phase 3） | 11 | ✔️ 100% 闭环 |
+- **活跃任务**：在当前目录下通过规范单据（如 `2026-09-XX_*.md`）跟踪。
+- **归档任务**：已交付单据归档在 [`archive/`](./archive/)，并通过 `quench archive` 自动同步至 [`CHANGELOG.md`](../../CHANGELOG.md)。
+- **查看状态**：运行 `quench status` 或调用 `dev_tasks_status` 即可查看当前实时全局状态。

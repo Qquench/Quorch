@@ -157,5 +157,5 @@ You can verify your configuration and test your Reviewer Engine connectivity fro
 quench check
 
 # Test Reviewer Engine connectivity, API key validity, and latency
-quench check --reviewer
+quench check-engine
 ```
