@@ -1784,6 +1784,89 @@ def dev_tasks_set_bypass(
     }
 
 
+@mcp.tool()
+async def dev_reviewer_consult(
+    workspace_root: str,
+    query: str,
+    context_files: list[str] | None = None,
+    mode: str = "critique",
+    max_hops: int = 1,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Directly consult the senior architecture Reviewer engine without creating a DevTask.
+    Mounts the global architecture baseline as a prompt-cache-friendly static prefix, streams
+    reasoning CoT to .agents/logs/reviewer/latest-<session_id>.log, and returns deep architectural
+    critique, trade-off analysis, or spec suggestions. Never mutates source files.
+
+    免任务单地直接咨询资深架构 Reviewer：挂载全局架构基线（命中 Prompt Cache），思考流实时落盘，
+    返回红队挑刺 / 方案权衡 / 规格建议，并在引擎未配置时显式降级（严禁就地角色扮演）。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        query: Specific architectural question, trade-off query, or critique target / 具体的架构咨询问题、权衡对比或红队挑刺标的。
+        context_files: List of workspace-relative paths to read sandboxed slices from / 工作区内相对路径列表（按需切片挂载）。
+        mode: Consultation mode ("critique" | "evaluate" | "brainstorm" | "audit") / 咨询模式（默认红队挑刺 critique）。
+        max_hops: Maximum dynamic context extension hops [0, 3] / 允许的最大上下文自动扩展追问轮次（钳制在 0-3 次）。
+        session_id: Optional tracking identifier for log stream isolation / 可选的会话标识符（用于日志流隔离）。
+    """
+    if not workspace_root or not os.path.isdir(workspace_root):
+        return {
+            "status": "error",
+            "error": f"Invalid workspace_root: '{workspace_root}' is not an existing directory.",
+        }
+
+    if not query or not query.strip():
+        return {
+            "status": "error",
+            "error": "Query cannot be empty.",
+        }
+
+    if len(query) > 8000:
+        return {
+            "status": "error",
+            "error": f"Query exceeds maximum character budget (len={len(query)}, max=8000).",
+        }
+
+    if mode not in ("critique", "evaluate", "brainstorm", "audit"):
+        return {
+            "status": "error",
+            "error": f"Invalid mode '{mode}'. Supported modes: critique, evaluate, brainstorm, audit.",
+        }
+
+    clamped_hops = min(max(max_hops, 0), 3)
+
+    from consultation import ConsultRequest, run_consultation, sanitize_session_id
+    from dataclasses import asdict
+
+    try:
+        clean_sid = sanitize_session_id(session_id)
+    except ValueError as e:
+        return {
+            "status": "error",
+            "error": str(e),
+        }
+
+    req = ConsultRequest(
+        workspace_root=workspace_root,
+        query=query,
+        context_files=tuple(context_files or []),
+        mode=mode,
+        max_hops=clamped_hops,
+        session_id=clean_sid,
+    )
+
+    try:
+        config = load_project_config(workspace_root)
+    except Exception:
+        config = QuenchStackConfig(
+            workspace_root=workspace_root,
+            project_name=os.path.basename(workspace_root) or "default",
+        )
+
+    res = await run_consultation(req, config=config)
+    return asdict(res)
+
+
 def _degraded_card(reason: str, config: QuenchStackConfig) -> Dict[str, Any]:
     """返回结构化降级卡，绝不包含任何伪造的审查正文。"""
     prov = getattr(config.reviewer_engine, "provider", "none")
