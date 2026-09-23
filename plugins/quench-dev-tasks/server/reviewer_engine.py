@@ -1111,8 +1111,8 @@ class ReviewerClient:
 
     async def stream_chat(
         self,
-        system_prompt: str,
-        user_prompt: str,
+        system_prompt_or_messages: str | List[Dict[str, str]],
+        user_prompt: Optional[str] = None,
         *,
         session_id: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
@@ -1128,11 +1128,14 @@ class ReviewerClient:
         endpoint = _normalize_chat_endpoint(self.base_url)
         api_key = self.resolve_api_key()
 
-        messages: List[Dict[str, str]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
+        if isinstance(system_prompt_or_messages, list):
+            messages: List[Dict[str, str]] = system_prompt_or_messages
+        else:
+            messages = []
+            if system_prompt_or_messages:
+                messages.append({"role": "system", "content": system_prompt_or_messages})
+            if user_prompt:
+                messages.append({"role": "user", "content": user_prompt})
 
         payload: Dict[str, Any] = {
             "model": self.model,

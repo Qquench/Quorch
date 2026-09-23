@@ -43,4 +43,4 @@ reviewer_engine:
   api_key_env: "DEEPSEEK_API_KEY_Quench"
   thinking: true
   reasoning_effort: "high"
-  timeout_seconds: 60
+  timeout_seconds: 180
