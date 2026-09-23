@@ -126,7 +126,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 1.2 ✅ 已确认 — 引入 PROVIDER_PRESETS 声明式中立工厂并清除 server.py 厂商硬分支 (Declarative Provider Registry & Branch Removal)
+### 任务 1.2 ✔️ 已完成 — 引入 PROVIDER_PRESETS 声明式中立工厂并清除 server.py 厂商硬分支 (Declarative Provider Registry & Branch Removal)
 
 #### 【涉及文件】
 

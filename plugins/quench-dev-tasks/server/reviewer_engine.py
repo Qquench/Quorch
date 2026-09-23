@@ -620,20 +620,32 @@ class ReviewerClient:
     ):
         if config is not None:
             self.config = config
-            self.base_url = (base_url or getattr(config, "base_url", "")).strip()
-            self.model = model or getattr(config, "model", "")
-            self.api_key_env = api_key_env if api_key_env is not None else getattr(config, "api_key_env", None)
+            url_val = (base_url or getattr(config, "base_url", "")).strip()
             prov = getattr(config, "provider", None)
             self.provider_label = provider_label if provider_label != "generic" else (prov or "generic")
+            if not url_val and self.provider_label:
+                from project_config import resolve_preset
+                preset = resolve_preset(self.provider_label)
+                if preset and preset.base_url:
+                    url_val = preset.base_url
+            self.base_url = url_val
+            self.model = model or getattr(config, "model", "")
+            self.api_key_env = api_key_env if api_key_env is not None else getattr(config, "api_key_env", None)
             self.timeout_seconds = timeout_seconds if timeout_seconds != 60 else getattr(config, "timeout_seconds", 60)
             self.max_retries = max_retries if max_retries != 2 else getattr(config, "max_retries", 2)
             self.thinking = thinking if thinking is not True else getattr(config, "thinking", True)
             self.reasoning_effort = reasoning_effort if reasoning_effort != "high" else getattr(config, "reasoning_effort", "high")
         else:
-            self.base_url = (base_url or "").strip()
+            url_val = (base_url or "").strip()
             self.model = model or ""
             self.api_key_env = api_key_env
             self.provider_label = provider_label
+            if not url_val and self.provider_label:
+                from project_config import resolve_preset
+                preset = resolve_preset(self.provider_label)
+                if preset and preset.base_url:
+                    url_val = preset.base_url
+            self.base_url = url_val
             self.timeout_seconds = timeout_seconds
             self.max_retries = max_retries
             self.thinking = thinking

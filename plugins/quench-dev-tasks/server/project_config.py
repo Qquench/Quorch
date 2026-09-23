@@ -11,7 +11,9 @@ import tempfile
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Tuple, Literal
+from types import MappingProxyType
+from typing import Any, Mapping, Optional, Tuple, Literal
+import urllib.parse
 import yaml
 
 CURRENT_SCHEMA_VERSION = "1.0"
@@ -20,6 +22,7 @@ _DEFAULT_SCHEMA_VERSION_PATCH = 'schema_version: "1.0"\n'
 _DEFAULT_FAST_TRACK_PATCH = """fast_track_rules:
   allow_untracked_patterns: []
 """
+_SEEN_DEPRECATED_PROVIDERS: set[str] = set()
 
 
 DEFAULT_UNMANAGED_EXTENSIONS = {
@@ -91,21 +94,117 @@ def _match_glob(target_rel: str, pattern: str) -> bool:
 DispatchStrategy = Literal["subagent", "engine", "manual"]
 
 
+@dataclass(frozen=True)
+class ProviderPreset:
+    base_url: str
+    api_key_env: str | None
+    requires_thinking_flag: bool = False
+
+
+# -- vendor-presets:start
+PROVIDER_PRESETS: Mapping[str, ProviderPreset | None] = MappingProxyType({
+    "openai": ProviderPreset("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "deepseek": ProviderPreset("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+    "ollama": ProviderPreset("http://127.0.0.1:11434/v1", None),
+    "vllm": ProviderPreset("http://127.0.0.1:8000/v1", None),
+    "custom": ProviderPreset("", None),
+    "none": None,
+})
+PROVIDER_ALIASES: Mapping[str, str] = MappingProxyType({
+    "deepseek-compatible": "deepseek",
+    "openai-compatible": "openai",
+})
+# -- vendor-presets:end
+
+
+def resolve_preset(provider: str) -> ProviderPreset | None:
+    """解析 provider 对应的预设端点与环境变量（支持别名映射）。"""
+    if not provider:
+        return None
+    key = str(provider).lower().strip()
+    if key in PROVIDER_ALIASES:
+        key = PROVIDER_ALIASES[key]
+    return PROVIDER_PRESETS.get(key)
+
+
 @dataclass
 class ReviewerEngineConfig:
     mode: str = "auto"  # "auto" | "subagent" | "engine" | "manual"
     strategy_order: list[str] = field(
         default_factory=lambda: ["subagent", "engine", "manual"]
     )
-    provider: str = "none"  # "deepseek" | "openai" | "ollama" | "custom" | "none"
-    model: str = "deepseek-flash"
-    api_key_env: str = "DEEPSEEK_API_KEY_Quench"
-    base_url: str = "https://api.deepseek.com"
+    provider: str = "none"                       # 不再默认任何厂商
+    model: str = "default"                       # 通用占位，不再默认厂商模型名
+    api_key_env: str | None = None               # 不再默认厂商 Key 变量名
+    base_url: str = ""                           # 空 -> 由 preset 推导；preset 亦缺失 -> 判定未配置
     thinking: bool = True
     reasoning_effort: str = "high"
     timeout_seconds: int = 60
     max_retries: int = 2
     max_tool_hops: int = 3
+
+
+def create_reviewer_client(
+    config: ReviewerEngineConfig,
+    *,
+    sink: Any = None,
+) -> Any:
+    """工厂函数：根据声明式配置创建厂商中立 ReviewerClient。
+    返回 None 表示引擎未配置（调用方必须走降级卡，严禁自行扮演 Reviewer）。
+    """
+    from reviewer_engine import ReviewerClient, ReviewerNotConfiguredError
+
+    if not config or config.provider in ("none", "", None):
+        return None
+
+    prov = str(config.provider).lower().strip()
+    preset = resolve_preset(prov)
+
+    base_url = (config.base_url or "").strip()
+    api_key_env = config.api_key_env
+
+    if preset is not None:
+        if not base_url:
+            base_url = preset.base_url
+        if api_key_env is None:
+            api_key_env = preset.api_key_env
+    else:
+        # 未在注册表中
+        if not base_url:
+            raise ReviewerNotConfiguredError(
+                f"未知 Reviewer provider='{config.provider}' 且未显式指定 base_url。"
+                f"请在 quench_stack.yaml 中配置有效的 base_url 或使用已知预设: {list(PROVIDER_PRESETS.keys())}"
+            )
+
+    if not base_url:
+        raise ReviewerNotConfiguredError(f"Reviewer 引擎 base_url 为空 (provider='{prov}')")
+
+    # URL 校验
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ReviewerNotConfiguredError(f"base_url 必须为 http 或 https 协议: '{base_url}'")
+    if not parsed.hostname:
+        raise ReviewerNotConfiguredError(f"base_url 必须包含有效的 host: '{base_url}'")
+    if "@" in parsed.netloc:
+        raise ReviewerNotConfiguredError(f"base_url 不得包含 userinfo 凭据 (@): '{base_url}'")
+
+    is_local = (parsed.hostname or "").lower() in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+    if not is_local and not api_key_env:
+        raise ReviewerNotConfiguredError(
+            f"远端 Reviewer 端点 ('{base_url}') 必须配置 api_key_env 环境变量名以进行鉴权"
+        )
+
+    return ReviewerClient(
+        base_url=base_url,
+        model=config.model,
+        api_key_env=api_key_env,
+        provider_label=prov,
+        timeout_seconds=config.timeout_seconds,
+        max_retries=config.max_retries,
+        thinking=config.thinking,
+        reasoning_effort=config.reasoning_effort,
+        sink=sink,
+    )
 
 
 @dataclass
@@ -387,13 +486,37 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         else:
             strategy_order = ["subagent", "engine", "manual"]
 
+        # 确保 provider="none" 时 strategy_order 兜底包含 manual
+        if provider_val == "none" and "manual" not in strategy_order:
+            strategy_order.append("manual")
+
+        base_url_val = str(re_data.get("base_url", "")).strip() if re_data.get("base_url") is not None else ""
+        api_key_env_val = str(re_data.get("api_key_env")).strip() if re_data.get("api_key_env") is not None else None
+        model_val = str(re_data.get("model", "default")).strip()
+
+        # 迁移兼容（只读补全内存配置，绝不改写用户 YAML 落盘）
+        if provider_val in ("deepseek", "deepseek-compatible"):  # vendor-literal: allow
+            if not base_url_val:
+                preset = resolve_preset(provider_val)
+                if preset:
+                    base_url_val = preset.base_url
+                    if api_key_env_val is None:
+                        api_key_env_val = preset.api_key_env
+                    if provider_val not in _SEEN_DEPRECATED_PROVIDERS:
+                        _SEEN_DEPRECATED_PROVIDERS.add(provider_val)
+                        warnings.warn(  # vendor-literal: allow
+                            f"检测到旧版配置 provider='{provider_val}' 且未显式声明 base_url，已按预设自动补全，建议在 quench_stack.yaml 中显式声明。",  # vendor-literal: allow
+                            DeprecationWarning,  # vendor-literal: allow
+                            stacklevel=2,  # vendor-literal: allow
+                        )  # vendor-literal: allow
+
         reviewer_engine = ReviewerEngineConfig(
             mode=effective_mode,
             strategy_order=strategy_order,
             provider=provider_val,
-            model=str(re_data.get("model", "deepseek-flash")).strip(),
-            api_key_env=str(re_data.get("api_key_env", "DEEPSEEK_API_KEY_Quench")).strip(),
-            base_url=str(re_data.get("base_url", "https://api.deepseek.com")).strip(),
+            model=model_val,
+            api_key_env=api_key_env_val,
+            base_url=base_url_val,
             thinking=bool(re_data.get("thinking", True)),
             reasoning_effort=str(re_data.get("reasoning_effort", "high")).strip(),
             timeout_seconds=int(re_data.get("timeout_seconds", 60)),

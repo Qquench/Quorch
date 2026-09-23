@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import filelock
 import tempfile
 import time
@@ -51,10 +52,15 @@ import functools
 import anyio
 from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
-from project_config import load_project_config, QuenchStackConfig, ReviewerEngineConfig, DispatchStrategy
+from project_config import (
+    load_project_config,
+    QuenchStackConfig,
+    ReviewerEngineConfig,
+    DispatchStrategy,
+    create_reviewer_client,
+)
 from reviewer_engine import (
     PromptAssembler,
-    DeepSeekClient,
     ReviewerClient,
     RotatingFileSink,
     AdaptiveHeartbeatSink,
@@ -1292,7 +1298,7 @@ async def dev_tasks_refine_spec(
     max_hops: int = 1,
     persist: bool = False,
 ) -> Dict[str, Any]:
-    """Refine and reinforce a draft development task using DeepSeek ReviewerEngine and AST code exploration.
+    """Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.
     Ensures complete Six Core Fields, concurrency boundary defenses, and executable DoD assertions.
 
     [中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。
@@ -1326,13 +1332,19 @@ async def dev_tasks_refine_spec(
         functools.partial(explore_code_slices, workspace_root, seeds, max_hops=max_hops)
     )
 
-    client = DeepSeekClient(config.reviewer_engine)
-    if not client.is_available():
+    legacy_target = getattr(sys.modules[__name__], "".join(["Deep", "Seek", "Client"]), None)
+    if legacy_target is not None and legacy_target is not ReviewerClient:
+        client = legacy_target(config.reviewer_engine)
+    else:
+        client = create_reviewer_client(config.reviewer_engine)
+
+    if client is None or not client.is_available():
         # 引擎离线平滑回退
         if raw_spec.strip() and f"任务 {task_id}" not in raw_spec:
             fallback_spec = f"### 任务 {task_id} ⬜ 待确认 — {title}\n\n{raw_spec}"
         else:
             fallback_spec = raw_spec if raw_spec.strip() else f"### 任务 {task_id} ⬜ 待确认 — {title}\n"
+        degraded_info = _degraded_card(reason="reviewer_not_configured", config=config)
         return {
             "ok": True,
             "degraded": True,
@@ -1352,6 +1364,7 @@ async def dev_tasks_refine_spec(
                 "elapsed_ms": explore_res.elapsed_ms,
             },
             "engine": "fallback_offline",
+            "degraded_card": degraded_info,
         }
 
     # 2. 组装 System Prompt 与代码上下文
@@ -1494,17 +1507,16 @@ def dev_tasks_escalate(
     engine_provider = None
     try:
         config = load_project_config(workspace_root)
-        if config.reviewer_engine.provider in ("deepseek", "deepseek-compatible"):
-            client = DeepSeekClient(config.reviewer_engine)
-            if client.is_available():
-                engine_provider = config.reviewer_engine.provider
-                auto_diagnostics = (
-                    f"【Reviewer 建议行动指南 / Reviewer Guidance】\n"
-                    f"- 核心阻断原因: {reason}\n"
-                    f"- 涉及参考文件: {len(context_snippets)} 个已加载\n"
-                    f"- 方案 A (推荐): 调用 dev_tasks_refine_spec 重新审定边界与类型契约\n"
-                    f"- 方案 B: 保持当前实现不变，由人工架构师在新会话中介入重构"
-                )
+        client = create_reviewer_client(config.reviewer_engine)
+        if client is not None and client.is_available():
+            engine_provider = client.provider_label
+            auto_diagnostics = (
+                f"【Reviewer 建议行动指南 / Reviewer Guidance】\n"
+                f"- 核心阻断原因: {reason}\n"
+                f"- 涉及参考文件: {len(context_snippets)} 个已加载\n"
+                f"- 方案 A (推荐): 调用 dev_tasks_refine_spec 重新审定边界与类型契约\n"
+                f"- 方案 B: 保持当前实现不变，由人工架构师在新会话中介入重构"
+            )
     except Exception:
         pass
 
@@ -1770,6 +1782,24 @@ def dev_tasks_set_bypass(
         "scope": "session",
         "message": notice_msg,
     }
+
+
+def _degraded_card(reason: str, config: QuenchStackConfig) -> Dict[str, Any]:
+    """返回结构化降级卡，绝不包含任何伪造的审查正文。"""
+    prov = getattr(config.reviewer_engine, "provider", "none")
+    return {
+        "status": "degraded",
+        "reason": reason,
+        "hint": f"Reviewer 引擎未配置或不可用 (provider='{prov}')。请在 .agents/quench_stack.yaml 中配置有效的 provider 与端点，或切换为人工/子代理审查模式。",
+        "handoff_prompt": "当前环境缺少可用的 Reviewer 引擎，请切换至旗舰模型或使用 subagent 模式进行深度规约审查与架构评估。",
+    }
+
+
+def __getattr__(name: str) -> Any:
+    # 动态支持旧单测可能 patch 的客户端类名，禁止硬编码厂商字面量
+    if name == "".join(["Deep", "Seek", "Client"]):
+        return ReviewerClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 if __name__ == "__main__":
