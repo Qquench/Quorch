@@ -1,7 +1,7 @@
 # 阶段二演进：Antigravity 社区通用开箱即用与开源准备
 
 > **所属阶段**：Stage 2 — Antigravity Community Out-of-the-Box & Open Source Release  
-> **基线规划**：`docs/roadmap/archive/v1.2_stage02_antigravity_community_ready.md`  
+> **基线规划**：`docs/roadmap/archive/v1.02_antigravity_community_ready.md`  
 > **目标**：彻底消除代码库中任何本地绝对路径强绑定，提供跨平台自适应安装与 Pre-flight 预检脚手架，项目配置模板去特定化与逻辑角色模型解耦，并构建专业双语开源社区门面与规范资产。  
 > **审查状态**：✅ 已确认（架构复核与决策修订完毕，已全量确认待执行）  
 > **推荐执行顺序**：任务 1 → 任务 2 → 任务 3 → 任务 4
