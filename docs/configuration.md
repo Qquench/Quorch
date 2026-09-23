@@ -83,7 +83,7 @@ governance_scope:
 
 ## 5. Reviewer Engine & External Architect Dispatch (`reviewer_engine`)
 
-The `reviewer_engine` block decouples strategic reasoning models (Reviewer) from everyday agile coding (Runner). It supports multiple pluggable LLM providers, corporate proxies, and streaming observability.
+The `reviewer_engine` block decouples strategic reasoning models (Reviewer) from everyday agile coding (Runner). It supports multiple pluggable LLM providers, corporate proxies, and streaming observability. By default, `provider: "none"` disables direct API calls, routing to native subagents or graceful manual fallbacks.
 
 ```yaml
 reviewer_engine:
@@ -96,17 +96,17 @@ reviewer_engine:
     - "engine"
     - "manual"
 
-  # Upstream API Provider: "deepseek" | "openai" | "ollama" | "custom" | "none"
-  provider: "deepseek"
+  # Upstream API Provider: "none" | "openai" | "deepseek" | "ollama" | "vllm" | "generic-openai" | "custom"
+  provider: "none"
 
-  # Model identifier
-  model: "deepseek-flash"
+  # Model identifier (defaults to "default" when provider is "none")
+  model: "default"
 
   # Environment variable name containing your API key (NEVER hardcode keys in plaintext!)
-  api_key_env: "DEEPSEEK_API_KEY"
+  api_key_env: null
 
-  # API Base URL endpoint
-  base_url: "https://api.deepseek.com"
+  # API Base URL endpoint (OpenAI-compatible /chat/completions endpoint)
+  base_url: "https://api.openai.com/v1"
 
   # Enable streaming reasoning_content (Chain-of-Thought thinking stream)
   thinking: true
@@ -124,29 +124,63 @@ reviewer_engine:
   max_tool_hops: 3
 ```
 
-### Supported Providers
+### Supported Provider Presets (`PROVIDER_PRESETS`)
 
-| Provider | Typical Models | Base URL | Highlights |
-| :--- | :--- | :--- | :--- |
-| **`deepseek`** | `deepseek-chat`, `deepseek-reasoner`, `deepseek-flash` | `https://api.deepseek.com` | Native `reasoning_content` stream extraction, automated Prompt Cache token billing detection. |
-| **`openai`** | `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | `https://api.openai.com/v1` | Standard OpenAI chat completion format. |
-| **`ollama`** | `deepseek-r1:14b`, `qwen2.5-coder:14b` | `http://localhost:11434/v1` | 100% offline, local GPU inference, zero external API key requirements. |
-| **`subagent`** | IDE Native Subagent (`reviewer`) | N/A | Leverages IDE host subscription quota (e.g. Antigravity Pro Plan) with zero incremental API cost. |
-| **`manual`** | Human Architect | N/A | Graceful fallback generating structured interactive review handoff cards. |
+| Provider Preset | Default Model | Default Base URL | Authentication | Key Features |
+| :--- | :--- | :--- | :--- | :--- |
+| **`none`** | `default` | `https://api.openai.com/v1` | None | Completely disables external API calls; triggers graceful fallback. |
+| **`openai`** | `gpt-4o` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Standard OpenAI endpoints and reasoning models (o1, o3-mini). |
+| **`deepseek`** | `deepseek-chat` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | Native `reasoning_content` stream extraction & Prompt Cache detection. |
+| **`ollama`** | `qwen2.5-coder:14b` | `http://localhost:11434/v1` | None (Local) | 100% offline local inference, zero external credentials required. |
+| **`vllm`** | `default` | `http://localhost:8000/v1` | None (Local) | High-throughput local/private server deployment with OpenAI compatibility. |
+| **`generic-openai`** | `default` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Compatible proxy gateway / aggregator for standard chat completions. |
+| **`custom`** | User-defined | User-defined | User-defined | Custom private endpoint (remote endpoints require `api_key_env`). |
 
 ---
 
 ## 6. Observability & Thinking Stream Logs
 
 When external reasoning models stream Chain-of-Thought thoughts, Quench automatically:
-1. Pipes thoughts into `.agents/logs/reviewer/thinking.log`;
-2. Enforces a **1024KB hard cap** with automated single-backup rotation (`thinking.log.1`);
-3. Performs streaming regex redaction across chunk boundaries (masking API keys, secrets, and private tokens);
-4. Emits ~1.0s throttled progress heartbeats back to the IDE, keeping the MCP `sys.stdout` JSON-RPC transport completely unpolluted.
+1. Pipes task refinement thoughts into `.agents/logs/reviewer/thinking.log`;
+2. Pipes ad-hoc consultation thoughts into `.agents/logs/reviewer/latest-<session_id>.log`;
+3. Enforces a **1024KB hard cap** with automated single-backup rotation (`*.log.1`);
+4. Performs streaming regex redaction across chunk boundaries (masking API keys, secrets, and private tokens);
+5. Emits ~1.0s throttled progress heartbeats back to the IDE, keeping the MCP `sys.stdout` JSON-RPC transport completely unpolluted.
 
 ---
 
-## 7. Diagnostics & Health Checks
+## 7. Ad-Hoc Architecture Consultation (`dev_reviewer_consult`)
+
+For spontaneous technical discussions, trade-off evaluations, or red-team audits without binding to a DevTask lifecycle, agents and users can invoke `dev_reviewer_consult`:
+
+```python
+dev_reviewer_consult(
+    workspace_root=".",
+    query="Evaluate state machine concurrency risks under multi-tab access",
+    context_files=["server/state_machine.py:40-120"],
+    mode="critique",      # "critique" | "evaluate" | "brainstorm" | "audit"
+    max_hops=1,          # Multi-turn context extension rounds (0-3)
+    session_id=None,     # Log file correlation identifier
+)
+```
+
+### Consultation Modes
+
+- **`critique`** (Red-Team Threat Modeling): Relentlessly challenges assumptions, highlights concurrency/persistence race conditions, and categorizes risks by severity.
+- **`evaluate`** (Technical Trade-Off Matrix): Multi-dimensional comparative analysis (Theoretical Benefits vs. Operational Costs vs. Rollback Paths).
+- **`brainstorm`** (Architectural Exploration): Explores divergent patterns, proof-of-concept tests, and novel architectural approaches.
+- **`audit`** (Contract & Implementation Conformance): Read-only line-anchored audit checking code against architectural contracts.
+
+### Anti-Roleplaying Invariant & Degraded Cards
+
+If the Reviewer engine is unconfigured (`provider: "none"`), disconnected, or timed out:
+- The tool returns a structured degraded card: `{"status": "degraded", "degraded_reason": "...", "findings": "", "handoff_prompt": "..."}`;
+- **`findings` is strictly empty string (`""`)**;
+- In-context roleplaying or hallucinating critique text by the everyday executor model is strictly prohibited by governance rules.
+
+---
+
+## 8. Diagnostics & Health Checks
 
 You can verify your configuration and test your Reviewer Engine connectivity from the command line:
 
@@ -157,3 +191,4 @@ quench check
 # Test Reviewer Engine connectivity, API key validity, and latency
 quench check-engine
 ```
+

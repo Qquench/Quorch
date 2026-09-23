@@ -1,7 +1,7 @@
 # Quench-DevTasks MCP Service Architecture & Specification (DevTasks Orchestrator Spec)
 
-> **Version**: v1.4.0 (Implemented & Verified)  
-> **Implementation Status**: ✔️ Fully implemented and verified with 167+ automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, ReviewerClient engine, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
+> **Version**: v1.5.0 (Implemented & Verified)  
+> **Implementation Status**: ✔️ Fully implemented and verified with 230 automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, ad-hoc architectural consultation `dev_reviewer_consult`, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
 > **Source Specification**: `dev_tasks_mcp_specification.md`  
 > **Workflow Reference**: [DevTasks Workflow Specification](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
 > **Role & Purpose**: General-purpose development task governance and dual-model orchestration MCP server for engineering repositories.
@@ -20,12 +20,12 @@ This MCP service mechanizes and enforces the **"Dual-Model Task Governance Workf
   - **Avoids wasting scarce flagship reasoning budgets on routine implementation tasks**.
 - **Strategic Reviewer (On-Demand Strategic Architect)**:
   - Frugally expends flagship reasoning budget, **awakened only under two conditions**:
-    1. **Explicit Developer Instruction**: e.g., user requests: "Have the Reviewer inspect the current module and draft a comprehensive DevTask";
+    1. **Explicit Developer Instruction**: e.g., user requests: "Have the Reviewer inspect the current module and draft a comprehensive DevTask" or calls `dev_reviewer_consult`;
     2. **Self-Escalation**: Triggered when tackling multi-module refactoring, resolving architectural impasses, or encountering repeated test failures.
   - Upon completing task decomposition or architecture review, the Reviewer **immediately sleeps**, handing back execution to the runner model.
 
 ### 1.3 Model Decoupling & Pluggable ReviewerClient Architecture
-The MCP server operates as an independent Python process (FastMCP over stdio JSON-RPC) and **never hardcodes specific model version strings**. Logical roles and external model dispatch are decoupled via workspace configuration (`.agents/quench_stack.yaml::reviewer_engine`):
+The MCP server operates as an independent Python process (FastMCP over stdio JSON-RPC) and **never hardcodes specific model version strings or proprietary vendor literals**. Logical roles and external model dispatch are decoupled via workspace configuration (`.agents/quench_stack.yaml::reviewer_engine`) and governed by an automated static neutrality scan gate (`test_no_vendor_literals_in_core.py`):
 
 ```yaml
 # Workspace .agents/quench_stack.yaml configuration
@@ -38,10 +38,10 @@ reviewer_engine:
     - "subagent"                  # 1. Native IDE subagent (Antigravity/Cursor)
     - "engine"                    # 2. Direct upstream API engine
     - "manual"                    # 3. Interactive manual review fallback
-  provider: "deepseek"            # "deepseek" | "openai" | "ollama" | "custom"
-  model: "deepseek-flash"         # High-cost-performance thinking model
-  api_key_env: "DEEPSEEK_API_KEY_Quench" # Secure env var, no hardcoded secrets
-  base_url: "https://api.deepseek.com"
+  provider: "none"                # "none" | "openai" | "deepseek" | "ollama" | "vllm" | "generic-openai" | "custom"
+  model: "default"                # Model identifier or preset default
+  api_key_env: null               # Secure env var (e.g. OPENAI_API_KEY)
+  base_url: "https://api.openai.com/v1"
   thinking: true                  # Stream reasoning CoT via reasoning_content
   reasoning_effort: "high"        # High-depth reasoning budget
   timeout_seconds: 60
@@ -49,12 +49,12 @@ reviewer_engine:
   max_tool_hops: 3
 ```
 
-Upstream providers are managed via an extensible `ReviewerClient` abstraction:
-- **`DeepSeekReviewerClient`**: Supports streaming thinking tokens (`reasoning_content`) and Prompt Cache billing indicators (`prompt_cache_hit_tokens`).
-- **`OpenAIReviewerClient`**: Compatible with OpenAI standard chat completions.
-- **`OllamaReviewerClient`**: Supports offline, zero-telemetry local inference.
-- **`SubagentReviewerClient`**: Dispatches tasks to IDE-native subagents (e.g. Antigravity Reviewer).
-- **`ManualFallbackClient`**: Degrades cleanly to guided developer prompts if all network backends fail.
+Upstream providers are instantiated via the declarative `PROVIDER_PRESETS` registry (`create_reviewer_client`):
+- **`ReviewerClient`**: Unified, vendor-neutral abstract client supporting generic OpenAI-compatible `/chat/completions` streaming.
+- **Generic CoT Protocol Probe**: Extracts reasoning thoughts from `delta.reasoning_content`, `message.reasoning_content`, or `delta.thought` without proprietary branching.
+- **Offline Local Inference**: Full support for `ollama` and `vllm` endpoints without requiring cloud API keys.
+- **Subagent Delegation**: Dispatches tasks to IDE-native subagents (e.g. Antigravity Reviewer).
+- **Graceful Degraded Fallback**: Emits structured degraded cards with `findings == ""` if engine is unconfigured or unavailable, preventing in-context impersonation.
 
 ---
 
@@ -116,6 +116,13 @@ To prevent hallucinated file paths and unverified commands from entering the for
   4. *DoD Command Sanity*: Dry-runs pytest commands (`pytest --collect-only -q -o pythonpath=.`) to ensure test syntax validity and blocks dangerous shell metacharacters (`;`, `&`, `|`, `$`, `` ` ``, `>`, `<`).
 - **Atomic Promotion**: `dev_tasks_promote_draft` validates physical feasibility under cross-process file lock, removes draft annotations, and advances tasks to formal `⬜ 待确认` upon 100% green lint.
 
+### 2.5 Anti-Roleplaying Protocol & Ad-Hoc Consultation (`dev_reviewer_consult`)
+To address the "roleplaying loophole" and remove the requirement of task sheets for spontaneous architectural exploration:
+- **Strict Anti-Roleplaying Invariant**: In-context impersonation of the Reviewer by the everyday executor model is strictly forbidden. When the external Reviewer engine is unconfigured or offline, tools MUST return a structured degraded card with **`findings == ""`**. Never fabricate critique text.
+- **Atomic Ad-Hoc Consultation (`dev_reviewer_consult`)**: Exposes a direct read-only consultation tool supporting 4 modes (`critique`, `evaluate`, `brainstorm`, `audit`) without modifying tasks or creating files.
+- **Read-Only Context Guard**: Enforces workspace path sandbox boundaries, line range window slices, and a strict 12,000-character context budget to prevent token inflation.
+- **Byte-Level Stable Prompt Prefix Caching**: System prompt prefixes are generated with thread-safe caching (`_PREFIX_CACHE`), maximizing upstream LLM Prompt Cache hit rates.
+
 ---
 
 ## 3. Task Lifecycle & Physical State Machine
@@ -145,7 +152,7 @@ stateDiagram-v2
 
 ## 4. MCP Tools Specification
 
-The server exposes 10 atomic FastMCP tools:
+The server exposes 11 atomic FastMCP tools:
 
 1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status.
@@ -157,6 +164,7 @@ The server exposes 10 atomic FastMCP tools:
 8. **`dev_tasks_promote_draft`**: Validates physical feasibility of a draft task and promotes it to formal `[Pending]` state.
 9. **`dev_tasks_archive`**: Retires closed tasks to `archive/` and increments the changelog.
 10. **`dev_tasks_set_bypass`**: Manages temporary time-bound bypass tokens with strict audit logging.
+11. **`dev_reviewer_consult`**: Direct ad-hoc architecture consultation tool with read-only sandbox guards, 4 modes, and real-time streaming thinking logs.
 
 ---
 
@@ -166,17 +174,20 @@ All specifications are verified across the codebase:
 
 | Spec Section | Implementation Files | Key Mechanism |
 | :--- | :--- | :--- |
-| **Review Protocols** | `rules/dev-tasks-discipline.md`<br>`skills/dev-tasks-review/` | Read-only planning constraints and graded quality auditing |
+| **Review Protocols & Anti-Roleplay** | `rules/dev-tasks-discipline.md`<br>`skills/dev-tasks-review/` | Read-only planning constraints, anti-roleplay invariant (`findings == ""`), and triage decision tree |
 | **State Machine** | `server/state_machine.py` | Strict enum transitions, cross-process `FileLock`, Unicode emoji regex normalization |
 | **Six Core Fields** | `server/schema_validator.py` | Bilingual field aliases, markdown block parsing, granularity warnings |
 | **Draft & Feasibility Gate** | `server/schema_validator.py`<br>`server/server.py` | Physical existence checks, dry-run `--collect-only`, atomic `dev_tasks_promote_draft` |
-| **Reviewer Engine** | `server/reviewer_client.py` | Pluggable DeepSeek/OpenAI/Ollama/Subagent/Manual dispatch with Thinking and Prompt Cache |
-| **Observability Sinks** | `server/observability.py` | `RotatingFileSink`, bounded disk writes, 1.0s low-frequency MCP heartbeats, zero stdout pollution |
+| **Reviewer Engine & Presets** | `server/reviewer_engine.py` | Pluggable vendor-neutral `ReviewerClient`, declarative `PROVIDER_PRESETS`, generic CoT probe |
+| **Neutrality Gate** | `server/tests/test_no_vendor_literals_in_core.py` | Automated static source scan gate ensuring zero vendor literals in core modules |
+| **Ad-Hoc Consultation** | `server/consultation.py`<br>`server/server.py` | `dev_reviewer_consult`, read-only path sandbox, 12,000-char budget, stable prefix cache |
+| **Observability Sinks** | `server/reviewer_engine.py`<br>`server/observability.py` | `RotatingFileSink`, bounded disk writes, 1.0s low-frequency MCP heartbeats, zero stdout pollution |
 | **Physical Guards** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py`<br>`scripts/git_pre_commit_guard.py` | `PreToolUse` physical interception (`force_ask`), `PreInvocation` reminder injection, Git pre-commit barrier |
 | **Decoupled Config** | `server/project_config.py`<br>`templates/quench_stack.yaml` | Workspace `.agents/quench_stack.yaml` integration with migration engine |
-| **10 MCP Tools** | `server/server.py` | FastMCP tool registration with bilingual docstrings and argument descriptions |
+| **11 MCP Tools** | `server/server.py` | FastMCP tool registration with bilingual docstrings and argument descriptions |
 | **Cross-Tool Adapters** | `server/adapters/` | Multi-host adapter layer supporting Antigravity, Cursor, and generic CLI |
 | **Rules Exporter** | `scripts/rules_exporter.py` | Exports `.cursorrules` and modern `.cursor/rules/quench-dev-tasks.mdc` |
 | **Unified CLI** | `server/cli.py` | Standalone `quorch status/check/init/archive` terminal command suite |
 | **Installer** | `scripts/install.py`<br>`scripts/init_project.py` | Pre-flight health checks, snapshot backup/rollback, automated IDE configuration |
-| **Test Matrix** | `server/tests/` (167 tests) | 100% passing test coverage across Windows and Ubuntu environments |
+| **Test Matrix** | `server/tests/` (230 tests) | 100% passing test coverage across Windows and Ubuntu environments |
+
