@@ -106,3 +106,26 @@ When the agile runner model calls `dev_tasks_escalate` to awaken the Reviewer:
 1. Thoroughly read files provided in `context_files` and the cited reason for escalation.
 2. Formulate at least two viable options with clear trade-offs (Pros & Cons) for developer decision.
 3. Once the path is approved, decompose it into standard DevTasks.
+
+---
+
+## 5. Review Channel Triage & Degraded Fallback (审查分流与降级卡片)
+
+### 分流决策树 (Consult vs Refine vs Escalate)
+1. 只想知道"这样设计行不行" / 想被挑刺 / 比选方案 → `dev_reviewer_consult`（无需任何 DevTask）；
+2. 已有草案但六字段不达标 / 需拆分 / 需重估可行性 → `dev_tasks_refine_spec`；
+3. 执行中反复失败 / 需要架构层面重新裁决 → `dev_tasks_escalate`；
+4. 引擎不可用 → 输出 degraded 卡片并停机，**不得**在本会话内自行给出审查结论。
+
+### 显式降级卡片样例 (Degraded Card Example)
+当 `dev_reviewer_consult` 返回降级响应时，必须如实转呈给开发者，严禁由当前执行模型就地伪装 Reviewer 输出假评审：
+
+```json
+{
+  "status": "degraded",
+  "degraded_reason": "reviewer_not_configured",
+  "findings": "",
+  "handoff_prompt": "审查引擎未配置或当前离线。请开启新会话并切换到旗舰 Reviewer 模型后重新提问；当前会话的实现模型不会、也不得代行架构审查职责。"
+}
+```
+

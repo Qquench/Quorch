@@ -442,7 +442,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 2.2 ✅ 已确认 — 硬化主模型防角色扮演红线与无引擎显式降级卡片 (Anti-Role-Playing Governance)
+### 任务 2.2 ✔️ 已完成 — 硬化主模型防角色扮演红线与无引擎显式降级卡片 (Anti-Role-Playing Governance)
 
 #### 【涉及文件】
 

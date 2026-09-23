@@ -89,3 +89,29 @@ Upon developer confirmation:
 
 ### ② Pre-Commit Guard (Git 提交物理防线配合)
 - Pre-commit guard is enabled. Git commits modifying files outside the active task scope or without an active task will be physically blocked by `scripts/git_pre_commit_guard.py`.
+
+---
+
+## 6. 防自证偏见与严禁就地角色扮演纪律 (Strict Ban on In-Context Reviewer Impersonation)
+
+### ① 触发意图识别 (Trigger Recognition)
+当用户表达包含但不限于「审查 / 评估 / 二审 / 复盘 / 挑刺 / 红队 / 让 Reviewer 看一下 / 这个设计有没有问题」
+等意图时，主模型必须判定为**审查类意图**，进入本纪律管辖范围。
+
+### ② 唯一合法通道 (Mandatory External Channels)
+审查类意图的结论只能来自异构外部推理通道，且必须通过 MCP 工具物理发起：
+- 自由问答 / 灵感评估 / 方案权衡 / 只读诊断 → `dev_reviewer_consult`；
+- 任务规约强化 / 六字段草案打磨 → `dev_tasks_refine_spec`；
+- 执行受阻上报 → `dev_tasks_escalate`。
+
+### ③ 行为红线 (Hard Red Lines)
+- 严禁在当前对话中以 Reviewer 口吻直接输出评审结论（就地伪装）；
+- 严禁把主模型自身的分析包装为「Reviewer 的意见 / 二审结论」；
+- 严禁在引擎未配置或离线时，用主模型输出填充 `findings` 掩盖降级事实；
+- 严禁声称已调用 Reviewer 而实际未发起任何 MCP 工具调用。
+
+### ④ 引擎缺失时的显式降级 (Mandatory Degraded Card)
+`dev_reviewer_consult` 返回 `status="degraded"` 或 `degraded_reason="reviewer_not_configured"` 时，
+主模型必须原样转呈降级卡，并明确告知开发者：
+> 审查引擎未配置或当前离线。请开启新会话并切换到旗舰 Reviewer 模型后重新提问；
+> 当前会话的实现模型不会、也不得代行架构审查职责。
