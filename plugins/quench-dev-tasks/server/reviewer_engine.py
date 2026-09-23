@@ -3,32 +3,41 @@
 
 负责连接高阶推理审查模型 (Reviewer)，组装高命中率的静态架构上下文缓存前缀，
 并为任务规约强化 (Spec Refine) 与架构疑难升级 (Escalate) 提供确定性分析能力。
-具备非阻塞异步线程卸载 (acomplete)、企业网络异常防御与总耗时预算熔断。
+具备非阻塞异步线程卸载 (acomplete/stream_chat)、企业网络异常防御与总耗时预算熔断。
 """
 from __future__ import annotations
 
+import codecs
 import functools
 import hashlib
 import json
 import os
+import queue
 import random
+import re
 import sys
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import warnings
+from dataclasses import dataclass
 from datetime import datetime, timezone
-import re
 from typing import (
     Any,
+    AsyncIterator,
     Dict,
     List,
     Literal,
+    Mapping,
     NamedTuple,
     Optional,
     Protocol,
     TextIO,
     Tuple,
     TypedDict,
+    Union,
 )
 
 import anyio
@@ -49,17 +58,39 @@ _REVIEWER_LIMITER = anyio.CapacityLimiter(4)
 MAX_RESPONSE_BYTES = 1024 * 1024  # 1 MiB 响应体积硬上限
 
 
-class ReviewerEngineError(Exception):
-    """Reviewer Engine 基础异常。"""
+# ---- 异常体系（厂商中立，禁止硬编码厂商字面量）----
+class ReviewerError(RuntimeError):
+    """Reviewer 体系通用基类异常。"""
     pass
 
 
-class ReviewerEngineUnavailableError(ReviewerEngineError):
+class ReviewerAuthError(ReviewerError):
+    """身份鉴权或访问受限异常 (HTTP 401 / 403)。不可重试。"""
+    pass
+
+
+class ReviewerTimeoutError(ReviewerError):
+    """通信或执行超时异常。"""
+    pass
+
+
+class ReviewerNotConfiguredError(ReviewerError):
+    """Reviewer 引擎未配置或不可用。不可重试。"""
+    pass
+
+
+# 向后兼容别名与继承（保证现有捕获语句 100% 兼容）
+class ReviewerEngineError(ReviewerError):
+    """Reviewer Engine 基础异常 (向后兼容别名)。"""
+    pass
+
+
+class ReviewerEngineUnavailableError(ReviewerNotConfiguredError, ReviewerEngineError):
     """Reviewer 引擎不可用（未配置或缺少 API Key）。"""
     pass
 
 
-class ReviewerAuthenticationError(ReviewerEngineError):
+class ReviewerAuthenticationError(ReviewerAuthError, ReviewerEngineError):
     """身份鉴权失败（401 Unauthorized）。不可重试。"""
     pass
 
@@ -72,6 +103,24 @@ class ReviewerBadRequestError(ReviewerEngineError):
 class ReviewerRateLimitError(ReviewerEngineError):
     """触发流控限制（429 Too Many Requests）。可重试。"""
     pass
+
+
+# ---- 数据结构 ----
+@dataclass(frozen=True)
+class UsageSnapshot:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0          # Prompt Cache 命中（跨厂商归一化）
+    reasoning_tokens: int = 0
+    provider_label: str = "generic"  # 运行时注入，禁止模块级厂商常量
+
+
+@dataclass(frozen=True)
+class StreamChunk:
+    text: str = ""
+    reasoning: str = ""
+    usage: Optional[UsageSnapshot] = None
+    done: bool = False
 
 
 class ThoughtChunk(NamedTuple):
@@ -87,6 +136,137 @@ class ProgressSink(Protocol):
 
 
 _SECRET_REDACTION_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{20,}")
+
+
+# ---- 通用探针（纯函数，无副作用，绝不抛异常）----
+def _dig(payload: Any, *path: str) -> Any:
+    """安全逐级取值纯函数，任一层缺失或非 Mapping 即返回 None。"""
+    curr = payload
+    for key in path:
+        if not isinstance(curr, Mapping):
+            return None
+        curr = curr.get(key)
+        if curr is None:
+            return None
+    return curr
+
+
+def extract_reasoning_text(payload: Any) -> str:
+    """从上游响应 payload 中以通用探针提取思考链/推理文本。纯函数，无副作用，绝不抛异常。"""
+    if not isinstance(payload, Mapping):
+        return ""
+
+    target = payload
+    choices = payload.get("choices")
+    if isinstance(choices, list) and len(choices) > 0 and isinstance(choices[0], Mapping):
+        target = choices[0]
+
+    paths: List[Tuple[str, ...]] = [
+        ("delta", "reasoning_content"),
+        ("delta", "thought"),
+        ("delta", "reasoning"),
+        ("message", "reasoning_content"),
+        ("message", "thought"),
+        ("message", "reasoning"),
+        ("reasoning_content",),
+        ("thought",),
+        ("reasoning",),
+    ]
+
+    for path in paths:
+        val = _dig(target, *path)
+        if isinstance(val, str) and val:
+            return val
+
+    if target is not payload:
+        for path in paths:
+            val = _dig(payload, *path)
+            if isinstance(val, str) and val:
+                return val
+
+    return ""
+
+
+def extract_cached_tokens(payload: Any) -> int:
+    """提取 Prompt Cache 命中 token 数，依次探测 4 种跨厂商形态。纯函数，无副作用，绝不抛异常。"""
+    if not isinstance(payload, Mapping):
+        return 0
+
+    usage_dict = payload.get("usage")
+    target = usage_dict if isinstance(usage_dict, Mapping) else payload
+
+    candidates: List[Tuple[str, ...]] = [
+        ("prompt_cache_hit_tokens",),
+        ("prompt_tokens_details", "cached_tokens"),
+        ("cache_read_input_tokens",),
+        ("cached_tokens",),
+    ]
+
+    for path in candidates:
+        val = _dig(target, *path)
+        if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+            return val
+        if target is not payload:
+            val_root = _dig(payload, "usage", *path)
+            if isinstance(val_root, int) and not isinstance(val_root, bool) and val_root >= 0:
+                return val_root
+
+    return 0
+
+
+def extract_usage(payload: Any, provider_label: str = "generic") -> UsageSnapshot:
+    """提取归一化用量快照 UsageSnapshot。纯函数，无副作用，绝不抛异常。"""
+    if not isinstance(payload, Mapping):
+        return UsageSnapshot(provider_label=provider_label)
+
+    usage_dict = payload.get("usage")
+    u = usage_dict if isinstance(usage_dict, Mapping) else payload
+
+    prompt_tokens = 0
+    completion_tokens = 0
+    reasoning_tokens = 0
+
+    pt = u.get("prompt_tokens")
+    if isinstance(pt, int) and not isinstance(pt, bool):
+        prompt_tokens = max(0, pt)
+
+    ct = u.get("completion_tokens")
+    if isinstance(ct, int) and not isinstance(ct, bool):
+        completion_tokens = max(0, ct)
+
+    rt = _dig(u, "completion_tokens_details", "reasoning_tokens")
+    if not (isinstance(rt, int) and not isinstance(rt, bool)):
+        rt = u.get("reasoning_tokens")
+    if isinstance(rt, int) and not isinstance(rt, bool):
+        reasoning_tokens = max(0, rt)
+
+    cached_tokens = extract_cached_tokens(payload)
+
+    return UsageSnapshot(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cached_tokens=cached_tokens,
+        reasoning_tokens=reasoning_tokens,
+        provider_label=provider_label,
+    )
+
+
+def _is_local_endpoint(base_url: str) -> bool:
+    """判断端点是否为本地/私网回路。"""
+    try:
+        parsed = urllib.parse.urlparse(base_url)
+        host = (parsed.hostname or "").lower()
+        return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+    except Exception:
+        return False
+
+
+def _normalize_chat_endpoint(base_url: str) -> str:
+    """幂等拼接 /chat/completions 端点路径。"""
+    clean_url = (base_url or "").strip().rstrip("/")
+    if clean_url.endswith("/chat/completions"):
+        return clean_url
+    return f"{clean_url}/chat/completions"
 
 
 class RotatingFileSink:
@@ -196,7 +376,7 @@ class AdaptiveHeartbeatSink:
     """Low-frequency heartbeat pulse adapter (1Hz / 1000ms interval).
     Priority (B5):
     1. mcp_context (progress / info)
-    2. isatty(stderr) -> single-line dynamic overwrite via \r
+    2. isatty(stderr) -> single-line dynamic overwrite via \\r
     3. silent (no-op)
     Zero stdout pollution (P0#1 invariant).
     """
@@ -345,7 +525,7 @@ def _read_windows_env_var(var_name: str) -> Optional[str]:
 class PromptAssembler:
     """静态系统提示词组装器。
     
-    ★ 核心防线：为保障 DeepSeek Prompt Cache 极致命中率，
+    ★ 核心防线：为保障 Prompt Cache 极致命中率，
     本组装器组装的 System Prompt 必须保持绝对纯洁，严禁拼接任何动态时间戳、动态会话 ID 或随机数。
     """
 
@@ -418,18 +598,76 @@ class PromptAssembler:
         return [{"role": "system", "content": static_prefix}, *dynamic_turns]
 
 
-class DeepSeekClient:
-    """基于标准库与 AnyIO 实现的工业级 DeepSeek API 客户端。
-    具备异步非阻塞调度 (acomplete)、退避重试、企业网络防崩解析与总耗时预算熔断。
+class ReviewerClient:
+    """基于标准库与 AnyIO 实现的工业级厂商中立 Reviewer 客户端。
+    支持任意 OpenAI 兼容的 /chat/completions 端点（DeepSeek、Ollama、vLLM、LM Studio、Azure、OpenAI 等）。
+    具备异步非阻塞调度 (acomplete/stream_chat)、退避重试、跨厂商思考链探针与总耗时预算熔断。
     """
 
-    def __init__(self, config: ReviewerEngineConfig):
-        self.config = config
+    def __init__(
+        self,
+        config: Optional[ReviewerEngineConfig] = None,
+        *,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key_env: Optional[str] = None,
+        provider_label: str = "generic",
+        timeout_seconds: int = 60,
+        max_retries: int = 2,
+        thinking: bool = True,
+        reasoning_effort: Literal["low", "medium", "high"] = "high",
+        sink: Optional[ProgressSink] = None,
+    ):
+        if config is not None:
+            self.config = config
+            self.base_url = (base_url or getattr(config, "base_url", "")).strip()
+            self.model = model or getattr(config, "model", "")
+            self.api_key_env = api_key_env if api_key_env is not None else getattr(config, "api_key_env", None)
+            prov = getattr(config, "provider", None)
+            self.provider_label = provider_label if provider_label != "generic" else (prov or "generic")
+            self.timeout_seconds = timeout_seconds if timeout_seconds != 60 else getattr(config, "timeout_seconds", 60)
+            self.max_retries = max_retries if max_retries != 2 else getattr(config, "max_retries", 2)
+            self.thinking = thinking if thinking is not True else getattr(config, "thinking", True)
+            self.reasoning_effort = reasoning_effort if reasoning_effort != "high" else getattr(config, "reasoning_effort", "high")
+        else:
+            self.base_url = (base_url or "").strip()
+            self.model = model or ""
+            self.api_key_env = api_key_env
+            self.provider_label = provider_label
+            self.timeout_seconds = timeout_seconds
+            self.max_retries = max_retries
+            self.thinking = thinking
+            self.reasoning_effort = reasoning_effort
+            self.config = ReviewerEngineConfig(
+                provider=self.provider_label,
+                model=self.model,
+                api_key_env=self.api_key_env,
+                base_url=self.base_url,
+                timeout_seconds=self.timeout_seconds,
+                max_retries=self.max_retries,
+                thinking=self.thinking,
+                reasoning_effort=self.reasoning_effort,
+            )
+        self.sink = sink
 
     def resolve_api_key(self) -> Optional[str]:
         """按优先级解析 API Key：指定变量名 -> 默认候选 -> Windows 注册表穿透。"""
-        target_var = self.config.api_key_env or "DEEPSEEK_API_KEY_Quench"
-        candidates = [target_var, "DEEPSEEK_API_KEY_Quench", "DEEPSEEK_API_KEY"]
+        if self.api_key_env is None and _is_local_endpoint(self.base_url):
+            return None
+
+        candidates: List[str] = []
+        if self.api_key_env:
+            candidates.append(self.api_key_env)
+
+        if self.provider_label and self.provider_label not in ("generic", "none"):
+            normalized_prov = self.provider_label.upper().replace("-", "_")
+            candidates.append(f"{normalized_prov}_API_KEY_QUENCH")
+            candidates.append(f"{normalized_prov}_API_KEY")
+
+        candidates.append("OPENAI_API_KEY")
+        candidates.append("DEEPSEEK_API_KEY_Quench")  # vendor-literal: allow
+        candidates.append("DEEPSEEK_API_KEY")  # vendor-literal: allow
+
         seen = set()
         unique_candidates = [c for c in candidates if not (c in seen or seen.add(c))]
 
@@ -448,10 +686,10 @@ class DeepSeekClient:
         return None
 
     def is_available(self) -> bool:
-        """检查 Reviewer 引擎是否就绪。支持通用 OpenAI 兼容端点与本地 Ollama。"""
-        if self.config.provider in ("none", "", False):
+        """检查 Reviewer 引擎是否就绪。支持通用 OpenAI 兼容端点与本地端点。"""
+        if self.provider_label in ("none", "", False):
             return False
-        if self.config.provider == "ollama":
+        if self.provider_label == "ollama" or _is_local_endpoint(self.base_url):
             return True
         return bool(self.resolve_api_key())
 
@@ -480,15 +718,15 @@ class DeepSeekClient:
         soft_token_ceiling: int = 64000,
         soft_time_ceiling_s: float = 600.0,
     ) -> Dict[str, Any]:
-        """向 DeepSeek API 发起同步请求，具备精细化重试、有界读取、实时思考流落盘、心跳与总耗时预算熔断。"""
+        """向 Reviewer API 发起同步请求，具备精细化重试、有界读取、实时思考流落盘、心跳与总耗时预算熔断。"""
         if not self.is_available():
             raise ReviewerEngineUnavailableError(
-                f"Reviewer 引擎未就绪 (provider='{self.config.provider}', api_key_env='{self.config.api_key_env}')"
+                f"Reviewer 引擎未就绪 (provider='{self.provider_label}', api_key_env='{self.api_key_env}')"
             )
 
         api_key = self.resolve_api_key()
-        endpoint = f"{self.config.base_url.rstrip('/')}/chat/completions"
-        per_call_timeout = float(timeout or self.config.timeout_seconds)
+        endpoint = _normalize_chat_endpoint(self.base_url)
+        per_call_timeout = float(timeout or self.timeout_seconds)
 
         # 整体总耗时预算（Wall-clock Total Deadline），防止多次重试导致 MCP 请求无限挂起
         deadline_budget = total_deadline_s or (per_call_timeout * 2.5)
@@ -512,17 +750,17 @@ class DeepSeekClient:
             )
 
         payload: Dict[str, Any] = {
-            "model": self.config.model,
+            "model": self.model,
             "messages": messages,
             "stream": stream,
         }
-        if self.config.thinking:
+        if self.thinking:
             payload["thinking"] = {"type": "enabled"}
-            if self.config.reasoning_effort:
-                payload["reasoning_effort"] = self.config.reasoning_effort
+            if self.reasoning_effort:
+                payload["reasoning_effort"] = self.reasoning_effort
 
         data_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        max_attempts = 1 + max(0, self.config.max_retries)
+        max_attempts = 1 + max(0, self.max_retries)
 
         try:
             for attempt in range(max_attempts):
@@ -535,14 +773,17 @@ class DeepSeekClient:
 
                 effective_timeout = min(per_call_timeout, max(1.0, remaining))
 
+                req_headers: Dict[str, str] = {
+                    "Content-Type": "application/json",
+                    "User-Agent": f"Quorch-Reviewer-Engine/1.0 ({self.provider_label})",
+                }
+                if api_key:
+                    req_headers["Authorization"] = f"Bearer {api_key}"
+
                 req = urllib.request.Request(
                     url=endpoint,
                     data=data_bytes,
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "User-Agent": "Quorch-Reviewer-Engine/1.0",
-                    },
+                    headers=req_headers,
                     method="POST",
                 )
 
@@ -577,8 +818,8 @@ class DeepSeekClient:
                                     if choice.get("finish_reason"):
                                         finish_reason = choice["finish_reason"]
 
-                                    delta = choice.get("delta", {})
-                                    r_chunk = delta.get("reasoning_content") or ""
+                                    delta = choice.get("delta", {}) if isinstance(choice, Mapping) else {}
+                                    r_chunk = extract_reasoning_text(choice) or extract_reasoning_text(chunk_json)
                                     c_chunk = delta.get("content") or ""
 
                                     if r_chunk:
@@ -613,7 +854,7 @@ class DeepSeekClient:
                                         for s in sinks:
                                             s.on_heartbeat(tokens_out, elapsed_s)
 
-                                    # Check soft ceilings (B6: 64k tokens / 600s)
+                                    # Check soft ceilings (64k tokens / 600s)
                                     if tokens_out >= soft_token_ceiling or elapsed_s >= soft_time_ceiling_s:
                                         truncated = True
                                         finish_reason = "length"
@@ -705,14 +946,21 @@ class DeepSeekClient:
                                 )
 
                             choice = choices[0]
-                            message = choice.get("message", {})
+                            message = choice.get("message", {}) if isinstance(choice, Mapping) else {}
                             content = message.get("content", "")
-                            reasoning_content = message.get("reasoning_content", "")
-                            finish_reason = choice.get("finish_reason", "stop")
+                            reasoning_content = extract_reasoning_text(choice) or extract_reasoning_text(body_json) or message.get("reasoning_content", "")
+                            finish_reason = choice.get("finish_reason", "stop") if isinstance(choice, Mapping) else "stop"
                             usage = body_json.get("usage", {})
+                            if isinstance(usage, Mapping) and "prompt_cache_hit_tokens" not in usage:
+                                cached_tok = extract_cached_tokens(body_json)
+                                if cached_tok > 0:
+                                    usage = dict(usage)
+                                    usage["prompt_cache_hit_tokens"] = cached_tok
 
                             elapsed_s = time.monotonic() - start_time
-                            total_tokens = usage.get("total_tokens") or (len(content) + len(reasoning_content)) // 4
+                            total_tokens = usage.get("total_tokens") if isinstance(usage, Mapping) else None
+                            if total_tokens is None:
+                                total_tokens = (len(content) + len(reasoning_content)) // 4
 
                             if sinks:
                                 if reasoning_content:
@@ -787,17 +1035,23 @@ class DeepSeekClient:
 
                     # 401 鉴权失败：单次快速失败，严禁盲目重试
                     if e.code == 401:
+                        key_display = self.api_key_env or "API_KEY"
                         raise ReviewerAuthenticationError(
-                            f"[HTTP 401 Unauthorized] DeepSeek API 凭据鉴权失败: {err_body}"
+                            f"[HTTP 401 Unauthorized] Reviewer API ({self.provider_label}) 鉴权失败：请检查环境变量 {key_display} 是否已导出: {err_body}"
                         )
                     # 400 参数非法：单次快速失败，严禁重试
                     elif e.code == 400:
                         raise ReviewerBadRequestError(
-                            f"[HTTP 400 Bad Request] DeepSeek 请求参数非法: {err_body}"
+                            f"[HTTP 400 Bad Request] Reviewer API ({self.provider_label}) 请求参数非法: {err_body}"
                         )
                     # 403 / 404：无权限或路由不存在，直接失败
-                    elif e.code in (403, 404):
-                        raise ReviewerEngineError(f"[HTTP {e.code}] 接口调用失败: {err_body}")
+                    elif e.code == 403:
+                        key_display = self.api_key_env or "API_KEY"
+                        raise ReviewerAuthenticationError(
+                            f"[HTTP 403 Forbidden] Reviewer API ({self.provider_label}) 访问受限：请检查权限或凭据 {key_display}: {err_body}"
+                        )
+                    elif e.code == 404:
+                        raise ReviewerEngineError(f"[HTTP 404 Not Found] Reviewer API ({self.provider_label}) 路由端点不存在: {err_body}")
 
                     # 429（流控）或 5xx（服务端错误）：支持有限次数指数退避 + 抖动重试
                     if (e.code == 429 or e.code >= 500) and attempt < max_attempts - 1:
@@ -811,10 +1065,9 @@ class DeepSeekClient:
                         time.sleep(backoff_sec)
                         continue
 
-                    raise ReviewerEngineError(f"[HTTP {e.code}] 超过最大重试次数: {err_body}")
+                    raise ReviewerEngineError(f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 超过最大重试次数: {err_body}")
 
                 except (urllib.error.URLError, TimeoutError, OSError) as e:
-                    # SSL 证书失效：快速失败，避免无谓重试
                     err_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in err_str or "certificate verify failed" in err_str.lower():
                         raise ReviewerEngineError(f"[SSL Error] 证书校验失败: {err_str}")
@@ -827,7 +1080,6 @@ class DeepSeekClient:
 
                     raise ReviewerEngineError(f"[Network Error] 网络通信超时或异常: {e}")
 
-            # 正常情况下由循环内返回或抛出，此处为类型系统安全兜底
             raise ReviewerEngineError("[Fatal] 审查客户端请求异常退出")
         finally:
             if sinks:
@@ -837,6 +1089,188 @@ class DeepSeekClient:
                             s.close()
                         except Exception:
                             pass
+
+    async def stream_chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        session_id: str | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """异步消费通用 /chat/completions SSE 推理与思考流。
+        基于探针提取 reasoning 与跨厂商 usage，单行 JSON 容错，带 1MB 单行截断防护与连接释放。
+        """
+        if not self.is_available():
+            key_display = self.api_key_env or "API_KEY"
+            raise ReviewerNotConfiguredError(
+                f"Reviewer 引擎未就绪 (provider='{self.provider_label}', api_key_env='{key_display}')"
+            )
+
+        endpoint = _normalize_chat_endpoint(self.base_url)
+        api_key = self.resolve_api_key()
+
+        messages: List[Dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+        }
+        if self.thinking:
+            payload["thinking"] = {"type": "enabled"}
+            if self.reasoning_effort:
+                payload["reasoning_effort"] = self.reasoning_effort
+
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "User-Agent": f"Quorch-Reviewer-Engine/1.0 ({self.provider_label})",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        data_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        max_attempts = 1 + max(0, self.max_retries)
+        chunk_queue: queue.Queue = queue.Queue(maxsize=100)
+        stop_event = threading.Event()
+        MAX_LINE_BYTES = 1024 * 1024  # 1 MiB 单行上限
+
+        def _stream_worker() -> None:
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            for attempt in range(max_attempts):
+                if stop_event.is_set():
+                    break
+                req = urllib.request.Request(
+                    url=endpoint,
+                    data=data_bytes,
+                    headers=headers,
+                    method="POST",
+                )
+                resp = None
+                try:
+                    resp = urllib.request.urlopen(req, timeout=float(self.timeout_seconds))
+                    line_buffer = bytearray()
+                    while not stop_event.is_set():
+                        raw_byte = resp.read(8192)
+                        if not raw_byte:
+                            break
+                        line_buffer.extend(raw_byte)
+                        while b"\n" in line_buffer:
+                            line_end = line_buffer.index(b"\n")
+                            raw_line = bytes(line_buffer[:line_end])
+                            del line_buffer[: line_end + 1]
+
+                            if len(raw_line) > MAX_LINE_BYTES:
+                                raw_line = raw_line[:MAX_LINE_BYTES]
+
+                            line = decoder.decode(raw_line).strip()
+                            if not line or line.startswith(":"):
+                                continue
+                            if line.startswith("data:"):
+                                data_str = line[5:].strip()
+                                if data_str == "[DONE]":
+                                    chunk_queue.put(StreamChunk(done=True))
+                                    return
+
+                                try:
+                                    chunk_json = json.loads(data_str)
+                                except Exception:
+                                    continue
+
+                                choices = chunk_json.get("choices") or []
+                                r_chunk = extract_reasoning_text(chunk_json)
+                                c_chunk = ""
+                                if choices and isinstance(choices[0], Mapping):
+                                    c_chunk = choices[0].get("delta", {}).get("content") or ""
+
+                                usage_snapshot = None
+                                if "usage" in chunk_json and chunk_json["usage"]:
+                                    usage_snapshot = extract_usage(chunk_json, provider_label=self.provider_label)
+
+                                if r_chunk or c_chunk or usage_snapshot:
+                                    chunk_queue.put(
+                                        StreamChunk(
+                                            text=c_chunk,
+                                            reasoning=r_chunk,
+                                            usage=usage_snapshot,
+                                            done=False,
+                                        )
+                                    )
+                    chunk_queue.put(StreamChunk(done=True))
+                    return
+
+                except urllib.error.HTTPError as e:
+                    err_body = ""
+                    try:
+                        raw_err = e.read(1000)
+                        err_body = raw_err.decode("utf-8", errors="replace")
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            e.close()
+                        except Exception:
+                            pass
+
+                    if e.code in (401, 403):
+                        key_display = self.api_key_env or "API_KEY"
+                        chunk_queue.put(
+                            ReviewerAuthError(
+                                f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 鉴权失败：请检查环境变量 {key_display} 是否已导出: {err_body}"
+                            )
+                        )
+                        return
+                    if e.code == 400:
+                        chunk_queue.put(
+                            ReviewerError(
+                                f"[HTTP 400 Bad Request] Reviewer API ({self.provider_label}) 请求被拒：{err_body}"
+                            )
+                        )
+                        return
+
+                    if (e.code == 429 or e.code >= 500) and attempt < max_attempts - 1:
+                        time.sleep(1.0 * (2 ** attempt))
+                        continue
+
+                    chunk_queue.put(ReviewerError(f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 请求失败: {err_body}"))
+                    return
+
+                except (TimeoutError, urllib.error.URLError, OSError) as e:
+                    if isinstance(e, TimeoutError) or "timed out" in str(e).lower():
+                        if attempt >= max_attempts - 1:
+                            chunk_queue.put(ReviewerTimeoutError(f"Reviewer API ({self.provider_label}) 通信超时: {e}"))
+                            return
+                    else:
+                        if attempt >= max_attempts - 1:
+                            chunk_queue.put(ReviewerError(f"Reviewer API ({self.provider_label}) 网络通信异常: {e}"))
+                            return
+                    time.sleep(1.0 * (2 ** attempt))
+                finally:
+                    if resp is not None:
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+
+            chunk_queue.put(StreamChunk(done=True))
+
+        worker_thread = threading.Thread(target=_stream_worker, daemon=True)
+        worker_thread.start()
+
+        try:
+            while True:
+                item = await anyio.to_thread.run_sync(chunk_queue.get)
+                if isinstance(item, Exception):
+                    raise item
+                if isinstance(item, StreamChunk):
+                    yield item
+                    if item.done:
+                        break
+        finally:
+            stop_event.set()
 
     async def acomplete(
         self,
@@ -870,7 +1304,38 @@ class DeepSeekClient:
             return await anyio.to_thread.run_sync(fn, abandon_on_cancel=True)
 
 
-class ReviewerClient(DeepSeekClient):
-    """Generic OpenAI-compatible Reviewer Client supporting any standard /chat/completions provider."""
-    pass
+# ---- PEP 562 兼容层（模块级）----
+def __getattr__(name: str) -> Any:
+    """PEP 562 兼容别名：平滑迁移 DeepSeekClient 至 ReviewerClient。"""
+    if name == "DeepSeekClient":  # vendor-literal: allow
+        warnings.warn("DeepSeekClient 已弃用，请改用 ReviewerClient", DeprecationWarning, stacklevel=2)  # vendor-literal: allow
+        return ReviewerClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
+
+__all__ = [
+    "ReviewerClient",
+    "DeepSeekClient",  # vendor-literal: allow
+    "UsageSnapshot",
+    "StreamChunk",
+    "extract_reasoning_text",
+    "extract_cached_tokens",
+    "extract_usage",
+    "ReviewerError",
+    "ReviewerAuthError",
+    "ReviewerTimeoutError",
+    "ReviewerNotConfiguredError",
+    "ReviewerEngineError",
+    "ReviewerEngineUnavailableError",
+    "ReviewerAuthenticationError",
+    "ReviewerBadRequestError",
+    "ReviewerRateLimitError",
+    "ThoughtChunk",
+    "ProgressSink",
+    "RotatingFileSink",
+    "AdaptiveHeartbeatSink",
+    "PromptAssembler",
+    "compute_repetition_score",
+    "log_telemetry_event",
+    "_read_windows_env_var",
+]

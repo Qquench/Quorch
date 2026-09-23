@@ -10,7 +10,7 @@
 
 ## 批次 1 (Batch 1): 厂商中立客户端重构与硬编码清洗
 
-### 任务 1.1 ✅ 已确认 — 将 DeepSeekClient 重构为厂商中立 ReviewerClient 并抽象通用推理草稿协议探针 (Vendor-Neutral ReviewerClient & Generic CoT Probe)
+### 任务 1.1 ✔️ 已完成 — 将 DeepSeekClient 重构为厂商中立 ReviewerClient 并抽象通用推理草稿协议探针 (Vendor-Neutral ReviewerClient & Generic CoT Probe)
 
 #### 【涉及文件】
 
