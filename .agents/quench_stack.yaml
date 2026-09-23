@@ -44,3 +44,15 @@ reviewer_engine:
   thinking: true
   reasoning_effort: "high"
   timeout_seconds: 180
+  max_total_injection_chars: 40000
+  default_window_lines: 200
+  max_lines_per_slice: 600
+
+observability:
+  verdict_path: ".agents/logs/reviewer/verdicts.jsonl"
+  max_record_bytes: 16384
+  stream_in_subagent: false
+
+governance:
+  manifest_path: ".agents/.quorch/manifest.json"
+  lease_ttl_seconds: 300

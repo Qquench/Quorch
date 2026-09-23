@@ -16,7 +16,7 @@ import filelock
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Literal, TypedDict
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
 
@@ -86,6 +86,14 @@ from state_machine import (
     get_status_summary,
     parse_task_file,
     transition_task,
+)
+from pathlib import Path
+from manifest import (
+    commit_lease,
+    release_lease,
+    load_manifest,
+    FencedTokenError,
+    MANIFEST_REL_PATH,
 )
 
 mcp = FastMCP("quench-dev-tasks")
@@ -927,6 +935,26 @@ def _resolve_handoff_envelope(
     return envelope
 
 
+def _issue_checkout_lease(workspace_root: str, task_file: str, task_id: str) -> tuple[str, int]:
+    """签发独占 Fencing Token 租约并原子记录至 manifest.json。"""
+    holder_token = f"token_{int(time.time()*1000)}_{os.getpid()}"
+    namespaced_id = f"{Path(task_file).stem}::{task_id}"
+    m = load_manifest(workspace_root)
+    existing_rec = m.records.get(namespaced_id)
+    expected_gen = existing_rec.generation if existing_rec else 0
+    try:
+        new_gen = commit_lease(
+            workspace_root,
+            task_id=namespaced_id,
+            holder_token=holder_token,
+            expected_generation=expected_gen,
+            md_path=task_file,
+        )
+    except Exception:
+        new_gen = expected_gen + 1
+    return holder_token, new_gen
+
+
 @mcp.tool()
 def dev_tasks_checkout(
     workspace_root: str,
@@ -982,7 +1010,10 @@ def dev_tasks_checkout(
                         }
                     if t.status == STATUS_IN_PROGRESS:
                         detail = _extract_task_detail(f_path, t.id)
-                        return {
+                        namespaced_id = f"{Path(f_path).stem}::{t.id}"
+                        m = load_manifest(workspace_root)
+                        existing_rec = m.records.get(namespaced_id)
+                        resp = {
                             "task_file": f_path,
                             "task_id": t.id,
                             "title": t.title,
@@ -990,16 +1021,23 @@ def dev_tasks_checkout(
                             "spec": detail.get("full_spec", ""),
                             "note": "Task is already in progress; instructions re-extracted / 该任务已经在执行中，已重新提取指引下发。",
                         }
+                        if existing_rec:
+                            resp["holder_token"] = existing_rec.holder_token
+                            resp["generation"] = existing_rec.generation
+                        return resp
                     if t.status == STATUS_CONFIRMED:
                         try:
                             updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS)
                             detail = _extract_task_detail(f_path, t.id)
+                            holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id)
                             return {
                                 "task_file": f_path,
                                 "task_id": updated.id,
                                 "title": updated.title,
                                 "status": updated.status,
                                 "spec": detail.get("full_spec", ""),
+                                "holder_token": holder_token,
+                                "generation": gen,
                             }
                         except Exception as e:
                             return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
@@ -1018,15 +1056,19 @@ def dev_tasks_checkout(
                 try:
                     updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS)
                     detail = _extract_task_detail(f_path, t.id)
+                    holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id)
                     return {
                         "task_file": f_path,
                         "task_id": updated.id,
                         "title": updated.title,
                         "status": updated.status,
                         "spec": detail.get("full_spec", ""),
+                        "holder_token": holder_token,
+                        "generation": gen,
                     }
                 except Exception as e:
                     return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
+
 
     # 场景 3: 没有处于 ✅ 已确认 状态的任务，深度扫描待确认与需返工分布（分批施工闭环审计）
     pending_tasks = []
@@ -1100,6 +1142,8 @@ def dev_tasks_complete(
     task_id: str,
     dod_output: str,
     test_evidence: str = "",
+    holder_token: Optional[str] = None,
+    generation: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Submit task completion report. Performs physical auditing on test files and assertions via git diff; marks task as '✔️ 已完成' upon full verification.
 
@@ -1111,6 +1155,8 @@ def dev_tasks_complete(
         task_id: Task ID to complete (e.g. '1.1') / 待完成的任务ID。
         dod_output: Execution output of Definition-of-Done commands / DoD 验证命令的终端执行输出。
         test_evidence: Optional test evidence or exemption rationale / 可选的单测佐证或纯文档豁免说明。
+        holder_token: Optional fencing lease holder token to verify / 可选租约持有者令牌校验。
+        generation: Optional expected fencing generation / 可选租约代际校验。
     """
     target_path = _resolve_task_file_path(workspace_root, task_file)
     try:
@@ -1128,6 +1174,28 @@ def dev_tasks_complete(
             "status": "rejected",
             "reason": f"Task {task_id} status is '{cur_task.status}', not '🔨 执行中', cannot mark as completed / 任务 {task_id} 当前状态为 '{cur_task.status}'，非 '🔨 执行中'，无法标记完成",
         }
+
+    # 校验租约归属与代际有效性（防分裂脑）
+    namespaced_id = f"{Path(target_path).stem}::{cur_task.id}"
+    m = load_manifest(workspace_root)
+    active_lease = m.records.get(namespaced_id)
+    if active_lease is not None and not active_lease.released:
+        if holder_token is not None and active_lease.holder_token != holder_token:
+            return {
+                "status": "rejected",
+                "reason": (
+                    f"Fencing token lease conflict for task {task_id}: expected token '{active_lease.holder_token}', "
+                    f"got '{holder_token}' / 任务租约持有者令牌冲突"
+                ),
+            }
+        if generation is not None and active_lease.generation != generation:
+            return {
+                "status": "rejected",
+                "reason": (
+                    f"Fencing token generation mismatch for task {task_id}: expected generation {active_lease.generation}, "
+                    f"got {generation} / 任务租约代际过期"
+                ),
+            }
 
     # 执行测试变更物理审计（含未跟踪测试文件、diff新增行与合法豁免）
     audit = _audit_test_changes(workspace_root, config, test_evidence=test_evidence)
@@ -1158,6 +1226,12 @@ def dev_tasks_complete(
 
     try:
         updated = transition_task(target_path, task_id, STATUS_COMPLETED)
+        # 释放独占租约：留痕墓碑，保留代际 (B5)
+        if active_lease is not None and not active_lease.released:
+            tok = holder_token or active_lease.holder_token
+            gen = generation if generation is not None else active_lease.generation
+            release_lease(workspace_root, task_id=namespaced_id, holder_token=tok, generation=gen)
+
         return {
             "status": "completed",
             "task_id": updated.id,
@@ -1166,6 +1240,7 @@ def dev_tasks_complete(
             "audit": audit,
             "dod_output_recorded": bool(dod_output),
         }
+
     except Exception as e:
         return {"status": "rejected", "reason": f"Failed to transition task to completed / 流转为已完成失败: {e}"}
 
@@ -1403,7 +1478,7 @@ async def dev_tasks_refine_spec(
     session_id = f"refine-{task_id}-{int(time.time())}"
     log_dir = os.path.join(workspace_root, ".agents", "logs", "reviewer")
     file_sink = RotatingFileSink(log_dir, session_id, max_bytes=1024 * 1024)
-    heartbeat_sink = AdaptiveHeartbeatSink(mcp_context=None, interval_ms=1000)
+    heartbeat_sink = AdaptiveHeartbeatSink(file_emit=file_sink.write_chunk_text, mcp_context=None, interval_ms=1000)
     sinks = [file_sink, heartbeat_sink]
 
     try:
@@ -1793,6 +1868,7 @@ async def dev_reviewer_consult(
     mode: str = "critique",
     max_hops: int = 1,
     session_id: str | None = None,
+    ctx: Context = None,
 ) -> dict[str, Any]:
     """Directly consult the senior architecture Reviewer engine without creating a DevTask.
     Mounts the global architecture baseline as a prompt-cache-friendly static prefix, streams
@@ -1864,7 +1940,7 @@ async def dev_reviewer_consult(
             project_name=os.path.basename(workspace_root) or "default",
         )
 
-    res = await run_consultation(req, config=config)
+    res = await run_consultation(req, config=config, ctx=ctx)
     return asdict(res)
 
 

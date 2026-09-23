@@ -22,6 +22,7 @@ import os
 import re
 import time
 from typing import Any, List, Optional
+from unittest.mock import MagicMock
 import pytest
 
 from consultation import ConsultRequest, ConsultResult, run_consultation
@@ -163,10 +164,13 @@ async def test_max_hops_clamped_and_out_of_range_returns_structured_error(tmp_pa
 
 @pytest.mark.anyio
 async def test_reasoning_stream_is_persisted_chunkwise_to_session_log(tmp_path: Path, monkeypatch):
-    """断言思考流分块按序实时落盘至 latest-<session_id>.log，具备 ISO8601 时间戳与合法格式。"""
-    chunks = [
-        StreamChunk(text="", reasoning="Step 1: checking boundary safety."),
-        StreamChunk(text="", reasoning="Step 2: verifying thread safety."),
+    """断言思考流细粒度分片按自然换行聚合并实时落盘至 latest-<session_id>.log，具备 ISO8601 时间戳，绝不按分片单字破碎膨胀。"""
+    # 细粒度流式分片（模拟真实 SSE 传输，含 CJK 汉字与 Emoji 代理对）
+    reasoning_fragments = [
+        "🔍", "Step ", "1: ", "检查", "边界", "安全", "性。\n",
+        "Step ", "2: ", "verifying ", "thread ", "safety.\n",
+    ]
+    chunks = [StreamChunk(text="", reasoning=frag) for frag in reasoning_fragments] + [
         StreamChunk(text="Final assessment output.", reasoning=""),
     ]
     fake_client = FakeReviewerClient(chunks)
@@ -184,12 +188,12 @@ async def test_reasoning_stream_is_persisted_chunkwise_to_session_log(tmp_path: 
     log_path = Path(res["log_path"])
     assert log_path.exists()
     log_content = log_path.read_text(encoding="utf-8")
-    assert "[reasoning] Step 1: checking boundary safety." in log_content
+    assert "[reasoning] 🔍Step 1: 检查边界安全性。" in log_content
     assert "[reasoning] Step 2: verifying thread safety." in log_content
 
-    # 断言每行均有 ISO8601 时间戳
+    # 断言每行均有 ISO8601 时间戳，且行数严格等于自然段落数（2 行），杜绝 12 个分片膨胀为 12 行
     reasoning_lines = [line for line in log_content.splitlines() if "[reasoning]" in line]
-    assert len(reasoning_lines) >= 2
+    assert len(reasoning_lines) == 2
     for line in reasoning_lines:
         assert re.match(r"^\d{4}-\d{2}-\d{2}T", line)
 
@@ -455,3 +459,43 @@ async def test_suggested_task_draft_parsed_but_not_persisted(tmp_path: Path, mon
     # 严格断言：dev_tasks 目录下未新增任何物理文件
     existing_files_after = set(os.listdir(tasks_dir))
     assert existing_files_after == existing_files_before
+
+
+@pytest.mark.anyio
+async def test_dev_reviewer_consult_heartbeat_dispatch_and_context_propagation(tmp_path: Path, monkeypatch, capfd):
+    """断言 dev_reviewer_consult 支持透传 FastMCP Context 并同时向 FILE 通道追加 [progress] 心跳记录。"""
+    # 模拟有微小耗时的流式分片，确保后台心跳 worker 触发
+    chunks = [
+        StreamChunk(text="", reasoning="Checking boundaries...\n"),
+        StreamChunk(text="All good.\n", reasoning=""),
+    ]
+    fake_client = FakeReviewerClient(chunks, delay_before_chunk_s=1.1)
+    monkeypatch.setattr("consultation.create_reviewer_client", lambda cfg, sink=None: fake_client)
+
+    mock_ctx = MagicMock()
+    mock_ctx.info = MagicMock()
+    mock_ctx.report_progress = MagicMock()
+
+    session_id = "test-hb-dispatch-101"
+    res = await server.dev_reviewer_consult(
+        workspace_root=str(tmp_path),
+        query="Check heartbeat fanout",
+        session_id=session_id,
+        ctx=mock_ctx,
+    )
+    assert res["status"] == "ok"
+
+    log_path = Path(res["log_path"])
+    assert log_path.exists()
+    log_content = log_path.read_text(encoding="utf-8")
+
+    # 断言 FILE 通道兜底存在 [progress] 心跳标记
+    assert "[progress]" in log_content
+    assert "[reasoning] Checking boundaries..." in log_content
+
+    # 断言 mock_ctx 收到了至少一次通知
+    assert mock_ctx.info.called or mock_ctx.report_progress.called
+
+    # 零 stdout 污染断言
+    captured = capfd.readouterr()
+    assert captured.out == ""

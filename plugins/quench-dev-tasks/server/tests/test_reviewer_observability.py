@@ -28,7 +28,7 @@ def test_stdout_is_byte_clean(capfd, tmp_path):
     log_dir = str(tmp_path / "logs")
     session_id = "clean-test-session"
     sink = RotatingFileSink(log_dir=log_dir, session_id=session_id)
-    heartbeat = AdaptiveHeartbeatSink(interval_ms=500)
+    heartbeat = AdaptiveHeartbeatSink(file_emit=sink.write_chunk_text, interval_ms=500)
 
     # Send chunks and heartbeat
     sink.on_chunk(ThoughtChunk(content="Thinking about architecture...", is_thought=True, tokens_estimate=5))
@@ -95,52 +95,96 @@ def test_adaptive_heartbeat_throttling():
     """B4 & T6-4: Adaptive heartbeat throttled to >= 500ms / 1000ms."""
     fake_stderr = io.StringIO()
     fake_stderr.isatty = lambda: True
+    emitted_files = []
 
-    heartbeat = AdaptiveHeartbeatSink(stderr=fake_stderr, interval_ms=1000)
+    heartbeat = AdaptiveHeartbeatSink(
+        file_emit=emitted_files.append,
+        stderr=fake_stderr,
+        interval_ms=1000,
+    )
 
     # First pulse at t=0
     heartbeat.on_heartbeat(tokens_so_far=100, elapsed_s=1.0)
     out1 = fake_stderr.getvalue()
     assert "[Reviewer 思考中: 100 tokens | 1.0s]" in out1
+    assert len(emitted_files) == 1
+    assert "[progress] [Reviewer 思考中: 100 tokens | 1.0s]" in emitted_files[0]
 
     # Second pulse immediately after (no time elapsed) -> throttled
     heartbeat.on_heartbeat(tokens_so_far=200, elapsed_s=1.1)
     out2 = fake_stderr.getvalue()
     assert out2 == out1, "Rapid pulses within interval must be throttled"
+    assert len(emitted_files) == 1
 
     # Fast forward clock > 1.05s
     with patch("time.monotonic", return_value=time.monotonic() + 2.0):
         heartbeat.on_heartbeat(tokens_so_far=300, elapsed_s=3.0)
         out3 = fake_stderr.getvalue()
         assert "[Reviewer 思考中: 300 tokens | 3.0s]" in out3
+        assert len(emitted_files) == 2
 
 
-def test_heartbeat_environment_precedence():
-    """B5: Environment precedence mcp_context > isatty(stderr) > silent."""
-    # 1. mcp_context priority
+def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
+    """验证 AdaptiveHeartbeatSink 能力分发与 FILE 常驻兜底三态覆盖 ({mcp_present, no_ctx_tty, no_ctx_no_tty})。"""
+    # 0. D6 强制校验：未传 file_emit 必须抛 ValueError
+    with pytest.raises(ValueError, match="file_emit"):
+        AdaptiveHeartbeatSink(file_emit=None)
+
+    # 1. State: mcp_present
     mcp_ctx = MagicMock()
     mcp_ctx.info = MagicMock()
-    fake_stderr = io.StringIO()
-    fake_stderr.isatty = lambda: True
+    fake_stderr1 = io.StringIO()
+    fake_stderr1.isatty = lambda: False
+    file_emitted1: list[str] = []
 
-    hb_mcp = AdaptiveHeartbeatSink(mcp_context=mcp_ctx, stderr=fake_stderr, interval_ms=500)
+    hb_mcp = AdaptiveHeartbeatSink(
+        file_emit=file_emitted1.append,
+        mcp_context=mcp_ctx,
+        stderr=fake_stderr1,
+        interval_ms=500,
+    )
     hb_mcp.on_heartbeat(tokens_so_far=50, elapsed_s=0.5)
     mcp_ctx.info.assert_called_once()
-    assert fake_stderr.getvalue() == "", "When mcp_context is present, stderr must not be written"
+    assert len(file_emitted1) == 1
+    assert "[progress] [Reviewer 思考中: 50 tokens | 0.5s]" in file_emitted1[0]
+    assert fake_stderr1.getvalue() == ""
 
-    # 2. isatty(stderr) priority
+    # 2. State: no_ctx_tty (交互终端)
     fake_stderr2 = io.StringIO()
     fake_stderr2.isatty = lambda: True
-    hb_tty = AdaptiveHeartbeatSink(mcp_context=None, stderr=fake_stderr2, interval_ms=500)
-    hb_tty.on_heartbeat(tokens_so_far=50, elapsed_s=0.5)
-    assert "\r[Reviewer 思考中: 50 tokens | 0.5s]..." in fake_stderr2.getvalue()
+    file_emitted2: list[str] = []
 
-    # 3. silent fallback
+    hb_tty = AdaptiveHeartbeatSink(
+        file_emit=file_emitted2.append,
+        mcp_context=None,
+        stderr=fake_stderr2,
+        interval_ms=500,
+    )
+    hb_tty.on_heartbeat(tokens_so_far=60, elapsed_s=0.6)
+    assert "\r[Reviewer 思考中: 60 tokens | 0.6s]..." in fake_stderr2.getvalue()
+    assert len(file_emitted2) == 1
+    assert "[progress] [Reviewer 思考中: 60 tokens | 0.6s]" in file_emitted2[0]
+
+    # 3. State: no_ctx_no_tty (后台非 TTY 管道，无 MCP 上下文) -> FILE 常驻兜底，永不静默
     fake_stderr3 = io.StringIO()
     fake_stderr3.isatty = lambda: False
-    hb_silent = AdaptiveHeartbeatSink(mcp_context=None, stderr=fake_stderr3, interval_ms=500)
-    hb_silent.on_heartbeat(tokens_so_far=50, elapsed_s=0.5)
-    assert fake_stderr3.getvalue() == "", "Non-tty stderr without mcp_context must remain silent"
+    file_emitted3: list[str] = []
+
+    hb_silent_stderr = AdaptiveHeartbeatSink(
+        file_emit=file_emitted3.append,
+        mcp_context=None,
+        stderr=fake_stderr3,
+        interval_ms=500,
+    )
+    hb_silent_stderr.on_heartbeat(tokens_so_far=70, elapsed_s=0.7)
+    # stderr 遵守非 TTY 规范保持纯净，但 FILE 通道已记录
+    assert fake_stderr3.getvalue() == ""
+    assert len(file_emitted3) == 1
+    assert "[progress] [Reviewer 思考中: 70 tokens | 0.7s]" in file_emitted3[0]
+
+    # 4. 全局零 stdout 污染核验
+    captured = capfd.readouterr()
+    assert captured.out == "", f"Expected clean stdout, got: {captured.out!r}"
 
 
 def test_telemetry_schema_and_fail_open(tmp_path):

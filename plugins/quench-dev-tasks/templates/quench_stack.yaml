@@ -128,3 +128,45 @@ reviewer_engine:
   # Max multi-turn tool hops during review refinement / 审查推导最大工具调用轮数
   max_tool_hops: 3
 
+  # Context Guard: Global character ceiling across all injected code slices (512 - 200,000)
+  # 全局注入字符上限聚合预算（防止上下文无限膨胀击穿 Prompt 预算）
+  max_total_injection_chars: 40000
+
+  # Context Guard: Default line count when no line range is explicitly provided (30 - 2000)
+  # 缺省单文件上下文切片行数窗口
+  default_window_lines: 200
+
+  # Context Guard: Maximum lines allowed per explicit slice (30 - 5000)
+  # 单次切片最大允许行数硬天花板
+  max_lines_per_slice: 600
+
+# ==============================================================================
+# Reviewer Observability & Verdict Audit (审查可观测性与裁决快照审计配置)
+# Governs streaming log capture vs. lightweight snapshot audit across dispatch modes.
+# 兼顾引擎模式细粒度流式观测与子代理模式下的零空写 I/O，并建立永久裁决快照通道。
+# ==============================================================================
+observability:
+  # Path to verdict audit log (Relative to project root or absolute, default: .agents/logs/reviewer/verdicts.jsonl)
+  # 最终裁决快照审计日志路径（行式 JSONL 格式）
+  verdict_path: ".agents/logs/reviewer/verdicts.jsonl"
+
+  # Maximum size in bytes for a single verdict audit record / 单条裁决审计行物理字节硬上限 (默认 16KB)
+  max_record_bytes: 16384
+
+  # Whether to force streaming disk capture in subagent mode / 是否在子代理模式下强制写流式盘（默认 false 保持零空写）
+  stream_in_subagent: false
+
+# ==============================================================================
+# Microkernel Governance & Fencing Token Lease (微内核治理与 Fencing Token 租约配置)
+# Governs authoritative manifest tracking, atomic CAS leases, and reaper probe.
+# 管控权威清单登记、单调 CAS 租约与智能条件判断回收器。
+# ==============================================================================
+governance:
+  # Path to central authoritative manifest (Relative to project root, default: .agents/.quorch/manifest.json)
+  # 中心化权威清单路径（记录任务代际与租约拥有者）
+  manifest_path: ".agents/.quorch/manifest.json"
+
+  # Lease TTL in seconds / 租约超时时间（秒，默认 300 秒）
+  lease_ttl_seconds: 300
+
+

@@ -22,6 +22,8 @@ import weakref
 from path_guard import sanitize_workspace_path, PathTraversalError
 from project_config import QuenchStackConfig, ReviewerEngineConfig, create_reviewer_client
 from reviewer_engine import (
+    AdaptiveHeartbeatSink,
+    CoalescingTextSink,
     PromptAssembler,
     ReviewerClient,
     ReviewerEngineError,
@@ -44,13 +46,17 @@ NEED_FILES_PATTERN = re.compile(r"<<<NEED-FILES>>>\s*(.*?)\s*<<<END>>>", re.DOTA
 TASK_DRAFT_PATTERN = re.compile(r"<<<TASK_DRAFT>>>\s*(.*?)\s*<<<END>>>", re.DOTALL)
 
 MAX_CONTEXT_FILES = 6
-DEFAULT_WINDOW_LINES = 50
+DEFAULT_WINDOW_LINES = 200
 MIN_WINDOW_LINES = 30
-MAX_INJECTION_CHARS = 12000
+MAX_LINES_PER_SLICE = 600
+MAX_TOTAL_INJECTION_CHARS = 40000
+MAX_INJECTION_CHARS = MAX_TOTAL_INJECTION_CHARS  # SSOT backward compatibility alias
 MAX_QUERY_CHARS = 8000
 MAX_LOG_FILES_QUOTA = 20
 MAX_LOG_FILE_BYTES = 2_000_000
 MAX_REASONING_TOKENS_CEILING = 32000
+
+CONTEXT_SPEC_PATTERN = re.compile(r"^(?P<path>.+):(?P<start>\d+)-(?P<end>\d+)$")
 
 
 @dataclass(frozen=True)
@@ -103,9 +109,11 @@ def resolve_context_files(
     rel_paths: Sequence[str],
     *,
     max_files: int = 6,
-    window_lines: int = 50,
+    window_lines: int = DEFAULT_WINDOW_LINES,
+    max_total_injection_chars: int = MAX_TOTAL_INJECTION_CHARS,
+    max_lines_per_slice: int = MAX_LINES_PER_SLICE,
 ) -> tuple[list[CodeSlice], list[str], bool]:
-    """安全解析并切片上下文文件。
+    """安全解析并切片上下文文件，支持 path:start-end 行号区间文法并实行全局字符预算聚合。
     越界路径（..、绝对路径、符号链接逃逸、盘符漂移）一律跳过并计入 skipped_files，绝不抛出异常。
     """
     real_ws = os.path.realpath(workspace_root)
@@ -115,7 +123,7 @@ def resolve_context_files(
 
     effective_window = max(window_lines, MIN_WINDOW_LINES)
     total_chars = 0
-    seen_paths: set[str] = set()
+    seen_paths: set[tuple[str, Optional[int], Optional[int]]] = set()
 
     for raw_p in rel_paths:
         if not raw_p or not isinstance(raw_p, str):
@@ -124,9 +132,28 @@ def resolve_context_files(
         if not p_str:
             continue
 
+        # 提前短路：若预算已耗尽，不再进行无意义的路径解析与文件 I/O
+        if total_chars >= max_total_injection_chars:
+            truncated = True
+            break
+
+        # 0. 解析路径与行号区间文法 (e.g. path/to/file.py:10-50 或纯路径)
+        range_match = CONTEXT_SPEC_PATTERN.match(p_str)
+        if range_match:
+            spec_path = range_match.group("path").strip()
+            explicit_start = int(range_match.group("start"))
+            explicit_end = int(range_match.group("end"))
+            if explicit_start < 1 or explicit_start > explicit_end:
+                skipped_files.append(p_str)
+                continue
+        else:
+            spec_path = p_str
+            explicit_start = None
+            explicit_end = None
+
         # 1. 规范化路径并检查是否逃逸与存在 (使用单一事实源 path_guard)
         try:
-            real_target = sanitize_workspace_path(real_ws, p_str, must_exist=True)
+            real_target = sanitize_workspace_path(real_ws, spec_path, must_exist=True)
         except PathTraversalError:
             skipped_files.append(p_str)
             continue
@@ -139,7 +166,7 @@ def resolve_context_files(
             skipped_files.append(p_str)
             continue
 
-        # 5. 敏感文件防御（.env, *.key, *secret*, 等）
+        # 3. 敏感文件防御（.env, *.key, *secret*, 等）
         base_name = os.path.basename(real_target).lower()
         if any(base_name.startswith(pre) for pre in (".env", "id_rsa", "id_ed25519")) or any(
             ext in base_name for ext in (".key", ".pem", ".pfx", ".p12", "secret", "credential", "token")
@@ -147,16 +174,17 @@ def resolve_context_files(
             skipped_files.append(p_str)
             continue
 
-        if real_target in seen_paths:
+        target_key = (real_target, explicit_start, explicit_end)
+        if target_key in seen_paths:
             continue
-        seen_paths.add(real_target)
+        seen_paths.add(target_key)
 
-        # 6. 超出 max_files 限制
+        # 4. 超出 max_files 限制
         if len(slices) >= max_files:
             truncated = True
             break
 
-        # 7. 读取切片
+        # 5. 读取切片
         try:
             with open(real_target, "r", encoding="utf-8", errors="replace") as f:
                 all_lines = f.readlines()
@@ -164,20 +192,42 @@ def resolve_context_files(
             skipped_files.append(p_str)
             continue
 
-        start_line = 1
-        end_line = min(len(all_lines), effective_window)
-        selected_lines = all_lines[:end_line]
+        total_file_lines = len(all_lines)
+        if total_file_lines == 0:
+            if explicit_start is not None:
+                skipped_files.append(p_str)
+                continue
+            start_line = 0
+            end_line = 0
+        elif explicit_start is not None:
+            if explicit_start > total_file_lines:
+                skipped_files.append(p_str)
+                continue
+            start_line = explicit_start
+            req_end = explicit_end
+            if req_end - start_line + 1 > max_lines_per_slice:
+                req_end = start_line + max_lines_per_slice - 1
+            end_line = min(total_file_lines, req_end)
+        else:
+            start_line = 1
+            end_line = min(total_file_lines, effective_window)
+
+        selected_lines = all_lines[start_line - 1 : end_line]
         slice_content = "".join(selected_lines)
 
         norm_rel = os.path.relpath(real_target, real_ws).replace("\\", "/")
         anchor = f"# file: {norm_rel}:{start_line}-{end_line}\n"
         full_slice_text = anchor + slice_content
 
-        # 8. 预算检查（总计 <= 12000 字符）
-        if total_chars + len(full_slice_text) > MAX_INJECTION_CHARS:
-            remaining_budget = MAX_INJECTION_CHARS - total_chars
-            if remaining_budget > len(anchor) + 50:
-                truncated_content = slice_content[: remaining_budget - len(anchor) - 20] + "\n# [... truncated ...]\n"
+        # 6. 全局聚合字符预算检查 (max_total_injection_chars)
+        if total_chars + len(full_slice_text) > max_total_injection_chars:
+            remaining_budget = max_total_injection_chars - total_chars
+            marker = "\n# [... truncated due to global budget cap ...]\n"
+            needed_overhead = len(anchor) + len(marker)
+            if remaining_budget > needed_overhead:
+                # 严格按字符串字符切片，绝不对 UTF-8 字节进行撕裂性盲切 (R-C5)
+                cut_len = remaining_budget - needed_overhead
+                truncated_content = slice_content[:cut_len] + marker
                 slices.append(
                     CodeSlice(
                         rel_path=norm_rel,
@@ -392,13 +442,19 @@ async def run_consultation(
 
     session_lock = _get_session_lock(session_id)
 
+    cfg_window_lines = getattr(re_cfg, "default_window_lines", DEFAULT_WINDOW_LINES) if re_cfg else DEFAULT_WINDOW_LINES
+    cfg_max_total_chars = getattr(re_cfg, "max_total_injection_chars", MAX_TOTAL_INJECTION_CHARS) if re_cfg else MAX_TOTAL_INJECTION_CHARS
+    cfg_max_lines_per_slice = getattr(re_cfg, "max_lines_per_slice", MAX_LINES_PER_SLICE) if re_cfg else MAX_LINES_PER_SLICE
+
     # 3. 初始切片解析
     initial_files = list(req.context_files)
     slices, skipped_files, truncated = resolve_context_files(
         workspace_root,
         initial_files,
         max_files=MAX_CONTEXT_FILES,
-        window_lines=DEFAULT_WINDOW_LINES,
+        window_lines=cfg_window_lines,
+        max_total_injection_chars=cfg_max_total_chars,
+        max_lines_per_slice=cfg_max_lines_per_slice,
     )
 
     static_prefix = build_static_prefix(workspace_root, config)
@@ -411,6 +467,11 @@ async def run_consultation(
         carry_over_bytes=64,
         flush_interval_s=0.2,
     )
+    heartbeat_sink = AdaptiveHeartbeatSink(
+        file_emit=sink.write_chunk_text,
+        mcp_context=ctx,
+        interval_ms=1000,
+    )
 
     async with session_lock:
         current_hop = 0
@@ -422,24 +483,20 @@ async def run_consultation(
             "prompt_cache_hit_tokens": 0,
         }
 
-        # 心跳后台任务
+        # 心跳后台任务（多通道能力分发 + FILE 常驻兜底）
         heartbeat_stop = asyncio.Event()
+        stream_stats = {"chars": 0, "start_t": time.monotonic()}
 
         async def _heartbeat_worker():
-            pct = 10
             while not heartbeat_stop.is_set():
                 try:
                     await asyncio.sleep(1.0)
                     if heartbeat_stop.is_set():
                         break
-                    if ctx and hasattr(ctx, "report_progress"):
-                        pct = min(pct + 15, 95)
-                        try:
-                            res = ctx.report_progress(pct, 100)
-                            if asyncio.iscoroutine(res):
-                                await res
-                        except Exception:
-                            pass
+                    now = time.monotonic()
+                    elapsed_s = now - stream_stats["start_t"]
+                    tokens_est = stream_stats["chars"] // 4
+                    await heartbeat_sink.apulse(tokens_so_far=tokens_est, elapsed_s=elapsed_s)
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -463,7 +520,7 @@ async def run_consultation(
                 async def _call_engine():
                     content_parts: list[str] = []
                     last_flush_t = time.monotonic()
-                    buffer = ""
+                    coalescer = CoalescingTextSink(sink.write_chunk_text, tag="reasoning")
 
                     try:
                         accumulated_reasoning_chars = 0
@@ -472,43 +529,39 @@ async def run_consultation(
                             chunk_text = getattr(chunk, "text", "") or ""
                             if reasoning:
                                 accumulated_reasoning_chars += len(reasoning)
+                                stream_stats["chars"] = accumulated_reasoning_chars
                                 if accumulated_reasoning_chars > MAX_REASONING_TOKENS_CEILING * 4:
                                     raise ReasoningBudgetExceededError("Reasoning tokens exceeded ceiling 32000")
-                                iso_ts = datetime.now(timezone.utc).isoformat()
-                                buffer += f"{iso_ts} [reasoning] {reasoning}\n"
+                                coalescer.feed(reasoning)
                                 now = time.monotonic()
-                                if len(buffer) >= 512 or (now - last_flush_t >= 0.2):
-                                    sink.write_chunk_text(buffer)
+                                if now - last_flush_t >= 0.5:
                                     sink.flush()
-                                    buffer = ""
                                     last_flush_t = now
 
                             if chunk_text:
                                 content_parts.append(chunk_text)
 
-                        if buffer:
-                            sink.write_chunk_text(buffer)
-                            sink.flush()
-                            buffer = ""
+                        coalescer.close()
+                        sink.flush()
 
                         full_text = "".join(content_parts)
                         return {"content": full_text, "usage": {}}
                     except (AttributeError, NotImplementedError):
+                        coalescer.close()
                         resp = await client.acomplete(messages)
                         reasoning = extract_reasoning_text(resp)
                         if reasoning:
-                            iso_ts = datetime.now(timezone.utc).isoformat()
-                            sink.write_chunk_text(f"{iso_ts} [reasoning] {reasoning}\n")
+                            fallback_coalescer = CoalescingTextSink(sink.write_chunk_text, tag="reasoning")
+                            fallback_coalescer.feed(reasoning)
+                            fallback_coalescer.close()
                             sink.flush()
                         return resp
                     finally:
-                        if buffer:
-                            try:
-                                sink.write_chunk_text(buffer)
-                                sink.flush()
-                                buffer = ""
-                            except Exception:
-                                pass
+                        coalescer.close()
+                        try:
+                            sink.flush()
+                        except Exception:
+                            pass
 
                 try:
                     raw_result = await asyncio.wait_for(_call_engine(), timeout=float(timeout_s))
@@ -596,11 +649,15 @@ async def run_consultation(
                         if line.strip() and not line.strip().startswith("#")
                     ]
                     if raw_extra_paths:
+                        current_total_chars = sum(len(s.text) for s in active_slices)
+                        remaining_budget = max(0, cfg_max_total_chars - current_total_chars)
                         extra_slices, extra_skipped, extra_trunc = resolve_context_files(
                             workspace_root,
                             raw_extra_paths,
                             max_files=MAX_CONTEXT_FILES - len(active_slices),
-                            window_lines=DEFAULT_WINDOW_LINES,
+                            window_lines=cfg_window_lines,
+                            max_total_injection_chars=remaining_budget,
+                            max_lines_per_slice=cfg_max_lines_per_slice,
                         )
                         active_slices.extend(extra_slices)
                         active_skipped.extend(extra_skipped)
@@ -641,4 +698,5 @@ async def run_consultation(
                 await heartbeat_task
             except (asyncio.CancelledError, Exception):
                 pass
+            heartbeat_sink.on_finish("stop", {})
             sink.close()

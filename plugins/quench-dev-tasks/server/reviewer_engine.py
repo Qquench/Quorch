@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import (
     Any,
     AsyncIterator,
+    Callable,
     Dict,
     List,
     Literal,
@@ -43,6 +44,14 @@ from typing import (
 import anyio
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
+from observability_policy import (
+    MAX_RECORD_BYTES,
+    ObservabilityDecision,
+    SinkMode,
+    VerdictAuditSink,
+    make_verdict_sink,
+    resolve_observability_policy,
+)
 
 # Windows UTF-8 控制台设防
 if sys.version_info >= (3, 7):
@@ -379,63 +388,319 @@ class RotatingFileSink:
                 pass
 
 
-class AdaptiveHeartbeatSink:
-    """Low-frequency heartbeat pulse adapter (1Hz / 1000ms interval).
-    Priority (B5):
-    1. mcp_context (progress / info)
-    2. isatty(stderr) -> single-line dynamic overwrite via \\r
-    3. silent (no-op)
-    Zero stdout pollution (P0#1 invariant).
+@dataclass(frozen=True)
+class CoalescingStats:
+    """行聚合落盘 Sink 运行指标快照。"""
+    lines_emitted: int
+    total_chars_fed: int             # 累计喂入字符总量（单调递增）
+    chars_currently_buffered: int    # 瞬时滞留待刷盘字符量（非单调）
+    chunks_fed: int                  # 累计喂入分片数（单调递增）
+
+
+class CoalescingTextSink:
+    """将流式文本分片聚合并按行/尺寸/空闲边界落盘，杜绝分片级写行。
+
+    - 按自然换行 `\n` 切分完整行输出；
+    - 空白行直接写 `\n`，严保 Markdown 语义完整，不掺时间戳；
+    - 非空行前缀 `<iso_ts> [<tag>] <line>\n`；
+    - 超过 max_line_chars 强制切分；
+    - 空闲超时 (idle_flush_seconds) 后台 watchdog 自动刷盘，保障实时可观测性；
+    - close() / flush(force=True) 强制刷盘尾残内容（零丢损）；
+    - 内部锁保护，严格早于底层 FileSink 锁，严禁反向交叉持锁。
     """
 
     def __init__(
         self,
+        emit_line: Callable[[str], None],
+        *,
+        tag: str = "reasoning",
+        max_line_chars: int = 400,
+        idle_flush_seconds: float = 0.4,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        self._emit_line = emit_line
+        self.tag = tag or "reasoning"
+        self.max_line_chars = max(int(max_line_chars), 64)
+        self.idle_flush_seconds = float(idle_flush_seconds)
+        self._clock = clock if clock is not None else (lambda: time.monotonic())
+        self._lock = threading.Lock()
+        self._pending = ""
+        self._lines_emitted = 0
+        self._total_chars_fed = 0
+        self._chunks_fed = 0
+        self._last_feed_t = self._clock()
+        self._closed = False
+        self._watchdog_timer: Optional[threading.Timer] = None
+
+    def feed(self, fragment: str) -> None:
+        """喂入文本分片。若遇到换行符或超过长度/空闲阈值则触发切行输出。"""
+        if fragment is None:
+            fragment = ""
+        with self._lock:
+            if self._closed:
+                return
+            now = self._clock()
+            # 若已有滞留文本且距离上次喂入超时，先将滞留文本作为一行刷出
+            if self._pending and self.idle_flush_seconds > 0 and (now - self._last_feed_t >= self.idle_flush_seconds):
+                self._flush_tail_locked()
+            self._last_feed_t = now
+            self._chunks_fed += 1
+            if fragment:
+                self._total_chars_fed += len(fragment)
+                self._pending += fragment
+                self._emit_ready_lines_locked()
+
+            if self._pending and self.idle_flush_seconds > 0:
+                self._arm_watchdog_locked(self.idle_flush_seconds)
+            elif not self._pending and self._watchdog_timer is not None:
+                try:
+                    self._watchdog_timer.cancel()
+                except Exception:
+                    pass
+                self._watchdog_timer = None
+
+    def flush(self, *, force: bool = False) -> None:
+        """刷新滞留文本。若 force=True 则无条件将滞留尾残刷出。"""
+        with self._lock:
+            if self._closed:
+                return
+            if force:
+                self._flush_tail_locked()
+            else:
+                now = self._clock()
+                if self._pending and self.idle_flush_seconds > 0 and (now - self._last_feed_t >= self.idle_flush_seconds):
+                    self._flush_tail_locked()
+
+    def close(self) -> None:
+        """关闭汇聚器。强制刷盘尾残内容（零丢损）并取消定时器。幂等调用。"""
+        with self._lock:
+            if self._closed:
+                return
+            if self._watchdog_timer is not None:
+                try:
+                    self._watchdog_timer.cancel()
+                except Exception:
+                    pass
+                self._watchdog_timer = None
+            self._flush_tail_locked(is_close=True)
+            self._closed = True
+
+    def __enter__(self) -> "CoalescingTextSink":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    @property
+    def stats(self) -> CoalescingStats:
+        """获取当前聚合指标的只读快照。"""
+        with self._lock:
+            return CoalescingStats(
+                lines_emitted=self._lines_emitted,
+                total_chars_fed=self._total_chars_fed,
+                chars_currently_buffered=len(self._pending),
+                chunks_fed=self._chunks_fed,
+            )
+
+    def _arm_watchdog_locked(self, delay: float) -> None:
+        if self._closed:
+            return
+        if self._watchdog_timer is not None:
+            try:
+                self._watchdog_timer.cancel()
+            except Exception:
+                pass
+            self._watchdog_timer = None
+        if self._pending:
+            self._watchdog_timer = threading.Timer(delay, self._on_watchdog)
+            self._watchdog_timer.daemon = True
+            self._watchdog_timer.start()
+
+    def _on_watchdog(self) -> None:
+        with self._lock:
+            if self._closed or not self._pending:
+                return
+            now = self._clock()
+            idle = now - self._last_feed_t
+            if idle >= self.idle_flush_seconds:
+                self._flush_tail_locked()
+            else:
+                remaining = max(0.01, self.idle_flush_seconds - idle)
+                self._arm_watchdog_locked(remaining)
+
+    def _emit_ready_lines_locked(self) -> None:
+        while True:
+            pos = self._pending.find("\n")
+            if pos != -1 and pos <= self.max_line_chars:
+                raw_line = self._pending[:pos]
+                self._pending = self._pending[pos + 1 :]
+                if raw_line.endswith("\r"):
+                    raw_line = raw_line[:-1]
+                self._emit_formatted_locked(raw_line)
+            elif len(self._pending) >= self.max_line_chars:
+                raw_line = self._pending[: self.max_line_chars]
+                self._pending = self._pending[self.max_line_chars :]
+                self._emit_formatted_locked(raw_line)
+            else:
+                break
+
+    def _flush_tail_locked(self, *, is_close: bool = False) -> None:
+        if not self._pending:
+            return
+        self._emit_ready_lines_locked()
+        if self._pending:
+            raw_line = self._pending
+            self._pending = ""
+            if raw_line.endswith("\r"):
+                raw_line = raw_line[:-1]
+            self._emit_formatted_locked(raw_line, is_close=is_close)
+
+    def _emit_formatted_locked(self, raw_line: str, *, is_close: bool = False) -> None:
+        if not raw_line.strip():
+            formatted = "\n"
+        else:
+            iso_ts = datetime.now(timezone.utc).isoformat()
+            formatted = f"{iso_ts} [{self.tag}] {raw_line}\n"
+
+        try:
+            self._emit_line(formatted)
+            self._lines_emitted += 1
+        except Exception as e:
+            try:
+                sys.stderr.write(f"[CoalescingTextSink] emit_line failed: {e}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            if is_close:
+                pass
+
+
+class AdaptiveHeartbeatSink:
+    """能力分发式心跳：向所有可用通道 fan-out，FILE 常驻兜底，严格遵守零 stdout 污染。
+
+    通道分发：
+    1. file_emit (强制必填): 无论任何环境均常驻追加 [progress] 记录至会话日志，永不失联；
+    2. mcp_context: 若注入 FastMCP 上下文，调用 report_progress / info；
+    3. stderr: 仅在 isatty 为真时进行动态 \r 覆盖输出；
+    4. 零 stdout 污染 (P0#1 铁律)：严禁向 sys.stdout 输出任何字符。
+    """
+
+    def __init__(
+        self,
+        *,
+        file_emit: Callable[[str], None],
         mcp_context: Any = None,
         stderr: Optional[TextIO] = None,
         interval_ms: int = 1000,
-    ):
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        if file_emit is None or not callable(file_emit):
+            raise ValueError(
+                "AdaptiveHeartbeatSink requires a callable 'file_emit' channel as a mandatory last-resort fallback."
+            )
+        self.file_emit = file_emit
         self.mcp_context = mcp_context
         self.stderr = stderr if stderr is not None else sys.stderr
-        self.interval_s = max(interval_ms, 500) / 1000.0
-        self._last_pulse = 0.0
+        self.interval_s = max(int(interval_ms), 500) / 1000.0
+        self._clock = clock if clock is not None else (lambda: time.monotonic())
+        self._lock = threading.Lock()
+        self._last_pulse_monotonic = 0.0
         self._pulse_count = 0
         self._is_tty = bool(self.stderr and hasattr(self.stderr, "isatty") and self.stderr.isatty())
+        self._disabled_channels: set[str] = set()
 
     def on_chunk(self, chunk: ThoughtChunk) -> None:
         pass
 
     def on_heartbeat(self, tokens_so_far: int, elapsed_s: float) -> None:
-        now = time.monotonic()
-        jitter = random.uniform(0.0, 0.015)
-        if (now - self._last_pulse) < (self.interval_s + jitter):
-            return
+        with self._lock:
+            now = self._clock()
+            jitter = random.uniform(0.0, 0.015)
+            if (now - self._last_pulse_monotonic) < (self.interval_s + jitter):
+                return
+            self._last_pulse_monotonic = now
+            self._pulse_count += 1
+            msg = f"[Reviewer 思考中: {tokens_so_far} tokens | {elapsed_s:.1f}s]"
+            iso_ts = datetime.now(timezone.utc).isoformat()
+            file_msg = f"{iso_ts} [progress] {msg}\n"
 
-        self._last_pulse = now
-        self._pulse_count += 1
-        msg = f"[Reviewer 思考中: {tokens_so_far} tokens | {elapsed_s:.1f}s]"
+        # 1. FILE 常驻兜底通道
+        if "file" not in self._disabled_channels:
+            try:
+                self.file_emit(file_msg)
+            except Exception:
+                self._disabled_channels.add("file")
 
-        # 1. MCP context priority
-        if self.mcp_context is not None:
+        # 2. MCP 上下文通道
+        if self.mcp_context is not None and "mcp" not in self._disabled_channels:
             try:
                 if hasattr(self.mcp_context, "info"):
-                    self.mcp_context.info(msg)
-                    return
+                    res = self.mcp_context.info(msg)
+                    if asyncio.iscoroutine(res):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(res)
+                        except RuntimeError:
+                            pass
                 elif hasattr(self.mcp_context, "report_progress"):
-                    self.mcp_context.report_progress(tokens_so_far, 64000)
-                    return
+                    res = self.mcp_context.report_progress(tokens_so_far, 64000)
+                    if asyncio.iscoroutine(res):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(res)
+                        except RuntimeError:
+                            pass
             except Exception:
-                pass
+                self._disabled_channels.add("mcp")
 
-        # 2. isatty(stderr) priority
-        if self._is_tty:
+        # 3. stderr (TTY)
+        if self._is_tty and "stderr" not in self._disabled_channels:
             try:
                 self.stderr.write(f"\r{msg}...")
                 self.stderr.flush()
-                return
             except Exception:
-                pass
+                self._disabled_channels.add("stderr")
 
-        # 3. Silent fallback (no-op)
+    async def apulse(self, *, tokens_so_far: int, elapsed_s: float, step: str = "thinking") -> None:
+        with self._lock:
+            now = self._clock()
+            jitter = random.uniform(0.0, 0.015)
+            if (now - self._last_pulse_monotonic) < (self.interval_s + jitter):
+                return
+            self._last_pulse_monotonic = now
+            self._pulse_count += 1
+            msg = f"[Reviewer 思考中: {tokens_so_far} tokens | {elapsed_s:.1f}s]"
+            iso_ts = datetime.now(timezone.utc).isoformat()
+            file_msg = f"{iso_ts} [progress] {msg}\n"
+
+        # 1. FILE 常驻兜底通道
+        if "file" not in self._disabled_channels:
+            try:
+                self.file_emit(file_msg)
+            except Exception:
+                self._disabled_channels.add("file")
+
+        # 2. MCP 上下文通道
+        if self.mcp_context is not None and "mcp" not in self._disabled_channels:
+            try:
+                if hasattr(self.mcp_context, "info"):
+                    res = self.mcp_context.info(msg)
+                    if asyncio.iscoroutine(res):
+                        await res
+                elif hasattr(self.mcp_context, "report_progress"):
+                    res = self.mcp_context.report_progress(tokens_so_far, 64000)
+                    if asyncio.iscoroutine(res):
+                        await res
+            except Exception:
+                self._disabled_channels.add("mcp")
+
+        # 3. stderr (TTY)
+        if self._is_tty and "stderr" not in self._disabled_channels:
+            try:
+                self.stderr.write(f"\r{msg}...")
+                self.stderr.flush()
+            except Exception:
+                self._disabled_channels.add("stderr")
 
     def on_finish(self, reason: str, meta: Dict[str, Any]) -> None:
         if self._is_tty and self._pulse_count > 0:
@@ -1356,6 +1621,14 @@ __all__ = [
     "ProgressSink",
     "RotatingFileSink",
     "AdaptiveHeartbeatSink",
+    "CoalescingStats",
+    "CoalescingTextSink",
+    "SinkMode",
+    "ObservabilityDecision",
+    "VerdictAuditSink",
+    "MAX_RECORD_BYTES",
+    "resolve_observability_policy",
+    "make_verdict_sink",
     "PromptAssembler",
     "compute_repetition_score",
     "log_telemetry_event",

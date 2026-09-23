@@ -44,6 +44,7 @@ DEFAULT_UNMANAGED_DIRS = (
     "docs/", "doc/", "documentation/", "future_roadmap/",
     "roadmap/", "notes/", "manuals/", "sample_data/",
     "samples/", ".vscode/", ".idea/", ".github/",
+    ".agents/.quorch/", ".agents/logs/",
 )
 
 CRITICAL_CODE_MANIFEST_PATTERNS: list[str] = [
@@ -127,6 +128,24 @@ def resolve_preset(provider: str) -> ProviderPreset | None:
     return PROVIDER_PRESETS.get(key)
 
 
+DEFAULT_MAX_TOTAL_INJECTION_CHARS: int = 40000
+DEFAULT_WINDOW_LINES: int = 200
+MAX_LINES_PER_SLICE: int = 600
+MIN_TOTAL_INJECTION_CHARS: int = 512
+MAX_TOTAL_INJECTION_CHARS_UPPER: int = 200_000
+
+
+def _coerce_positive_int(raw: object, *, default: int, lo: int, hi: int) -> int:
+    """Coerce YAML scalar to a clamped int; never raises on malformed input. Excludes bool."""
+    if isinstance(raw, bool) or raw is None:
+        return default
+    try:
+        val = int(raw)
+        return max(lo, min(hi, val))
+    except (ValueError, TypeError):
+        return default
+
+
 @dataclass
 class ReviewerEngineConfig:
     mode: str = "auto"  # "auto" | "subagent" | "engine" | "manual"
@@ -142,6 +161,31 @@ class ReviewerEngineConfig:
     timeout_seconds: int = 60
     max_retries: int = 2
     max_tool_hops: int = 3
+    max_total_injection_chars: int = DEFAULT_MAX_TOTAL_INJECTION_CHARS
+    default_window_lines: int = DEFAULT_WINDOW_LINES
+    max_lines_per_slice: int = MAX_LINES_PER_SLICE
+
+    def __post_init__(self) -> None:
+        self.max_total_injection_chars = _coerce_positive_int(
+            self.max_total_injection_chars,
+            default=DEFAULT_MAX_TOTAL_INJECTION_CHARS,
+            lo=MIN_TOTAL_INJECTION_CHARS,
+            hi=MAX_TOTAL_INJECTION_CHARS_UPPER,
+        )
+        self.max_lines_per_slice = _coerce_positive_int(
+            self.max_lines_per_slice,
+            default=MAX_LINES_PER_SLICE,
+            lo=30,
+            hi=5000,
+        )
+        self.default_window_lines = _coerce_positive_int(
+            self.default_window_lines,
+            default=DEFAULT_WINDOW_LINES,
+            lo=30,
+            hi=self.max_lines_per_slice,
+        )
+        if self.default_window_lines > self.max_lines_per_slice:
+            self.default_window_lines = self.max_lines_per_slice
 
 
 def create_reviewer_client(
@@ -519,9 +563,12 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
             base_url=base_url_val,
             thinking=bool(re_data.get("thinking", True)),
             reasoning_effort=str(re_data.get("reasoning_effort", "high")).strip(),
-            timeout_seconds=int(re_data.get("timeout_seconds", 60)),
-            max_retries=int(re_data.get("max_retries", 2)),
-            max_tool_hops=int(re_data.get("max_tool_hops", 3)),
+            timeout_seconds=_coerce_positive_int(re_data.get("timeout_seconds"), default=60, lo=5, hi=600),
+            max_retries=_coerce_positive_int(re_data.get("max_retries"), default=2, lo=0, hi=10),
+            max_tool_hops=_coerce_positive_int(re_data.get("max_tool_hops"), default=3, lo=0, hi=10),
+            max_total_injection_chars=_coerce_positive_int(re_data.get("max_total_injection_chars"), default=DEFAULT_MAX_TOTAL_INJECTION_CHARS, lo=MIN_TOTAL_INJECTION_CHARS, hi=MAX_TOTAL_INJECTION_CHARS_UPPER),
+            default_window_lines=_coerce_positive_int(re_data.get("default_window_lines"), default=DEFAULT_WINDOW_LINES, lo=30, hi=2000),
+            max_lines_per_slice=_coerce_positive_int(re_data.get("max_lines_per_slice"), default=MAX_LINES_PER_SLICE, lo=30, hi=5000),
         )
     else:
         reviewer_engine = ReviewerEngineConfig(mode="manual", provider="none")

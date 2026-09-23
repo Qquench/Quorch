@@ -5,6 +5,16 @@ Unlike real-time specification documents (which reflect only the active design),
 
 ---
 
+## [2026-09-24] Consultation Context Guard & Declarative Budget Relaxation (议题一)
+
+- **Task 1.1**: 咨询上下文预算契约同步与声明式配置域校验门 (Context Budget Relaxation, Line Range Syntax & Declarative Clamping)
+  - **Declarative Budget & Line Range Slicing**: Introduced `max_total_injection_chars: 40000`, `default_window_lines: 200`, and `max_lines_per_slice: 600` in `ReviewerEngineConfig` with zero vendor lock-in and domain validation (`_coerce_positive_int`, `[512, 200000]`);
+  - **Syntax & Windows Path Defense**: Greedily matched `path:start-end` syntax with Windows drive letter (`C:\...`) compatibility and boundary clamping;
+  - **Unicode Safe Truncation & Early Short-Circuit**: Enforced global budget cap with string character slicing (no byte tearing), dynamic overhead subtraction, and pre-I/O short-circuit;
+  - **Prompt Cache Prefix Preservation**: Preserved 100% byte stability of `build_static_prefix` system prompt with pure user-turn context slice injection;
+  - **L1 SSOT Synchronization**: Updated `dev_tasks_mcp_specification.md` (§1.3, §2.5, §5) to eliminate cross-session contract drifts;
+  - **308+ Unit Tests**: Added 12 comprehensive unit tests in `test_consultation_context_guard.py` with 100% passing rate.
+
 ## [2026-09-23] 2026-09-23_cross_platform_path_guard.md
 
 - **Task 1.1**: 统一跨平台路径穿透防御与路径沙箱规范化 (Unified Cross-Platform Path Guard & Workspace Confinement)

@@ -229,3 +229,168 @@ async def test_dev_reviewer_consult_unconfigured_engine_degraded_safely(tmp_path
     assert res["findings"] == ""
     assert res["handoff_prompt"] is not None
     assert "严禁" in res["handoff_prompt"] or "请勿" in res["handoff_prompt"] or "Reviewer" in res["handoff_prompt"]
+
+
+def test_resolve_context_files_line_range_syntax_and_boundary_checks(tmp_path: Path):
+    """断言 path:start-end 行号区间文法解析与边界条件防御 (R-C3, R-C4)。"""
+    ws = tmp_path / "ws_syntax"
+    ws.mkdir()
+
+    # 创建一个 50 行的文件，每行清晰标号
+    content_50 = "".join([f"line_{i:03d} = {i}\n" for i in range(1, 51)])
+    target_file = ws / "sample.py"
+    target_file.write_text(content_50, encoding="utf-8")
+
+    # 创建一个空文件
+    empty_file = ws / "empty.py"
+    empty_file.write_text("", encoding="utf-8")
+
+    # 1. 正常区间切片：sample.py:10-25
+    slices, skipped, trunc = resolve_context_files(str(ws), ["sample.py:10-25"])
+    assert len(slices) == 1
+    assert "sample.py" not in skipped
+    assert slices[0].start_line == 10
+    assert slices[0].end_line == 25
+    assert slices[0].text.startswith("# file: sample.py:10-25\n")
+    assert "line_010 = 10\n" in slices[0].text
+    assert "line_025 = 25\n" in slices[0].text
+    assert "line_026 = 26\n" not in slices[0].text
+
+    # 2. 负向边界：倒置区间 25-10
+    slices_inv, skipped_inv, _ = resolve_context_files(str(ws), ["sample.py:25-10"])
+    assert len(slices_inv) == 0
+    assert "sample.py:25-10" in skipped_inv
+
+    # 3. 负向边界：0 开始行 0-10
+    slices_zero, skipped_zero, _ = resolve_context_files(str(ws), ["sample.py:0-10"])
+    assert len(slices_zero) == 0
+    assert "sample.py:0-10" in skipped_zero
+
+    # 4. 负向边界：起始行超出文件总行数 60-70 (总共 50 行)
+    slices_oob, skipped_oob, _ = resolve_context_files(str(ws), ["sample.py:60-70"])
+    assert len(slices_oob) == 0
+    assert "sample.py:60-70" in skipped_oob
+
+    # 5. 边界钳制：请求结束行超出文件总行数 40-80 -> 钳制为 40-50
+    slices_clamp, skipped_clamp, _ = resolve_context_files(str(ws), ["sample.py:40-80"])
+    assert len(slices_clamp) == 1
+    assert slices_clamp[0].start_line == 40
+    assert slices_clamp[0].end_line == 50
+    assert slices_clamp[0].text.startswith("# file: sample.py:40-50\n")
+
+    # 6. 边界钳制：单次切片行数超出 max_lines_per_slice 限制
+    slices_max_lines, _, _ = resolve_context_files(
+        str(ws),
+        ["sample.py:5-45"],
+        max_lines_per_slice=15,
+    )
+    assert len(slices_max_lines) == 1
+    assert slices_max_lines[0].start_line == 5
+    assert slices_max_lines[0].end_line == 19  # 5 + 15 - 1 = 19
+    assert slices_max_lines[0].text.startswith("# file: sample.py:5-19\n")
+
+    # 7. 空文件处理：显式行号应当被 skipped，无行号应当返回 start=0, end=0
+    slices_empty_exp, skipped_empty_exp, _ = resolve_context_files(str(ws), ["empty.py:1-5"])
+    assert len(slices_empty_exp) == 0
+    assert "empty.py:1-5" in skipped_empty_exp
+
+    slices_empty_plain, skipped_empty_plain, _ = resolve_context_files(str(ws), ["empty.py"])
+    assert len(slices_empty_plain) == 1
+    assert slices_empty_plain[0].start_line == 0
+    assert slices_empty_plain[0].end_line == 0
+
+
+def test_resolve_context_files_global_budget_char_safe_truncation(tmp_path: Path):
+    """断言全局注入字符上限预算 max_total_injection_chars 与字符安全截断 (R-C1, R-C5)。"""
+    ws = tmp_path / "ws_budget"
+    ws.mkdir()
+
+    # 构造两个各 1000 字符的文件
+    f1 = ws / "file1.py"
+    f1.write_text("# F1\n" + "A" * 900 + "\n", encoding="utf-8")
+    f2 = ws / "file2.py"
+    f2.write_text("# F2\n" + "B" * 900 + "\n", encoding="utf-8")
+
+    # 设置预算刚好容纳 f1 但无法容纳完整 f2
+    # f1 约 910 字符，加上 anchor 约 940 字符。
+    # 给定 max_total_injection_chars = 1400，f2 必须发生安全字符截断
+    slices, skipped, is_truncated = resolve_context_files(
+        str(ws),
+        ["file1.py", "file2.py"],
+        max_total_injection_chars=1400,
+    )
+
+    assert is_truncated is True
+    assert len(slices) == 2
+    # f1 完整放入
+    assert "A" * 800 in slices[0].text
+    # f2 被截断并包含提示标记
+    assert "[... truncated due to global budget cap ...]" in slices[1].text
+    # 总字符严格不超过 1400
+    total_len = sum(len(s.text) for s in slices)
+    assert total_len <= 1400
+
+
+def test_reviewer_engine_config_declarative_injection_limits(tmp_path: Path):
+    """断言 QuenchStackConfig 能够声明式读取 max_total_injection_chars、default_window_lines 等参数 (R-C6)。"""
+    from project_config import load_project_config
+
+    ws = tmp_path / "ws_config"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    yaml_content = """schema_version: "1.0"
+project_name: "InjectionLimitsTest"
+reviewer_engine:
+  mode: "subagent"
+  provider: "custom-openai"
+  model: "gpt-4o"
+  base_url: "https://api.openai.com/v1"
+  max_total_injection_chars: 48000
+  default_window_lines: 240
+  max_lines_per_slice: 550
+"""
+    (agents_dir / "quench_stack.yaml").write_text(yaml_content, encoding="utf-8")
+
+    cfg = load_project_config(str(ws))
+    re_cfg = cfg.reviewer_engine
+
+    assert re_cfg is not None
+    assert re_cfg.provider == "custom-openai"
+    assert re_cfg.max_total_injection_chars == 48000
+    assert re_cfg.default_window_lines == 240
+    assert re_cfg.max_lines_per_slice == 550
+
+
+def test_reviewer_engine_config_malformed_scalars_coerced_and_clamped():
+    """断言 ReviewerEngineConfig 在遇到非法类型、越界数值及偏序冲突时安全钳制并自愈。"""
+    # 1. 字符串标量、负数与反常值
+    cfg = ReviewerEngineConfig(
+        max_total_injection_chars="abc",  # type: ignore
+        default_window_lines=-5,
+        max_lines_per_slice=600,
+    )
+    assert isinstance(cfg.max_total_injection_chars, int)
+    assert cfg.max_total_injection_chars == 40000  # 回退到默认值
+    assert cfg.default_window_lines == 30          # 钳制到下界 30
+
+    # 2. 超出上界与偏序反转：default_window_lines > max_lines_per_slice
+    cfg_inverted = ReviewerEngineConfig(
+        max_total_injection_chars=999_999,
+        default_window_lines=1200,
+        max_lines_per_slice=500,
+    )
+    assert cfg_inverted.max_total_injection_chars == 200_000
+    assert cfg_inverted.max_lines_per_slice == 500
+    # 偏序规则：default_window_lines 受 max_lines_per_slice 钳制
+    assert cfg_inverted.default_window_lines == 500
+
+    # 3. 布尔陷阱（True/False 是 int 子类）
+    cfg_bool = ReviewerEngineConfig(
+        max_total_injection_chars=True,  # type: ignore
+        default_window_lines=False,      # type: ignore
+    )
+    assert cfg_bool.max_total_injection_chars == 40000
+    assert cfg_bool.default_window_lines == 200
+
+

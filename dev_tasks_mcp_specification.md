@@ -1,7 +1,7 @@
 # Quench-DevTasks MCP Service Architecture & Specification (DevTasks Orchestrator Spec)
 
-> **Version**: v1.5.0 (Implemented & Verified)  
-> **Implementation Status**: ✔️ Fully implemented and verified with 230 automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, ad-hoc architectural consultation `dev_reviewer_consult`, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
+> **Version**: v1.6.0 (Implemented & Verified)  
+> **Implementation Status**: ✔️ Fully implemented and verified with 308+ automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, ad-hoc architectural consultation `dev_reviewer_consult`, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
 > **Source Specification**: `dev_tasks_mcp_specification.md`  
 > **Workflow Reference**: [DevTasks Workflow Specification](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
 > **Role & Purpose**: General-purpose development task governance and dual-model orchestration MCP server for engineering repositories.
@@ -47,6 +47,9 @@ reviewer_engine:
   timeout_seconds: 60
   max_retries: 2
   max_tool_hops: 3
+  max_total_injection_chars: 40000 # Declarative context budget ceiling [512, 200000]
+  default_window_lines: 200       # Default lines when no line range is given
+  max_lines_per_slice: 600        # Maximum lines allowed per explicit slice
 ```
 
 Upstream providers are instantiated via the declarative `PROVIDER_PRESETS` registry (`create_reviewer_client`):
@@ -120,7 +123,7 @@ To prevent hallucinated file paths and unverified commands from entering the for
 To address the "roleplaying loophole" and remove the requirement of task sheets for spontaneous architectural exploration:
 - **Strict Anti-Roleplaying Invariant**: In-context impersonation of the Reviewer by the everyday executor model is strictly forbidden. When the external Reviewer engine is unconfigured or offline, tools MUST return a structured degraded card with **`findings == ""`**. Never fabricate critique text.
 - **Atomic Ad-Hoc Consultation (`dev_reviewer_consult`)**: Exposes a direct read-only consultation tool supporting 4 modes (`critique`, `evaluate`, `brainstorm`, `audit`) without modifying tasks or creating files.
-- **Read-Only Context Guard**: Enforces workspace path sandbox boundaries, line range window slices, and a strict 12,000-character context budget to prevent token inflation.
+- **Read-Only Context Guard**: Enforces workspace path sandbox boundaries, line range window slices, and a default 40,000-character context budget (declaratively configurable via `.agents/quench_stack.yaml` up to 200,000 chars) to balance deep context inspection with token inflation defense.
 - **Byte-Level Stable Prompt Prefix Caching**: System prompt prefixes are generated with thread-safe caching (`_PREFIX_CACHE`), maximizing upstream LLM Prompt Cache hit rates.
 
 ---
@@ -180,7 +183,7 @@ All specifications are verified across the codebase:
 | **Draft & Feasibility Gate** | `server/schema_validator.py`<br>`server/server.py` | Physical existence checks, dry-run `--collect-only`, atomic `dev_tasks_promote_draft` |
 | **Reviewer Engine & Presets** | `server/reviewer_engine.py` | Pluggable vendor-neutral `ReviewerClient`, declarative `PROVIDER_PRESETS`, generic CoT probe |
 | **Neutrality Gate** | `server/tests/test_no_vendor_literals_in_core.py` | Automated static source scan gate ensuring zero vendor literals in core modules |
-| **Ad-Hoc Consultation** | `server/consultation.py`<br>`server/server.py` | `dev_reviewer_consult`, read-only path sandbox, 12,000-char budget, stable prefix cache |
+| **Ad-Hoc Consultation** | `server/consultation.py`<br>`server/server.py` | `dev_reviewer_consult`, read-only path sandbox, default 40,000-char budget (declarative), stable prefix cache |
 | **Observability Sinks** | `server/reviewer_engine.py`<br>`server/observability.py` | `RotatingFileSink`, bounded disk writes, 1.0s low-frequency MCP heartbeats, zero stdout pollution |
 | **Physical Guards** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py`<br>`scripts/git_pre_commit_guard.py` | `PreToolUse` physical interception (`force_ask`), `PreInvocation` reminder injection, Git pre-commit barrier |
 | **Decoupled Config** | `server/project_config.py`<br>`templates/quench_stack.yaml` | Workspace `.agents/quench_stack.yaml` integration with migration engine |
@@ -189,5 +192,5 @@ All specifications are verified across the codebase:
 | **Rules Exporter** | `scripts/rules_exporter.py` | Exports `.cursorrules` and modern `.cursor/rules/quench-dev-tasks.mdc` |
 | **Unified CLI** | `server/cli.py` | Standalone `quorch status/check/init/archive` terminal command suite |
 | **Installer** | `scripts/install.py`<br>`scripts/init_project.py` | Pre-flight health checks, snapshot backup/rollback, automated IDE configuration |
-| **Test Matrix** | `server/tests/` (230 tests) | 100% passing test coverage across Windows and Ubuntu environments |
+| **Test Matrix** | `server/tests/` (308+ tests) | 100% passing test coverage across Windows and Ubuntu environments |
 
