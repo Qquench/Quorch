@@ -10,7 +10,7 @@
 
 ## 批次 1 (Batch 1): 厂商中立客户端重构与硬编码清洗
 
-### 任务 1.1 ⬜ 待确认 — 将 DeepSeekClient 重构为厂商中立 ReviewerClient 并抽象通用推理草稿协议探针 (Vendor-Neutral ReviewerClient & Generic CoT Probe)
+### 任务 1.1 ✅ 已确认 — 将 DeepSeekClient 重构为厂商中立 ReviewerClient 并抽象通用推理草稿协议探针 (Vendor-Neutral ReviewerClient & Generic CoT Probe)
 
 #### 【涉及文件】
 
@@ -126,7 +126,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 1.2 ⬜ 待确认 — 引入 PROVIDER_PRESETS 声明式中立工厂并清除 server.py 厂商硬分支 (Declarative Provider Registry & Branch Removal)
+### 任务 1.2 ✅ 已确认 — 引入 PROVIDER_PRESETS 声明式中立工厂并清除 server.py 厂商硬分支 (Declarative Provider Registry & Branch Removal)
 
 #### 【涉及文件】
 
@@ -235,7 +235,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 1.3 ⬜ 待确认 — 建立源码级中立性防回归扫描闸门并重构引擎既有测试为协议中立形态 (Neutrality Regression Gate)
+### 任务 1.3 ✅ 已确认 — 建立源码级中立性防回归扫描闸门并重构引擎既有测试为协议中立形态 (Neutrality Regression Gate)
 
 #### 【涉及文件】
 
