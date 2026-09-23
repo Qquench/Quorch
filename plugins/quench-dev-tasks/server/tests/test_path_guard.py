@@ -69,7 +69,12 @@ ATTACK_VECTORS = [
     "COM1",
     "com3.py",
     "LPT2",
-    # 13. Empty or null values
+    "CONIN$",
+    "CONOUT$",
+    # 13. NTFS Alternate Data Streams (ADS)
+    "file.txt:evil.exe",
+    "doc.pdf:stream",
+    # 14. Empty or null values
     "",
     "   ",
     "  \t\n  ",
@@ -178,3 +183,19 @@ def test_symlink_escape_defense(tmp_path: Path):
     # Attempting to access file through symlink pointing outside workspace must be blocked
     with pytest.raises(PathTraversalError):
         sanitize_workspace_path(str(tmp_path), "leak_link/secret.txt")
+
+
+def test_sibling_prefix_defense(tmp_path: Path):
+    """Paths resolving to sibling directories that share a string prefix must be blocked."""
+    # E.g. ws is /base/project, sibling is /base/project-evil
+    ws = tmp_path / "project"
+    ws.mkdir()
+    sibling = tmp_path / "project-evil"
+    sibling.mkdir()
+    evil_file = sibling / "payload.py"
+    evil_file.write_text("# evil", encoding="utf-8")
+
+    # Access via traversal from ws to sibling sharing string prefix
+    with pytest.raises(PathTraversalError):
+        sanitize_workspace_path(str(ws), "../project-evil/payload.py")
+

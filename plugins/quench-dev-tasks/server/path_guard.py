@@ -11,11 +11,11 @@ import re
 import urllib.parse
 from typing import Final, Sequence
 
-_NUL: Final = re.compile(r"\x00")
+_NUL_BYTE_RE: Final = re.compile(r"\x00")
 _DRIVE: Final = re.compile(r"^[a-zA-Z]:")
 _MULTI_DOT: Final = re.compile(r"^\.{3,}$")
-_WIN_RESERVED: Final = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
+_WIN_RESERVED_NAMES: Final = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
 )
@@ -34,6 +34,18 @@ def sanitize_workspace_path(
     allow_workspace_root: bool = False,
 ) -> str:
     """Sanitize and confine a candidate path within workspace_root, returning a canonical absolute realpath.
+
+    Pipeline invariant:
+    1. Null & empty string checks
+    2. NUL byte injection check
+    3. URL / percent-encoded traversal inspection
+    4. Host-invariant separator normalization (replace '\\' with '/')
+    5. Structural reject: absolute ('/'), UNC ('//'), drive / NTFS ADS (':')
+    6. Component-level defense: Win32 reserved names, trailing space/dot, multi-dot
+    7. Physical resolution via realpath(abspath(join(...)))
+    8. Sandboxed confinement via commonpath with normcase comparison
+    9. Relative path prefix traversal assertion
+    10. Physical disk existence check (if must_exist=True)
 
     Args:
         workspace_root: Absolute or relative root of the managed workspace.
@@ -55,7 +67,7 @@ def sanitize_workspace_path(
         raise PathTraversalError("Candidate path cannot be empty or whitespace only")
 
     # 1. NUL byte injection defense
-    if _NUL.search(cand_str):
+    if _NUL_BYTE_RE.search(cand_str):
         raise PathTraversalError(f"NUL byte injection detected in path: {candidate!r}")
 
     # 2. URL / percent-encoded traversal defense
@@ -68,9 +80,10 @@ def sanitize_workspace_path(
                     "/.." in norm_unquoted
                     or norm_unquoted.startswith("../")
                     or norm_unquoted == ".."
-                    or _NUL.search(unquoted)
+                    or _NUL_BYTE_RE.search(unquoted)
                     or norm_unquoted.startswith("/")
                     or _DRIVE.match(norm_unquoted)
+                    or ":" in norm_unquoted
                 ):
                     raise PathTraversalError(
                         f"Percent-encoded traversal vector detected: {candidate!r}"
@@ -83,13 +96,13 @@ def sanitize_workspace_path(
     # 3. Host-invariant separator normalization (BEFORE any path operations)
     norm = cand_str.replace("\\", "/")
 
-    # 4. Reject absolute / UNC / Windows drive formats pre-resolution
+    # 4. Reject absolute / UNC / Windows drive / NTFS ADS formats pre-resolution
     if norm.startswith("/"):
         raise PathTraversalError(f"Absolute path escapes workspace: {candidate!r}")
     if norm.startswith("//"):
         raise PathTraversalError(f"UNC network path escapes workspace: {candidate!r}")
-    if _DRIVE.match(norm):
-        raise PathTraversalError(f"Windows drive path rejected: {candidate!r}")
+    if ":" in norm:
+        raise PathTraversalError(f"Colon, Windows drive, or NTFS ADS path rejected: {candidate!r}")
 
     # 5. Component-level defense: Win32 aliases, multi-dots, trailing spaces/dots
     parts = norm.split("/")
@@ -103,7 +116,7 @@ def sanitize_workspace_path(
                 f"Win32 trailing dot/space evasion detected: {candidate!r}"
             )
         stem = part.split(".")[0].upper()
-        if stem in _WIN_RESERVED:
+        if stem in _WIN_RESERVED_NAMES:
             raise PathTraversalError(
                 f"Windows reserved device name detected: {candidate!r}"
             )
@@ -118,7 +131,8 @@ def sanitize_workspace_path(
     except ValueError:
         raise PathTraversalError(f"Cross-drive path escapes workspace: {candidate!r}")
 
-    if common != real_ws:
+    # Use normcase for host-safe case comparison (prevents Windows C: vs c: false positives)
+    if os.path.normcase(common) != os.path.normcase(real_ws):
         raise PathTraversalError(f"Path escapes workspace root: {candidate!r}")
 
     # 8. Relative path check (extra defense against edge degenerate resolutions)
