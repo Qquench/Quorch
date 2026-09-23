@@ -1,6 +1,6 @@
 # 2026-09-21_stage5_vendor_neutrality_and_consultation Development Tasks / 开发任务单
 
-> **路线图来源**: `docs/roadmap/stage5_vendor_neutral_reviewer_and_adhoc_consultation.md`
+> **路线图来源**: `docs/roadmap/v1.5_stage05_vendor_neutral_reviewer_and_adhoc_consultation.md`
 > **批次划分**: Batch 1（厂商中立重构，任务 1.1–1.3）→ Batch 2（即时咨询工具与防角色扮演治理，任务 2.1–2.3）
 > **串行约束**: 严格遵守单核串行施工原则，同一时间仅允许一个任务处于 `🔨 执行中`；Batch 1 全绿归档后方可启动 Batch 2（Batch 2 直接依赖 Batch 1 产出的 `create_reviewer_client` 工厂与 `ProviderPreset` 契约）。
 > **语言约定**: 本任务单采用中文正文与中文六字段标题，执行时严禁翻译或改写为英文标题（镜像契约）。
