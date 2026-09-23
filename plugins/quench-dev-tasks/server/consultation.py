@@ -30,6 +30,11 @@ from reviewer_engine import (
     extract_usage,
 )
 
+class ReasoningBudgetExceededError(ReviewerEngineError):
+    """推理链长度超出安全天花板异常。"""
+    pass
+
+
 ConsultMode = Literal["critique", "evaluate", "brainstorm", "audit"]
 VALID_MODES: tuple[str, ...] = ("critique", "evaluate", "brainstorm", "audit")
 
@@ -473,10 +478,16 @@ async def run_consultation(
                     buffer = ""
 
                     try:
+                        accumulated_reasoning_chars = 0
                         async for chunk in client.stream_chat(messages):
-                            if chunk.reasoning:
+                            reasoning = getattr(chunk, "reasoning", "") or ""
+                            chunk_text = getattr(chunk, "text", "") or ""
+                            if reasoning:
+                                accumulated_reasoning_chars += len(reasoning)
+                                if accumulated_reasoning_chars > MAX_REASONING_TOKENS_CEILING * 4:
+                                    raise ReasoningBudgetExceededError("Reasoning tokens exceeded ceiling 32000")
                                 iso_ts = datetime.now(timezone.utc).isoformat()
-                                buffer += f"{iso_ts} [reasoning] {chunk.reasoning}\n"
+                                buffer += f"{iso_ts} [reasoning] {reasoning}\n"
                                 now = time.monotonic()
                                 if len(buffer) >= 512 or (now - last_flush_t >= 0.2):
                                     sink.write_chunk_text(buffer)
@@ -484,12 +495,13 @@ async def run_consultation(
                                     buffer = ""
                                     last_flush_t = now
 
-                            if chunk.text:
-                                content_parts.append(chunk.text)
+                            if chunk_text:
+                                content_parts.append(chunk_text)
 
                         if buffer:
                             sink.write_chunk_text(buffer)
                             sink.flush()
+                            buffer = ""
 
                         full_text = "".join(content_parts)
                         return {"content": full_text, "usage": {}}
@@ -501,6 +513,14 @@ async def run_consultation(
                             sink.write_chunk_text(f"{iso_ts} [reasoning] {reasoning}\n")
                             sink.flush()
                         return resp
+                    finally:
+                        if buffer:
+                            try:
+                                sink.write_chunk_text(buffer)
+                                sink.flush()
+                                buffer = ""
+                            except Exception:
+                                pass
 
                 try:
                     raw_result = await asyncio.wait_for(_call_engine(), timeout=float(timeout_s))
@@ -525,13 +545,38 @@ async def run_consultation(
                             f"请尝试缩小 context_files 或提高 timeout_seconds 配置。"
                         ),
                     )
+                except ReasoningBudgetExceededError:
+                    sink.write_chunk_text(
+                        f"\n{datetime.now(timezone.utc).isoformat()} [error] Reasoning budget ceiling exceeded\n"
+                    )
+                    sink.flush()
+                    return ConsultResult(
+                        status="degraded",
+                        session_id=session_id,
+                        mode=mode,
+                        findings="",
+                        log_path=str(log_file),
+                        usage=total_usage,
+                        truncated=truncated,
+                        skipped_files=active_skipped,
+                        degraded_reason="reasoning_budget_exceeded",
+                        handoff_prompt=(
+                            "[Reasoning Budget Exceeded]\n"
+                            "思考流超出 32000 tokens 安全天花板，已主动熔断。部分思考轨迹已保存至日志，请精简问题或降低上下文量。"
+                        ),
+                    )
                 except ReviewerEngineError as ee:
                     err_msg = str(ee)
                     sink.write_chunk_text(
                         f"\n{datetime.now(timezone.utc).isoformat()} [error] ReviewerEngineError: {err_msg}\n"
                     )
                     sink.flush()
-                    deg_reason = "auth" if ("401" in err_msg or "鉴权" in err_msg) else "network"
+                    if "401" in err_msg or "鉴权" in err_msg:
+                        deg_reason = "auth_401"
+                    elif "connection" in err_msg.lower() or "unavailable" in err_msg.lower() or "refused" in err_msg.lower():
+                        deg_reason = "connect_error"
+                    else:
+                        deg_reason = "network"
                     return ConsultResult(
                         status="degraded",
                         session_id=session_id,
@@ -550,8 +595,8 @@ async def run_consultation(
                 usage_snap = extract_usage(raw_result)
                 total_usage["prompt_tokens"] += usage_snap.prompt_tokens
                 total_usage["completion_tokens"] += usage_snap.completion_tokens
-                total_usage["total_tokens"] += usage_snap.total_tokens
-                total_usage["prompt_cache_hit_tokens"] += usage_snap.prompt_cache_hit_tokens
+                total_usage["total_tokens"] += (usage_snap.prompt_tokens + usage_snap.completion_tokens)
+                total_usage["prompt_cache_hit_tokens"] += usage_snap.cached_tokens
 
                 # 检查上下文扩展轮次
                 need_files_match = NEED_FILES_PATTERN.search(findings_text)

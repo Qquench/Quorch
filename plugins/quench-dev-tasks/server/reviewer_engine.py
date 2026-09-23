@@ -350,21 +350,28 @@ class RotatingFileSink:
             self._fp.flush()
 
     def on_finish(self, reason: str, meta: Dict[str, Any]) -> None:
-        if self._is_closed:
-            return
-        if self._carry_over:
-            final_text = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", self._carry_over)
-            self._carry_over = ""
-            data_bytes = final_text.encode("utf-8")
-            self._rotate_if_needed(len(data_bytes))
-            self._fp.write(final_text)
-            self._written_bytes += len(data_bytes)
         self.close()
+
+    def flush(self) -> None:
+        """显式刷新写缓冲区至底层磁盘文件。"""
+        if not self._is_closed and not self._fp.closed:
+            try:
+                self._fp.flush()
+                self._last_flush = time.monotonic()
+            except Exception:
+                pass
 
     def close(self) -> None:
         if not self._is_closed:
             self._is_closed = True
             try:
+                if self._carry_over:
+                    final_text = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", self._carry_over)
+                    self._carry_over = ""
+                    data_bytes = final_text.encode("utf-8")
+                    self._rotate_if_needed(len(data_bytes))
+                    self._fp.write(final_text)
+                    self._written_bytes += len(data_bytes)
                 if not self._fp.closed:
                     self._fp.flush()
                     self._fp.close()

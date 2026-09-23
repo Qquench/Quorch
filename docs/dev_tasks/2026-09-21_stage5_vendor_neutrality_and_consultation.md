@@ -548,7 +548,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 2.3 ✅ 已确认 — 新增 dev_reviewer_consult 全行为矩阵单测并完成 Stage 5 端到端验收 (Consultation E2E Matrix)
+### 任务 2.3 ✔️ 已完成 — 新增 dev_reviewer_consult 全行为矩阵单测并完成 Stage 5 端到端验收 (Consultation E2E Matrix)
 
 #### 【涉及文件】
 
