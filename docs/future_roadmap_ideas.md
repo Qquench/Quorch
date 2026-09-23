@@ -117,3 +117,29 @@ Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、�
   - 自动化构建并发布至 PyPI，允许外部开发者直接执行 `uvx quorch --init` 或 `pipx run quorch init` 一键初始化任何第三方技术栈项目。
 - **Interactive TUI / CLI Wizard**:
   - 增强 `quorch` CLI 交互式向导，支持通过键盘方向键与问答一键生成符合规范的标准任务草案。
+
+---
+
+## 2026-09-23 — Microkernel Decoupling & Inversion of Control: Zero-API-Cost Pure Governance (微内核彻底解耦与控制权反转：零额外 API 费用的纯粹治理微内核)
+
+### 1. Motivation & Background (背景与契机)
+随着现代 AI IDE（如 Antigravity / Claude Code）普及原生 Subagent 多智能体协作并提供包月/包年订阅套餐，开发者倾向于将任务规划者（Reviewer）与工程搬砖者（Runner）全部配置为 IDE 内生子代理，实现 $0 额外第三方模型 API 账单。
+在此背景下，Quorch 服务端若继续强耦合主动出站 HTTP API 客户端，将导致逻辑冗余并割裂开发者已付费的 IDE 内置配额。需要推演系统从“代理执行编排者”向“纯粹任务治理微内核（Pure Governance Kernel）”的彻底解耦路径。
+
+### 2. Why not now? (为什么当期不做)
+- 当前 Stage 5 首要目标是实现厂商中立性（OpenAI 兼容协议标准化）与 `dev_reviewer_consult` 即席咨询支持，现有基于 API 的外部 Reviewer 通路已通过 167 项完整测试验证，稳定性最高。
+- 剥离或降级出站调用逻辑属于协议拓扑维度的根本性架构演进，需先沉淀完备的子代理指令契约与租约回收机制，避免激进破坏当期交付节奏。
+
+### 3. Key Architecture & Preconditions (核心构想与前置条件)
+- **Control Inversion & Return Contract Seam (控制权反转与返回契约 Seam)**:
+  - 架构抽象点收敛于 `dev_tasks_refine_spec` 的返回契约（Discriminated Union）：
+    - `mode: subagent`: 返回 `dispatch_directive`（结构化调度指令，由主代理/IDE 分派子代理，零出站请求）；
+    - `mode: engine`: 返回 `inline_reasoning`（Quorch 接管多轮推理循环并流式返回，即现状）；
+    - `mode: manual`: 返回 `manual_handoff`（交接卡文本与待办指引）。
+- **Headless Microkernel Architecture (无头微内核架构)**:
+  - 状态机（FileLock 互斥锁）、六大字段校验器、FileScopeGuard 物理拦截、物理可行性门禁与 Git 审计构成不可变内核，绝不感知任何拓扑 `mode` 分支或厂商差异；出站网络请求完全下沉至可插拔扩展层。
+- **Lease Timeout & Deadlock Reaper (租约超时与僵尸任务回收器)**:
+  - 在 IDE 子代理调度并发域中，为 `In Progress` 检出引入租约生命周期（`lease_expires_at`），防止子代理意外崩溃后全局互斥锁永久死锁。
+- **Task Directory Physical Defense & Bypass Audit (任务目录物理防线与旁路拦截)**:
+  - 封堵具备文件编辑权限的内生子代理直接通过 `write_to_file` 绕过 `dev_tasks_propose` 篡改任务的漏洞，确保所有任务创建与流转强制通过内核门禁。
+

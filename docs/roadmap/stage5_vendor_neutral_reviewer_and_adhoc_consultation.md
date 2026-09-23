@@ -119,7 +119,22 @@
 
 ## 4. 实施阶段规划 (Execution Phases)
 
-1. **阶段 5.1**: 通用客户端重构与厂商硬编码全面清洗（重命名、配置默认值中立化、去除 server.py 厂商分支）；
-2. **阶段 5.2**: `dev_reviewer_consult` MCP 工具实现、上下文挂载与思考流落盘联调；
-3. **阶段 5.3**: 规则库与技能说明硬化（防角色扮演）；
-4. **阶段 5.4**: 新增测试矩阵与全量回归验证。
+本阶段聚焦于 2 个高内聚批次（共 6 个细粒度 DevTasks，详见任务清单 [`docs/dev_tasks/2026-09-21_stage5_vendor_neutrality_and_consultation.md`](../dev_tasks/2026-09-21_stage5_vendor_neutrality_and_consultation.md)）：
+
+- **第一阶段 (Batch 1 - 通用客户端与厂商净化)**:
+  - Task 1.1: `ReviewerClient` 统一基类与通用协议探针标准化重构；
+  - Task 1.2: 动态 Provider 注册表 (`PROVIDER_PRESETS`) 与规范化配置项；
+  - Task 1.3: 静态无厂商偏好测试 (`test_no_vendor_literals_in_core.py`)。
+- **第二阶段 (Batch 2 - 即席咨询通道与防角色扮演)**:
+  - Task 2.1: `dev_reviewer_consult` MCP 工具实现与思考流实时分块落盘；
+  - Task 2.2: 主模型防角色扮演治理规则与技能说明硬化；
+  - Task 2.3: 即席架构咨询端到端测试矩阵。
+
+---
+
+## 5. 后续演进路线衔接 (Next Milestone Handoff)
+
+随着 Stage 5 达成厂商中立与咨询通道，后续关于多智能体微内核加固、拓扑自适应观测分流、Fencing Token 租约治理与任务目录双向互锁的完整技术规划，已独立升格并排期至下一阶段：
+👉 **[Stage 6: 治理微内核升维：拓扑自适应观测分流、智能租约回收器与任务目录双向互锁](./stage6_microkernel_adaptive_observability_and_governance_interlock.md)**
+
+

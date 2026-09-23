@@ -1,0 +1,111 @@
+# Stage 6: 治理微内核升维：拓扑自适应观测分流、智能租约回收器与任务目录双向互锁
+(Stage 6: Governance Microkernel Elevation: Adaptive Observability, Smart Conditional Reaper & Task Directory Two-Way Interlock)
+
+> **路线图状态**: 📋 已立项待推进 (Planned / Upcoming Milestone)  
+> **起始时间**: 紧随 Stage 5 交付验收后启动  
+> **前置里程碑**: ✔️ Stage 5 (`docs/roadmap/stage5_vendor_neutral_reviewer_and_adhoc_consultation.md`)  
+> **核心目标**: 
+> 1. **拓扑自适应观测分流 (`ObservabilityPolicy`)**: 在 `mode: subagent` 下物理旁路流式写盘，0 磁盘 I/O 消除噪声，将思考流观测交还 IDE 原生 UI；同时建立永久生效的最终裁决快照通道 (`VerdictAuditSink`) 确保跨会话审计链；
+> 2. **智能条件判断回收器 (Smart Conditional Reaper)**: 废除死板的单一绝对超时标量，建立基于多维客观事实（心跳、文件 mtime、Git dirty、会话存活）的健康判定，并引入 Fencing Token 租约机制与 CAS 交互式幂等回收 (`dev_tasks_reclaim`)，杜绝子代理崩溃僵尸死锁；
+> 3. **任务目录物理防护与双向互锁 (Two-Way Interlock)**: `FileScopeGuard` 扩展识别 Shell 重定向与符号链接别名逃逸（前置断绝），联动中心化 `.agents/.quorch/manifest.json` 权威清单对任务哈希对账拒认（后置拒认），彻底封死子代理直接篡改任务目录的旁路漏洞。
+
+---
+
+## 1. 背景与演进契机 (Context & Motivation)
+
+在推进 Stage 5（厂商中立与即席咨询）的架构推演中，结合全用量内部化（$0 额外 API 账单、全部采用 IDE 原生 Subagent）的演进趋势，外部架构审查引擎深度诊断出三项关键的工程与安全性挑战：
+
+1. **挑战 A（观测噪声与审计平衡）**：
+   - 现有的 `RotatingFileSink` 专为外挂 API 设计。当切换为 IDE 内生子代理时，中间思考 Token 根本不会跨过 stdio 边界，写盘流变成无意义的空写入与 I/O 浪费；但若彻底废除日志，又会导致跨会话事后审计证据链断裂。
+2. **挑战 B（僵尸任务死锁与超时误杀）**：
+   - 现有的跨进程单核排他锁（`FileLock`）严格保证同一时刻全项目只有一个 `[In Progress]` 任务。但在 IDE 子代理调度并发域中，若子代理在执行过程中崩溃或断线，固定绝对超时要么过短误杀正常深度推理，要么过长导致全局队列陷入数小时死锁。
+3. **挑战 C（任务目录旁路漏洞 The Bypass Hole）**：
+   - IDE 内置的 Worker 子代理通常拥有通用的文件写入工具（如 `write_to_file` 或 Shell 命令）。若子代理绕过 `dev_tasks_propose`，直接在 `docs/dev_tasks/` 目录下伪造 `.md` 任务文件，现存的状态机与 Schema 校验门禁将被全部跳过，造成治理防线的虚脱。
+
+---
+
+## 2. 核心架构规划 (Core Architecture)
+
+```
+┌───────────────────────────────── 治理微内核 (Pure Governance Kernel) ──────────────────────────────────┐
+│                                                                                                        │
+│   [第一道防线：前置物理断绝 (Guard)]                                                                     │
+│   FileScopeGuard (PreToolUse 拦截):                                                                    │
+│   • 严格管控 docs/dev_tasks/** 与 .agents/.quorch/**，普通写工具一律 DENY                                │
+│   • 正则拦截 Shell 写入重定向 (> / >> / tee)                                                           │
+│   • 解析强化: 禁止 .. 别名与符号链接逃逸                                                                │
+│   • 仅放行带有内存临时 kernel_nonce 签名的内核内部写入                                                 │
+│                                                                                                        │
+│   [第二道防线：后置权威校验 (Authority)]                                                                 │
+│   .agents/.quorch/manifest.json 权威清单 (FileLock + 原子替换):                                         │
+│   • 记录 task_id, md_sha256, generation, holder_token, last_heartbeat                                  │
+│   • dev_tasks_status 状态扫描时逐一哈希对账，未登记/篡改文件直接标为 [UNAUTHORIZED_BYPASS] 并踢出队列     │
+│                                                                                                        │
+│   [租约与回收治理 (Reaper)]                                                                            │
+│   Fencing Token 模式:                                                                                  │
+│   • checkout 派发独占 holder_token 并递增 generation                                                   │
+│   • reaper.probe 多维健康判定: 心跳 + [Affected Files] mtime + 会话存活性                              │
+│   • 疑似僵尸态 (STALE_SUSPECT) 提示人类/Agent 交互式确认，CAS 幂等回收 (dev_tasks_reclaim)             │
+│                                                                                                        │
+│   [自适应可观测性 (ObservabilityPolicy)]                                                               │
+│   • mode: subagent ──► 流式日志短路 (0 I/O)，思考流由 IDE 原生 UI 渲染                                  │
+│   • mode: engine   ──► 激活 RotatingFileSink 与心跳探针                                                │
+│   • 统一归宿       ──► VerdictAuditSink 有界追加 (≤16KB) 至 reviewer_verdicts.jsonl                    │
+│                                                                                                        │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. 史诗级任务拆解 (Epic Breakdown)
+
+### Epic 1: 拓扑自适应观测策略与快照审计 (Adaptive Observability)
+- **目标**: 按调用拓扑分流，消除子代理模式下的写盘噪声，并建立规范的裁决快照持久化通道。
+- **核心成果**:
+  - `ObservabilityPolicy` 策略解析器：集中管控 `StreamMode.DISABLED|ENABLED|MINIMAL`；
+  - `RotatingFileSink` 接入 Policy：路径为空时直接短路返回，零多余文件创建；
+  - `VerdictAuditSink`：独立于流式日志，行式 JSONL 有界追加（上限 16 KiB，截断防爆），记录跨会话核心裁决。
+
+### Epic 2: 智能条件判断回收器与 Fencing Token 租约治理 (Smart Reaper)
+- **目标**: 废弃死板超时，建立以客观事实为基准的健康度判定与无死锁回收闭环。
+- **核心成果**:
+  - `dev_tasks_heartbeat` MCP 心跳工具与节流防刷；
+  - Fencing Token 租约模式：`state_machine.checkout` 返回 `(holder_token, generation)`，并在后续状态入口强制校验；
+  - `reaper.probe` 多维探测器：合取心跳超时、文件冷寂与会话失联三项事实判定 `STALE_SUSPECT`；
+  - `dev_tasks_reclaim` CAS 幂等回收工具：交互式二次确认后回收任务至 `Confirmed`，旧持有者令牌立即失效。
+
+### Epic 3: 任务目录完备物理防护与双向互锁 (Task Directory Two-Way Interlock)
+- **目标**: 彻底根除未经 `dev_tasks_propose` 的直接文件写旁路漏洞。
+- **核心成果**:
+  - `FileScopeGuard` 硬化：覆盖 Shell 重定向解析、符号链接与 `..` 路径解析，封锁任务专有目录；
+  - `Manifest` 权威清单与原子持久化：SHA-256 全文哈希双写，内存 `kernel_nonce` 上下文保护；
+  - `dev_tasks_status` 旁路隔离：未核准文件直接隔离为 `[UNAUTHORIZED_BYPASS]`，CLI `--strict` 阻断非规范任务流转。
+
+---
+
+## 4. 实施阶段规划 (Execution Phases)
+
+本阶段拆解为 3 个子批次（共 8 个细粒度 DevTasks，遵循每个任务 ≤3 文件的微小粒度与测试先行原则）：
+
+### Batch 1: 自适应观测分流与快照审计 (Epic 1)
+- **Task 1.1**: `ObservabilityPolicy` 策略解析与 `RotatingFileSink` 拓扑旁路改造 (`server/observability.py`, `server/project_config.py`)；
+- **Task 1.2**: `VerdictAuditSink` 审计通道与 `ReviewerClient` 分流接线 (`server/observability.py`, `server/reviewer_client.py`)。
+
+### Batch 2: 心跳租约、健康探针与 CAS 回收器 (Epic 2)
+- **Task 2.1**: `dev_tasks_heartbeat` 心跳工具与 Fencing Token 状态校验注入 (`server/state_machine.py`, `server/server.py`)；
+- **Task 2.2**: `reaper.probe` 多维健康度探测引擎与配置扩展 (`server/reaper.py`, `server/project_config.py`)；
+- **Task 2.3**: `dev_tasks_reclaim` CAS 幂等回收工具与交互门禁集成 (`server/server.py`, `server/reaper.py`, `server/state_machine.py`)。
+
+### Batch 3: 目录物理硬化、Manifest 权威与双向互锁 (Epic 3)
+- **Task 3.1**: `FileScopeGuard` 路径解析硬化与 Shell 写入重定向正则拦截 (`server/hooks/file_scope_guard.py`, 测试套件)；
+- **Task 3.2**: `Manifest` 权威清单、SHA-256 哈希双写与内核签名校验 (`server/manifest.py`, `server/schema_validator.py`)；
+- **Task 3.3**: 双向互锁全链路集成、`[UNAUTHORIZED_BYPASS]` 隔离与 CLI 状态审计 (`server/server.py`, `server/cli.py`, `server/observability.py`)。
+
+---
+
+## 5. 验收标准与关键不变量 (DoD & System Invariants)
+
+1. **零旁路不变量**: 任何通过通用文件写入工具（或外部脚本）直接放置在 `docs/dev_tasks/` 下的 `.md` 文件，在未获 `manifest.json` 签发前，**绝对无法被 `checkout`、无法进入执行流**；
+2. **零僵尸死锁不变量**: 当且仅当心跳停摆、工作区无写动静且会话离线时，槽位进入 `STALE_SUSPECT`，后续检出者可经由显式确认一键安全释放；
+3. **零空写噪声不变量**: 在纯原生 Subagent 运行环境中，Quorch 服务端不产生任何冗余的流式日志文件，同时完整保留最终裁决的 JSONL 历史快照；
+4. **测试回归基线**: 全量 175+ 项自动化测试（原有 167 项 + 本阶段新增 ~8 组测试矩阵）100% 保持全绿。
