@@ -32,6 +32,7 @@ from reviewer_engine import (
     extract_reasoning_text,
     extract_usage,
 )
+from log_naming import allocate_log_file, gc_by_filename_order
 
 class ReasoningBudgetExceededError(ReviewerEngineError):
     """推理链长度超出安全天花板异常。"""
@@ -378,10 +379,14 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
 
 
 def _enforce_log_quota(log_dir: Path, max_files: int = MAX_LOG_FILES_QUOTA) -> None:
-    """清理历史日志，最多保留最新的 max_files 个 latest-*.log 文件。"""
+    """清理历史日志，最多保留最新的 max_files 个文件。"""
     try:
         if not log_dir.is_dir():
             return
+        # 1. 采用零 stat 的文件名纯字典序淘汰新格式日志
+        gc_by_filename_order(log_dir, keep=max_files)
+
+        # 2. 兼容清理旧格式 latest-*.log 日志
         log_files = sorted(log_dir.glob("latest-*.log"), key=lambda p: p.stat().st_mtime)
         while len(log_files) > max_files:
             oldest = log_files.pop(0)
@@ -438,7 +443,12 @@ async def run_consultation(
     log_dir = Path(workspace_root) / ".agents" / "logs" / "reviewer"
     log_dir.mkdir(parents=True, exist_ok=True)
     _enforce_log_quota(log_dir, max_files=MAX_LOG_FILES_QUOTA)
-    log_file = log_dir / f"latest-{session_id}.log"
+    allocated_log_path, _ = allocate_log_file(
+        str(log_dir),
+        slug=session_id,
+        header_metadata={"mode": mode, "session_id": session_id},
+    )
+    log_file = Path(allocated_log_path)
 
     session_lock = _get_session_lock(session_id)
 
@@ -466,6 +476,7 @@ async def run_consultation(
         max_bytes=MAX_LOG_FILE_BYTES,
         carry_over_bytes=64,
         flush_interval_s=0.2,
+        log_file=allocated_log_path,
     )
     heartbeat_sink = AdaptiveHeartbeatSink(
         file_emit=sink.write_chunk_text,

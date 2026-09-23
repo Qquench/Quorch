@@ -15,6 +15,7 @@ import os
 import queue
 import random
 import re
+import shutil
 import sys
 import threading
 import time
@@ -292,6 +293,7 @@ class RotatingFileSink:
         max_bytes: int = 1024 * 1024,
         carry_over_bytes: int = 64,
         flush_interval_s: float = 0.5,
+        log_file: Optional[str] = None,
     ):
         clean_sid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session_id))
         self.log_dir = os.path.abspath(log_dir)
@@ -301,13 +303,21 @@ class RotatingFileSink:
         self.flush_interval_s = max(flush_interval_s, 0.1)
 
         os.makedirs(self.log_dir, exist_ok=True)
-        self.log_file = os.path.join(self.log_dir, f"latest-{self.session_id}.log")
-        self.rot_file = os.path.join(self.log_dir, f"latest-{self.session_id}.1.log")
+        if log_file:
+            self.log_file = os.path.abspath(log_file)
+            base_without_ext = os.path.splitext(self.log_file)[0]
+            self.rot_file = f"{base_without_ext}.1.log"
+            mode = "a" if os.path.exists(self.log_file) else "w"
+            self._written_bytes = os.path.getsize(self.log_file) if mode == "a" else 0
+        else:
+            self.log_file = os.path.join(self.log_dir, f"latest-{self.session_id}.log")
+            self.rot_file = os.path.join(self.log_dir, f"latest-{self.session_id}.1.log")
+            mode = "w"
+            self._written_bytes = 0
 
         self._carry_over = ""
-        self._written_bytes = 0
         self._last_flush = time.monotonic()
-        self._fp = open(self.log_file, "w", encoding="utf-8", errors="replace")
+        self._fp = open(self.log_file, mode, encoding="utf-8", errors="replace")
         self._is_closed = False
 
     def _rotate_if_needed(self, incoming_bytes: int) -> None:
@@ -384,6 +394,13 @@ class RotatingFileSink:
                 if not self._fp.closed:
                     self._fp.flush()
                     self._fp.close()
+                # Update latest.log mirror
+                try:
+                    latest_ptr = os.path.join(self.log_dir, "latest.log")
+                    if os.path.exists(self.log_file):
+                        shutil.copyfile(self.log_file, latest_ptr)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

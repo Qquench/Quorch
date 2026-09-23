@@ -212,7 +212,9 @@ async def test_log_path_contains_sanitized_session_id(tmp_path: Path, monkeypatc
     )
     assert res["status"] == "ok"
     assert res["session_id"] == sid
-    assert res["log_path"].endswith(f"latest-{sid}.log")
+    assert re.search(r"\d{8}_\d{3}_custom_session_id_77\.log$", res["log_path"]) is not None
+    assert os.path.exists(res["log_path"])
+    assert os.path.exists(os.path.join(tmp_path, ".agents", "logs", "reviewer", "latest.log"))
 
 
 @pytest.mark.anyio
