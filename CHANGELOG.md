@@ -5,6 +5,10 @@ Unlike real-time specification documents (which reflect only the active design),
 
 ---
 
+## [2026-09-23] 2026-09-23_cross_platform_path_guard.md
+
+- **Task 1.1**: 统一跨平台路径穿透防御与路径沙箱规范化 (Unified Cross-Platform Path Guard & Workspace Confinement)
+
 ## [2026-09-23] 2026-09-21_stage5_vendor_neutrality_and_consultation.md
 
 - **Task 1.1**: 将 DeepSeekClient 重构为厂商中立 ReviewerClient 并抽象通用推理草稿协议探针 (Vendor-Neutral ReviewerClient & Generic CoT Probe)

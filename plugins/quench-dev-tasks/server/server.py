@@ -52,6 +52,7 @@ import functools
 import anyio
 from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
+from path_guard import to_workspace_relative_path, PathTraversalError
 from project_config import (
     load_project_config,
     QuenchStackConfig,
@@ -758,14 +759,14 @@ def _resolve_handoff_envelope(
     """
     ws_root = os.path.abspath(workspace_root)
 
-    # Path safety: ensure task_path is normalized and relative to workspace_root
-    if os.path.isabs(task_path):
-        try:
-            rel_task_path = os.path.relpath(task_path, ws_root).replace("\\", "/")
-        except ValueError:
-            rel_task_path = task_path.replace("\\", "/")
-    else:
-        rel_task_path = task_path.replace("\\", "/")
+    # Path safety: ensure task_path is normalized and confined within workspace_root
+    try:
+        rel_task_path = to_workspace_relative_path(ws_root, task_path)
+    except PathTraversalError:
+        # Fallback to sanitized basename if traversal attempted
+        rel_task_path = os.path.basename(str(task_path)).replace("\\", "/")
+    except Exception:
+        rel_task_path = str(task_path).replace("\\", "/")
 
     # Context files safety: restrict to workspace_root, cap at 8 files
     safe_context_files: List[str] = []
@@ -775,13 +776,13 @@ def _resolve_handoff_envelope(
                 cf_clean = str(cf).strip()
                 if not cf_clean:
                     continue
-                cf_abs = os.path.normpath(os.path.join(ws_root, cf_clean))
-                # Prevent path traversal outside workspace_root
-                if os.path.commonpath([ws_root, cf_abs]) == ws_root:
-                    rel_cf = os.path.relpath(cf_abs, ws_root).replace("\\", "/")
-                    safe_context_files.append(rel_cf)
+                rel_cf = to_workspace_relative_path(ws_root, cf_clean, must_exist=False)
+                safe_context_files.append(rel_cf)
+            except PathTraversalError:
+                # Strictly reject any traversal vectors (host-invariant)
+                continue
             except Exception:
-                pass
+                continue
 
     re_cfg = getattr(config, "reviewer_engine", None)
     if re_cfg is None:

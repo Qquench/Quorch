@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 from uuid import uuid4
 import weakref
 
+from path_guard import sanitize_workspace_path, PathTraversalError
 from project_config import QuenchStackConfig, ReviewerEngineConfig, create_reviewer_client
 from reviewer_engine import (
     PromptAssembler,
@@ -123,30 +124,17 @@ def resolve_context_files(
         if not p_str:
             continue
 
-        # 1. 绝对路径或以斜杠/反斜杠开头：直接拒绝
-        if os.path.isabs(p_str) or p_str.startswith(("/", "\\")):
-            skipped_files.append(p_str)
-            continue
-
-        # 2. 检查盘符 (Windows e.g. "C:foo")
-        drive, _ = os.path.splitdrive(p_str)
-        if drive:
-            skipped_files.append(p_str)
-            continue
-
-        # 3. 规范化路径并检查是否逃逸
-        joined = os.path.join(real_ws, p_str)
+        # 1. 规范化路径并检查是否逃逸与存在 (使用单一事实源 path_guard)
         try:
-            real_target = os.path.realpath(joined)
-            common = os.path.commonpath([real_target, real_ws])
-            if common != real_ws:
-                skipped_files.append(p_str)
-                continue
+            real_target = sanitize_workspace_path(real_ws, p_str, must_exist=True)
+        except PathTraversalError:
+            skipped_files.append(p_str)
+            continue
         except Exception:
             skipped_files.append(p_str)
             continue
 
-        # 4. 必须为真实存在且普通文件
+        # 2. 必须为普通文件 (排除目录)
         if not os.path.isfile(real_target):
             skipped_files.append(p_str)
             continue

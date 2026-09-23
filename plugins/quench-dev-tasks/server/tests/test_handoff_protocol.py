@@ -270,6 +270,11 @@ def test_path_traversal_defense(test_workspace):
     evil_context = [
         "../../etc/passwd",
         "..\\..\\windows\\system32\\cmd.exe",
+        "/absolute/path/escape.txt",
+        "\\\\server\\share\\unc.txt",
+        "C:foo.txt",
+        "....//....//escape.txt",
+        "%2e%2e%2fescaped.txt",
         "valid_sub/file.py",
     ]
     # Create the valid sub file
@@ -290,9 +295,11 @@ def test_path_traversal_defense(test_workspace):
     subagent_strat = next(s for s in envelope["strategies"] if s["strategy"] == "subagent")
     ctx_files = subagent_strat["payload"]["context_files"]
 
-    assert "valid_sub/file.py" in ctx_files
+    assert ctx_files == ["valid_sub/file.py"]
     for f in ctx_files:
         assert not f.startswith("..")
+        assert not f.startswith("/")
+        assert ":" not in f
 
 
 def test_legacy_backward_compatibility_fields(test_workspace):

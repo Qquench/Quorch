@@ -12,6 +12,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, NamedTuple, Optional, Union
 
+from path_guard import sanitize_workspace_path, PathTraversalError
+
 REQUIRED_FIELDS = [
     "affected_files",
     "root_cause_and_goal",
@@ -324,19 +326,18 @@ def lint_task_physical_feasibility(
             check_items = [(action, target_path)]
 
         for act, rel in check_items:
-            # 路径穿越防线
-            target_abs = os.path.normpath(os.path.join(ws_root, rel))
+            # 路径穿越防线（单一事实源 path_guard，消除跨平台分隔符歧义）
             try:
-                common = os.path.commonpath([ws_root, target_abs])
-                if common != ws_root:
-                    issues.append(
-                        LintIssue(
-                            "error",
-                            "affected_files",
-                            f"路径穿越安全违规: '{rel}' 超出工作区根目录",
-                        )
+                target_abs = sanitize_workspace_path(ws_root, rel)
+            except PathTraversalError as pte:
+                issues.append(
+                    LintIssue(
+                        "error",
+                        "affected_files",
+                        f"路径穿越安全违规: '{rel}' 超出工作区根目录 ({pte})",
                     )
-                    continue
+                )
+                continue
             except Exception:
                 issues.append(
                     LintIssue("error", "affected_files", f"非法文件路径: '{rel}'")
