@@ -5,6 +5,15 @@ Unlike real-time specification documents (which reflect only the active design),
 
 ---
 
+## [2026-09-23] 2026-09-21_stage5_vendor_neutrality_and_consultation.md
+
+- **Task 1.1**: 将 DeepSeekClient 重构为厂商中立 ReviewerClient 并抽象通用推理草稿协议探针 (Vendor-Neutral ReviewerClient & Generic CoT Probe)
+- **Task 1.2**: 引入 PROVIDER_PRESETS 声明式中立工厂并清除 server.py 厂商硬分支 (Declarative Provider Registry & Branch Removal)
+- **Task 1.3**: 建立源码级中立性防回归扫描闸门并重构引擎既有测试为协议中立形态 (Neutrality Regression Gate)
+- **Task 2.1**: 实现免任务单绑定的架构咨询原子工具 dev_reviewer_consult (Ad-Hoc Consultation Tool)
+- **Task 2.2**: 硬化主模型防角色扮演红线与无引擎显式降级卡片 (Anti-Role-Playing Governance)
+- **Task 2.3**: 新增 dev_reviewer_consult 全行为矩阵单测并完成 Stage 5 端到端验收 (Consultation E2E Matrix)
+
 ## [2026-09-21] 2026-09-21_model_switching_optimization.md
 
 - **Task 1**: Milestone 0: 独立轻量验证脚本与 Thinking / Prompt Cache 探测
