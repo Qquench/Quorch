@@ -600,7 +600,7 @@ class PromptAssembler:
 
 class ReviewerClient:
     """基于标准库与 AnyIO 实现的工业级厂商中立 Reviewer 客户端。
-    支持任意 OpenAI 兼容的 /chat/completions 端点（DeepSeek、Ollama、vLLM、LM Studio、Azure、OpenAI 等）。
+    支持任意 OpenAI 兼容的 /chat/completions 端点。
     具备异步非阻塞调度 (acomplete/stream_chat)、退避重试、跨厂商思考链探针与总耗时预算熔断。
     """
 
@@ -701,7 +701,7 @@ class ReviewerClient:
         """检查 Reviewer 引擎是否就绪。支持通用 OpenAI 兼容端点与本地端点。"""
         if self.provider_label in ("none", "", False):
             return False
-        if self.provider_label == "ollama" or _is_local_endpoint(self.base_url):
+        if _is_local_endpoint(self.base_url):
             return True
         return bool(self.resolve_api_key())
 
@@ -1318,7 +1318,7 @@ class ReviewerClient:
 
 # ---- PEP 562 兼容层（模块级）----
 def __getattr__(name: str) -> Any:
-    """PEP 562 兼容别名：平滑迁移 DeepSeekClient 至 ReviewerClient。"""
+    """PEP 562 兼容别名：平滑迁移旧客户端至 ReviewerClient。"""
     if name == "DeepSeekClient":  # vendor-literal: allow
         warnings.warn("DeepSeekClient 已弃用，请改用 ReviewerClient", DeprecationWarning, stacklevel=2)  # vendor-literal: allow
         return ReviewerClient

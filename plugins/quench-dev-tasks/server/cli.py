@@ -180,14 +180,14 @@ def cmd_check_engine(
     import json
     import time
     from project_config import load_project_config
-    from reviewer_engine import DeepSeekClient
+    from reviewer_engine import ReviewerClient
 
     ws = os.path.abspath(workspace_root)
     c = Colors(should_enable_color(plain and not as_json))
 
     provider = "none"
     model = "none"
-    api_key_env = "DEEPSEEK_API_KEY_Quench"
+    api_key_env = None
     api_key_present = False
     api_key_masked = "NOT SET"
     connectivity_ok = False
@@ -207,11 +207,11 @@ def cmd_check_engine(
         thinking_supported = (
             re_cfg.thinking
             or "reasoner" in m_lower
-            or "deepseek-r1" in m_lower
+            or "r1" in m_lower
             or "思考" in m_lower
         )
 
-        client = DeepSeekClient(re_cfg)
+        client = ReviewerClient(re_cfg)
         raw_key = client.resolve_api_key()
         api_key_present = bool(raw_key and raw_key.strip())
         api_key_masked = _mask_secret(raw_key)

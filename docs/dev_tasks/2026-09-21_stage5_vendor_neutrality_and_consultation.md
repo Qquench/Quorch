@@ -235,7 +235,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 1.3 ✅ 已确认 — 建立源码级中立性防回归扫描闸门并重构引擎既有测试为协议中立形态 (Neutrality Regression Gate)
+### 任务 1.3 ✔️ 已完成 — 建立源码级中立性防回归扫描闸门并重构引擎既有测试为协议中立形态 (Neutrality Regression Gate)
 
 #### 【涉及文件】
 

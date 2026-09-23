@@ -838,7 +838,7 @@ def _resolve_handoff_envelope(
     engine_allowed = mode in ("auto", "engine")
     engine_available = engine_allowed and client_available
 
-    key_present = bool(client.resolve_api_key()) or (re_cfg.provider == "ollama")
+    key_present = bool(client.resolve_api_key()) or client.is_available()
 
     engine_strat: Dict[str, Any] = {
         "strategy": "engine",

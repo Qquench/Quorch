@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for Quench Reviewer Engine: DeepSeekClient & PromptAssembler.
-Rigorous mock tests covering happy path, failure modes, async offload, deadline budgets,
+"""Unit tests for Quench Reviewer Engine: ReviewerClient & PromptAssembler.
+Protocol-neutral test suite covering happy path, failure modes, async offload, deadline budgets,
 malformed corporate proxy responses, and Prompt Cache stability.
 """
 import io
@@ -9,17 +9,19 @@ import os
 import shutil
 import tempfile
 import urllib.error
+import warnings
 from unittest.mock import MagicMock, patch
 
 import anyio
 import pytest
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
+import reviewer_engine
 from reviewer_engine import (
-    DeepSeekClient,
     PromptAssembler,
     ReviewerAuthenticationError,
     ReviewerBadRequestError,
+    ReviewerClient,
     ReviewerEngineError,
     ReviewerEngineUnavailableError,
     _read_windows_env_var,
@@ -44,8 +46,9 @@ def mock_ws():
         architecture_doc="docs/architecture/system_design.md",
         constraints=["All state changes must be thread-safe", "Do not break offline queues"],
         reviewer_engine=ReviewerEngineConfig(
-            provider="deepseek",
-            model="deepseek-flash",
+            provider="custom",
+            base_url="https://reviewer.internal.net/v1",
+            model="reviewer-eval-v1",
             api_key_env="MOCK_TEST_KEY_NOT_EXIST",
             timeout_seconds=30,
         ),
@@ -59,7 +62,7 @@ def test_default_config_provider_none_backward_compat():
     """断言红线 2：缺省配置下 provider 必须为 'none'，引擎不可用，100% 向后兼容。"""
     default_cfg = ReviewerEngineConfig()
     assert default_cfg.provider == "none"
-    client = DeepSeekClient(default_cfg)
+    client = ReviewerClient(default_cfg)
     assert client.is_available() is False
 
 
@@ -89,20 +92,20 @@ def test_prompt_assembler_static_prefix_purity_and_hash(mock_ws):
     assert msgs[1] == turns[0]
 
 
-def test_deepseek_client_unavailable_when_provider_none(mock_ws):
+def test_reviewer_client_unavailable_when_provider_none(mock_ws):
     _, cfg = mock_ws
     cfg.reviewer_engine.provider = "none"
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     assert client.is_available() is False
     with pytest.raises(ReviewerEngineUnavailableError):
         client.complete([{"role": "user", "content": "hello"}])
 
 
-def test_deepseek_client_successful_completion_with_thinking_payload_assertions(mock_ws):
+def test_reviewer_client_successful_completion_with_thinking_payload_assertions(mock_ws):
     """验证 Thinking 提取、模型参数、URL、请求头与 Timeout 真实断言。"""
     _, cfg = mock_ws
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     mock_response_json = {
         "id": "chatcmpl-test-123",
@@ -135,14 +138,14 @@ def test_deepseek_client_successful_completion_with_thinking_payload_assertions(
             result = client.complete([{"role": "user", "content": "review draft"}])
 
             assert mock_urlopen.call_count == 1
-            # 严格断言实际发送给 DeepSeek 的网络载荷 (Wire Contract)
+            # 严格断言实际发送给网关的网络载荷 (Wire Contract)
             sent_req = mock_urlopen.call_args.args[0]
             sent_payload = json.loads(sent_req.data.decode("utf-8"))
-            assert sent_payload["model"] == "deepseek-flash"
+            assert sent_payload["model"] == "reviewer-eval-v1"
             assert sent_payload["thinking"] == {"type": "enabled"}
             assert sent_payload["reasoning_effort"] == "high"
             assert sent_payload["stream"] is False
-            assert sent_req.full_url == "https://api.deepseek.com/chat/completions"
+            assert sent_req.full_url == "https://reviewer.internal.net/v1/chat/completions"
             assert sent_req.headers["Authorization"] == "Bearer mock-sk-123456"
             assert mock_urlopen.call_args.kwargs["timeout"] == 30.0
 
@@ -151,15 +154,15 @@ def test_deepseek_client_successful_completion_with_thinking_payload_assertions(
             assert result["usage"]["prompt_cache_hit_tokens"] == 96
 
 
-def test_deepseek_client_401_no_retry_even_with_retries_configured(mock_ws):
-    """即使配置了 max_retries=3，遇到 401 Unauthorized 必须单次即崩溃，严禁重试。"""
+def test_reviewer_client_401_no_retry_even_with_retries_configured(mock_ws):
+    """即使配置了 max_retries=3，遇到 401 Unauthorized 必须单次即崩溃，严禁重试；文案只依赖注入的 provider_label。"""
     _, cfg = mock_ws
     cfg.reviewer_engine.max_retries = 3
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine, provider_label="ollama")
 
     err_fp = io.BytesIO(b'{"error": {"message": "Invalid API Key"}}')
     http_err_401 = urllib.error.HTTPError(
-        url="https://api.deepseek.com/chat/completions",
+        url="https://reviewer.internal.net/v1/chat/completions",
         code=401,
         msg="Unauthorized",
         hdrs={},
@@ -168,21 +171,24 @@ def test_deepseek_client_401_no_retry_even_with_retries_configured(mock_ws):
 
     with patch.object(client, "resolve_api_key", return_value="bad-sk"):
         with patch("urllib.request.urlopen", side_effect=http_err_401) as mock_urlopen:
-            with pytest.raises(ReviewerAuthenticationError):
+            with pytest.raises(ReviewerAuthenticationError) as exc_info:
                 client.complete([{"role": "user", "content": "review draft"}])
 
             assert mock_urlopen.call_count == 1
+            err_text = str(exc_info.value)
+            assert "ollama" in err_text
+            assert "deepseek" not in err_text.casefold()
 
 
-def test_deepseek_client_400_bad_request_fast_fail(mock_ws):
+def test_reviewer_client_400_bad_request_fast_fail(mock_ws):
     """400 Bad Request 参数错误：单次快速失败，严禁盲目重试。"""
     _, cfg = mock_ws
     cfg.reviewer_engine.max_retries = 3
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     err_fp = io.BytesIO(b'{"error": {"message": "Invalid model parameter"}}')
     http_err_400 = urllib.error.HTTPError(
-        url="https://api.deepseek.com/chat/completions",
+        url="https://reviewer.internal.net/v1/chat/completions",
         code=400,
         msg="Bad Request",
         hdrs={},
@@ -197,10 +203,10 @@ def test_deepseek_client_400_bad_request_fast_fail(mock_ws):
             assert mock_urlopen.call_count == 1
 
 
-def test_deepseek_client_proxy_html_malformed_response_resilience(mock_ws):
+def test_reviewer_client_proxy_html_malformed_response_resilience(mock_ws):
     """企业代理/VPN 拦截并返回 HTTP 200 + HTML 登录页时，防御性解析为 ReviewerEngineError。"""
     _, cfg = mock_ws
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     html_bytes = b"<html><head><title>Corporate Proxy Login</title></head><body>Please login</body></html>"
     mock_resp = MagicMock()
@@ -216,10 +222,10 @@ def test_deepseek_client_proxy_html_malformed_response_resilience(mock_ws):
             assert "非合法 JSON" in str(exc_info.value)
 
 
-def test_deepseek_client_empty_choices_resilience(mock_ws):
+def test_reviewer_client_empty_choices_resilience(mock_ws):
     """服务端返回 200 但缺少 choices 列表时的防御。"""
     _, cfg = mock_ws
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     mock_resp = MagicMock()
     mock_resp.read.return_value = b'{"id": "test", "choices": []}'
@@ -233,13 +239,13 @@ def test_deepseek_client_empty_choices_resilience(mock_ws):
             assert "缺少 choices" in str(exc_info.value)
 
 
-def test_deepseek_client_total_deadline_exhaustion(mock_ws):
+def test_reviewer_client_total_deadline_exhaustion(mock_ws):
     """总耗时预算熔断：测试重试耗时超出 total_deadline_s 时主动熔断。"""
     _, cfg = mock_ws
     cfg.reviewer_engine.max_retries = 2
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
-    # 设极短总预算（0.001s）立即触发熔断
+    # 设极短总预算（-1.0s）立即触发熔断
     with patch.object(client, "resolve_api_key", return_value="mock-sk"):
         with patch("reviewer_engine.time.sleep"):
             with pytest.raises(ReviewerEngineError) as exc_info:
@@ -248,15 +254,15 @@ def test_deepseek_client_total_deadline_exhaustion(mock_ws):
             assert "[Deadline Exceeded]" in str(exc_info.value)
 
 
-def test_deepseek_client_429_retry_and_succeed_with_retry_after(mock_ws):
+def test_reviewer_client_429_retry_and_succeed_with_retry_after(mock_ws):
     """429 流控重试：支持 Retry-After 头与指数退避抖动重试。"""
     _, cfg = mock_ws
     cfg.reviewer_engine.max_retries = 2
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     err_fp = io.BytesIO(b'{"error": "rate limit exceeded"}')
     http_err_429 = urllib.error.HTTPError(
-        url="https://api.deepseek.com/chat/completions",
+        url="https://reviewer.internal.net/v1/chat/completions",
         code=429,
         msg="Too Many Requests",
         hdrs={"Retry-After": "2"},
@@ -285,7 +291,7 @@ def test_deepseek_client_429_retry_and_succeed_with_retry_after(mock_ws):
 def test_read_windows_env_var_fallback_seam(mock_ws):
     """测试 Windows 注册表读取 Seam 穿透能力与 CI 隔离性。"""
     _, cfg = mock_ws
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     with patch.dict(os.environ, {}, clear=True):
         with patch("reviewer_engine._read_windows_env_var", return_value="registry-secret-key"):
@@ -294,10 +300,10 @@ def test_read_windows_env_var_fallback_seam(mock_ws):
 
 
 @pytest.mark.anyio
-async def test_deepseek_client_acomplete_async(mock_ws):
+async def test_reviewer_client_acomplete_async(mock_ws):
     """验证异步门面 acomplete 使用 AnyIO 卸载至后台线程，不阻塞主事件循环。"""
     _, cfg = mock_ws
-    client = DeepSeekClient(cfg.reviewer_engine)
+    client = ReviewerClient(cfg.reviewer_engine)
 
     mock_resp_json = {
         "choices": [{"message": {"content": "async response", "reasoning_content": "async thinking"}}],
@@ -311,3 +317,13 @@ async def test_deepseek_client_acomplete_async(mock_ws):
             res = await client.acomplete([{"role": "user", "content": "hello async"}])
             assert res["content"] == "async response"
             assert res["reasoning_content"] == "async thinking"
+
+
+def test_deepseek_client_backward_compat_alias_warning():
+    """断言向后兼容别名 DeepSeekClient 映射至 ReviewerClient 且抛出 DeprecationWarning。"""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        deprecated_cls = reviewer_engine.DeepSeekClient
+        assert deprecated_cls is ReviewerClient
+        assert any(issubclass(item.category, DeprecationWarning) for item in w)
+        assert any("ReviewerClient" in str(item.message) for item in w)
