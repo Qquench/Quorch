@@ -322,7 +322,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 > **批次前置**：Batch 1 已交付 `create_reviewer_client` 工厂与 `ProviderPreset` 契约、`ReviewerClient` 通用探针、中立性扫描闸门。本批次**严禁**以任何形式新增厂商字面量（否则 1.3 的闸门会在本批次 DoD 中直接红）。
 
-### 任务 2.1 ⬜ 待确认 — 实现免任务单绑定的架构咨询原子工具 dev_reviewer_consult (Ad-Hoc Consultation Tool)
+### 任务 2.1 ✅ 已确认 — 实现免任务单绑定的架构咨询原子工具 dev_reviewer_consult (Ad-Hoc Consultation Tool)
 
 #### 【涉及文件】
 
@@ -442,7 +442,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 2.2 ⬜ 待确认 — 硬化主模型防角色扮演红线与无引擎显式降级卡片 (Anti-Role-Playing Governance)
+### 任务 2.2 ✅ 已确认 — 硬化主模型防角色扮演红线与无引擎显式降级卡片 (Anti-Role-Playing Governance)
 
 #### 【涉及文件】
 
@@ -548,7 +548,7 @@ pytest plugins/quench-dev-tasks/server/tests -q
 
 ---
 
-### 任务 2.3 ⬜ 待确认 — 新增 dev_reviewer_consult 全行为矩阵单测并完成 Stage 5 端到端验收 (Consultation E2E Matrix)
+### 任务 2.3 ✅ 已确认 — 新增 dev_reviewer_consult 全行为矩阵单测并完成 Stage 5 端到端验收 (Consultation E2E Matrix)
 
 #### 【涉及文件】
 
