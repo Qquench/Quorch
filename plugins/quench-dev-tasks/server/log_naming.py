@@ -249,3 +249,69 @@ def gc_by_filename_order(
             pass
 
     return pruned
+
+
+def enforce_unified_log_quota(
+    directory: str | os.PathLike[str],
+    *,
+    keep: int = 20,
+) -> list[str]:
+    """Retain at most `keep` total log files across both new (YYYYMMDD_NNN_*.log)
+    and legacy (latest-*.log) formats.
+
+    Policy:
+    1. Legacy logs (latest-*.log) are chronologically older than new-format logs;
+       purge oldest legacy files first when total count > keep.
+    2. If all legacy files are purged and new-format logs still exceed `keep`,
+       prune oldest new-format files via zero-stat filename order (gc_by_filename_order).
+    3. Rotation backups (.1.log) are pruned alongside their base log.
+    4. Pointer file (latest.log) is excluded from the count and never deleted.
+    """
+    if keep <= 0:
+        raise ValueError(f"keep must be greater than 0, got {keep}")
+
+    target_dir = os.path.abspath(directory)
+    if not os.path.isdir(target_dir):
+        return []
+
+    new_files = list_log_files(target_dir)
+
+    # Legacy logs matching latest-*.log (excluding latest.log and rotation .1.log)
+    legacy_files: list[str] = []
+    for entry in os.listdir(target_dir):
+        if entry.startswith("latest-") and entry.endswith(".log") and not entry.endswith(".1.log"):
+            legacy_files.append(entry)
+
+    # Sort legacy by mtime (oldest first)
+    legacy_files.sort(key=lambda fname: os.path.getmtime(os.path.join(target_dir, fname)))
+
+    total_logs = len(new_files) + len(legacy_files)
+    if total_logs <= keep:
+        return []
+
+    excess = total_logs - keep
+    pruned: list[str] = []
+
+    # 1. Prune legacy logs first (oldest first)
+    while legacy_files and excess > 0:
+        oldest_legacy = legacy_files.pop(0)
+        fpath = os.path.join(target_dir, oldest_legacy)
+        try:
+            if os.path.exists(fpath):
+                os.remove(fpath)
+                pruned.append(oldest_legacy)
+            rot_path = os.path.splitext(fpath)[0] + ".1.log"
+            if os.path.exists(rot_path):
+                os.remove(rot_path)
+        except OSError:
+            pass
+        excess -= 1
+
+    # 2. If still exceeding, prune oldest new-format logs via gc_by_filename_order
+    remaining_new_allowed = keep - len(legacy_files)
+    if len(new_files) > remaining_new_allowed and remaining_new_allowed > 0:
+        new_pruned = gc_by_filename_order(target_dir, keep=remaining_new_allowed)
+        pruned.extend(new_pruned)
+
+    return pruned
+

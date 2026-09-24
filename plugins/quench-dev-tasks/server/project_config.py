@@ -251,6 +251,30 @@ def create_reviewer_client(
     )
 
 
+DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS: int = 900
+DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS: int = 600
+
+
+@dataclass
+class ReaperPolicyConfig:
+    heartbeat_silence_threshold_seconds: int = DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS
+    affected_files_mtime_threshold_seconds: int = DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS
+
+    def __post_init__(self) -> None:
+        self.heartbeat_silence_threshold_seconds = _coerce_positive_int(
+            self.heartbeat_silence_threshold_seconds,
+            default=DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS,
+            lo=10,
+            hi=86400,
+        )
+        self.affected_files_mtime_threshold_seconds = _coerce_positive_int(
+            self.affected_files_mtime_threshold_seconds,
+            default=DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS,
+            lo=10,
+            hi=86400,
+        )
+
+
 @dataclass
 class QuenchStackConfig:
     workspace_root: str
@@ -266,6 +290,7 @@ class QuenchStackConfig:
     fast_track_rules: dict[str, Any] = field(default_factory=dict)
     governance_scope: dict[str, Any] = field(default_factory=dict)
     reviewer_engine: ReviewerEngineConfig = field(default_factory=ReviewerEngineConfig)
+    reaper_policy: ReaperPolicyConfig = field(default_factory=ReaperPolicyConfig)
 
     def resolve_path(self, field_name: str) -> str:
         """将相对路径属性解析为基于 workspace_root 的绝对路径"""
@@ -577,6 +602,29 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     if not isinstance(governance_scope_data, dict):
         governance_scope_data = {}
 
+    rp_data = data.get("reaper_policy")
+    if not isinstance(rp_data, dict):
+        gov_data = data.get("governance")
+        if isinstance(gov_data, dict) and isinstance(gov_data.get("reaper_policy"), dict):
+            rp_data = gov_data.get("reaper_policy")
+        else:
+            rp_data = {}
+
+    reaper_policy = ReaperPolicyConfig(
+        heartbeat_silence_threshold_seconds=_coerce_positive_int(
+            rp_data.get("heartbeat_silence_threshold_seconds"),
+            default=DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS,
+            lo=10,
+            hi=86400,
+        ),
+        affected_files_mtime_threshold_seconds=_coerce_positive_int(
+            rp_data.get("affected_files_mtime_threshold_seconds"),
+            default=DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS,
+            lo=10,
+            hi=86400,
+        ),
+    )
+
     return QuenchStackConfig(
         workspace_root=root,
         project_name=project_name,
@@ -591,6 +639,7 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         fast_track_rules=fast_track_data,
         governance_scope=governance_scope_data,
         reviewer_engine=reviewer_engine,
+        reaper_policy=reaper_policy,
     )
 
 

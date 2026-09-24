@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "records": {
+    "2026-09-23_v1.06_step02_smart_reaper_and_lease_governance::2.1": {
+      "task_id": "2026-09-23_v1.06_step02_smart_reaper_and_lease_governance::2.1",
+      "md_sha256": "bf992406f87a77c31315a354d76ef79ef224d474809ad5e5f193a67fc6e068b6",
+      "generation": 1,
+      "holder_token": "token_1790184165009_6696",
+      "last_heartbeat_monotonic_ns": 441843734000000,
+      "last_heartbeat_wall_utc": "2026-09-24T03:01:06.490621+00:00",
+      "git_head_sha": "05551a79043b78339e0a97af3dab35de47225000",
+      "git_index_mtime": 1790181784.130028,
+      "released": true
+    },
+    "2026-09-23_v1.06_step02_smart_reaper_and_lease_governance::2.2": {
+      "task_id": "2026-09-23_v1.06_step02_smart_reaper_and_lease_governance::2.2",
+      "md_sha256": "b4ba84cbc8aa58c7d64d3bb66f25a0238e4a3b3e853e1bfeea8afb894ef73102",
+      "generation": 1,
+      "holder_token": "token_1790218888531_15308",
+      "last_heartbeat_monotonic_ns": 442113406000000,
+      "last_heartbeat_wall_utc": "2026-09-24T03:05:36.156226+00:00",
+      "git_head_sha": "05551a79043b78339e0a97af3dab35de47225000",
+      "git_index_mtime": 1790181784.130028,
+      "released": true
+    },
+    "2026-09-23_v1.06_step02_smart_reaper_and_lease_governance::2.3": {
+      "task_id": "2026-09-23_v1.06_step02_smart_reaper_and_lease_governance::2.3",
+      "md_sha256": "b4ba84cbc8aa58c7d64d3bb66f25a0238e4a3b3e853e1bfeea8afb894ef73102",
+      "generation": 1,
+      "holder_token": "token_1790219166273_9168",
+      "last_heartbeat_monotonic_ns": 442991828000000,
+      "last_heartbeat_wall_utc": "2026-09-24T03:20:14.584803+00:00",
+      "git_head_sha": "05551a79043b78339e0a97af3dab35de47225000",
+      "git_index_mtime": 1790181784.130028,
+      "released": true
+    }
+  }
+}

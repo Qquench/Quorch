@@ -32,7 +32,7 @@ from reviewer_engine import (
     extract_reasoning_text,
     extract_usage,
 )
-from log_naming import allocate_log_file, gc_by_filename_order
+from log_naming import allocate_log_file, enforce_unified_log_quota, gc_by_filename_order
 
 class ReasoningBudgetExceededError(ReviewerEngineError):
     """推理链长度超出安全天花板异常。"""
@@ -379,26 +379,12 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
 
 
 def _enforce_log_quota(log_dir: Path, max_files: int = MAX_LOG_FILES_QUOTA) -> None:
-    """清理历史日志，最多保留最新的 max_files 个文件。"""
+    """清理历史日志，最多保留最新的 max_files 个文件（统合新旧格式与轮转文件）。"""
     try:
-        if not log_dir.is_dir():
-            return
-        # 1. 采用零 stat 的文件名纯字典序淘汰新格式日志
-        gc_by_filename_order(log_dir, keep=max_files)
-
-        # 2. 兼容清理旧格式 latest-*.log 日志
-        log_files = sorted(log_dir.glob("latest-*.log"), key=lambda p: p.stat().st_mtime)
-        while len(log_files) > max_files:
-            oldest = log_files.pop(0)
-            try:
-                oldest.unlink(missing_ok=True)
-                rot = oldest.with_suffix(".1.log")
-                if rot.exists():
-                    rot.unlink(missing_ok=True)
-            except OSError:
-                pass
+        enforce_unified_log_quota(log_dir, keep=max_files)
     except Exception:
         pass
+
 
 
 async def run_consultation(

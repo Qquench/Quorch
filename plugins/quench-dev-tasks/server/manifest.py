@@ -29,6 +29,11 @@ class FencedTokenError(Exception):
     pass
 
 
+class ManifestIntegrityError(Exception):
+    """清单物理文件损坏或校验不一致时抛出的 Fail-Closed 阻断异常。"""
+    pass
+
+
 @dataclass(frozen=True)
 class TaskRecord:
     task_id: str                      # 命名空间格式: <md_stem>::<task_id> (B5)
@@ -120,7 +125,7 @@ def _get_git_metadata(workspace_root: str) -> Tuple[str, float]:
 
 
 def load_manifest(workspace_root: str) -> Manifest:
-    """加载权威清单；首次运行自动初始化 generation=0 容器，若损坏则自动安全兜底。"""
+    """加载权威清单；首次运行自动初始化 generation=0 容器，若损坏则 Fail-Closed 阻断抛出 ManifestIntegrityError。"""
     manifest_path = os.path.join(workspace_root, MANIFEST_REL_PATH)
     if not os.path.isfile(manifest_path):
         return Manifest(schema_version="1.0", records={})
@@ -128,29 +133,38 @@ def load_manifest(workspace_root: str) -> Manifest:
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
-        return Manifest(schema_version="1.0", records={})
+    except Exception as e:
+        raise ManifestIntegrityError(f"Failed to read or parse manifest '{manifest_path}': {e}") from e
+
+    if not isinstance(data, dict):
+        raise ManifestIntegrityError(f"Corrupted manifest format in '{manifest_path}': root must be a JSON object")
 
     schema_version = str(data.get("schema_version", "1.0"))
-    raw_records = data.get("records", {})
+    raw_records = data.get("records")
+    if raw_records is None:
+        raw_records = {}
+    elif not isinstance(raw_records, dict):
+        raise ManifestIntegrityError(f"Corrupted manifest records in '{manifest_path}': 'records' must be a JSON object")
+
     records: Dict[str, TaskRecord] = {}
     for tid, rdata in raw_records.items():
-        if isinstance(rdata, dict):
-            try:
-                record = TaskRecord(
-                    task_id=str(rdata.get("task_id", tid)),
-                    md_sha256=str(rdata.get("md_sha256", "")),
-                    generation=int(rdata.get("generation", 0)),
-                    holder_token=str(rdata.get("holder_token", "")),
-                    last_heartbeat_monotonic_ns=int(rdata.get("last_heartbeat_monotonic_ns", 0)),
-                    last_heartbeat_wall_utc=str(rdata.get("last_heartbeat_wall_utc", "")),
-                    git_head_sha=str(rdata.get("git_head_sha", "")),
-                    git_index_mtime=float(rdata.get("git_index_mtime", 0.0)),
-                    released=bool(rdata.get("released", False)),
-                )
-                records[tid] = record
-            except (ValueError, TypeError):
-                continue
+        if not isinstance(rdata, dict):
+            raise ManifestIntegrityError(f"Invalid record data for '{tid}' in '{manifest_path}': record must be a dict")
+        try:
+            record = TaskRecord(
+                task_id=str(rdata.get("task_id", tid)),
+                md_sha256=str(rdata.get("md_sha256", "")),
+                generation=int(rdata.get("generation", 0)),
+                holder_token=str(rdata.get("holder_token", "")),
+                last_heartbeat_monotonic_ns=int(rdata.get("last_heartbeat_monotonic_ns", 0)),
+                last_heartbeat_wall_utc=str(rdata.get("last_heartbeat_wall_utc", "")),
+                git_head_sha=str(rdata.get("git_head_sha", "")),
+                git_index_mtime=float(rdata.get("git_index_mtime", 0.0)),
+                released=bool(rdata.get("released", False)),
+            )
+            records[tid] = record
+        except (ValueError, TypeError) as e:
+            raise ManifestIntegrityError(f"Corrupted record fields for '{tid}' in '{manifest_path}': {e}") from e
     return Manifest(schema_version=schema_version, records=records)
 
 
@@ -351,6 +365,54 @@ def release_lease(
             git_head_sha=record.git_head_sha,
             git_index_mtime=record.git_index_mtime,
             released=True,
+        )
+        atomic_replace_manifest(workspace_root, manifest)
+        return True
+
+
+def touch_heartbeat(
+    workspace_root: str,
+    *,
+    task_id: str,
+    holder_token: str,
+    generation: int,
+    now_monotonic_ns: Optional[int] = None,
+    now_wall_utc: Optional[str] = None,
+) -> bool:
+    """原子刷新任务心跳时间戳。
+    仅当 generation 与 holder_token 严格匹配活跃租约时刷新并返回 True；
+    若代际失效或租约已释放，返回 False（fail-closed），防已回收的旧持有者误续命。
+    """
+    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock = filelock.FileLock(lock_path, timeout=5.0)
+
+    with lock:
+        manifest = load_manifest(workspace_root)
+        namespaced_id = _resolve_namespaced_id(manifest, task_id)
+        record = manifest.records.get(namespaced_id)
+        if record is None:
+            return False
+        if record.released:
+            return False
+        if record.generation != generation:
+            return False
+        if record.holder_token != holder_token:
+            return False
+
+        m_ns = now_monotonic_ns if now_monotonic_ns is not None else time.monotonic_ns()
+        w_utc = now_wall_utc if now_wall_utc is not None else datetime.now(timezone.utc).isoformat()
+
+        manifest.records[namespaced_id] = TaskRecord(
+            task_id=record.task_id,
+            md_sha256=record.md_sha256,
+            generation=record.generation,
+            holder_token=record.holder_token,
+            last_heartbeat_monotonic_ns=m_ns,
+            last_heartbeat_wall_utc=w_utc,
+            git_head_sha=record.git_head_sha,
+            git_index_mtime=record.git_index_mtime,
+            released=False,
         )
         atomic_replace_manifest(workspace_root, manifest)
         return True

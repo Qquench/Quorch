@@ -29,6 +29,7 @@ ALL_STATUSES = [
 VALID_TRANSITIONS: Dict[str, List[str]] = {
     STATUS_PENDING: [STATUS_CONFIRMED, STATUS_SKIPPED, STATUS_REWORK],
     STATUS_CONFIRMED: [STATUS_IN_PROGRESS, STATUS_PENDING, STATUS_SKIPPED, STATUS_REWORK],
+    # 状态机防绕行守卫：STATUS_CONFIRMED 严格保留给 dev_tasks_reclaim 独占回收通道使用，禁止外部通过 dev_tasks_confirm 直接流转。
     STATUS_IN_PROGRESS: [STATUS_COMPLETED, STATUS_REWORK, STATUS_CONFIRMED],
     STATUS_REWORK: [STATUS_IN_PROGRESS, STATUS_CONFIRMED, STATUS_PENDING, STATUS_SKIPPED],
     STATUS_COMPLETED: [STATUS_REWORK, STATUS_PENDING],
@@ -157,7 +158,7 @@ def transition_task(
         raise InvalidTransitionError(f"Unknown target status '{new_status}', valid: {ALL_STATUSES} / 未知目标状态 '{new_status}'，合法状态: {ALL_STATUSES}")
 
     lock_path = filepath + ".lock"
-    lock = filelock.FileLock(lock_path, timeout=timeout)
+    lock = filelock.FileLock(lock_path, timeout=timeout, is_singleton=True)
 
     with lock:
         if not os.path.isfile(filepath):

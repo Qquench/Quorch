@@ -383,28 +383,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 1. status
     p_status = subparsers.add_parser("status", help="查看任务分布、活跃任务与治理看板")
     p_status.add_argument(
-        "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
+        "-w", "--workspace", default=argparse.SUPPRESS, help="工作区根目录（默认当前目录）"
     )
-    p_status.add_argument("--plain", action="store_true", help="禁用彩色输出")
+    p_status.add_argument("--plain", action="store_true", default=argparse.SUPPRESS, help="禁用彩色输出")
 
     # 2. check
     p_check = subparsers.add_parser("check", help="运行环境健康体检与依赖审计")
     p_check.add_argument(
-        "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
+        "-w", "--workspace", default=argparse.SUPPRESS, help="工作区根目录（默认当前目录）"
     )
     p_check.add_argument(
         "--engine", action="store_true", help="检查外部审查模型引擎连通性与配置体检"
     )
-    p_check.add_argument("--plain", action="store_true", help="禁用彩色输出")
-    p_check.add_argument("--json", action="store_true", help="以单行 JSON 输出")
+    p_check.add_argument("--plain", action="store_true", default=argparse.SUPPRESS, help="禁用彩色输出")
+    p_check.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="以单行 JSON 输出")
 
     # 3. check-engine
     p_check_engine = subparsers.add_parser("check-engine", help="检查外部审查模型引擎连通性与体检")
     p_check_engine.add_argument(
-        "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
+        "-w", "--workspace", default=argparse.SUPPRESS, help="工作区根目录（默认当前目录）"
     )
-    p_check_engine.add_argument("--plain", action="store_true", help="禁用彩色输出")
-    p_check_engine.add_argument("--json", action="store_true", help="以单行 JSON 输出")
+    p_check_engine.add_argument("--plain", action="store_true", default=argparse.SUPPRESS, help="禁用彩色输出")
+    p_check_engine.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="以单行 JSON 输出")
 
     # 4. init
     p_init = subparsers.add_parser("init", help="初始化目标项目接入 Quench 治理体系")
@@ -432,7 +432,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 5. archive
     p_archive = subparsers.add_parser("archive", help="归档已完工的任务单据至 archive/ 并同步 CHANGELOG")
     p_archive.add_argument(
-        "-w", "--workspace", default=".", help="工作区根目录（默认当前目录）"
+        "-w", "--workspace", default=argparse.SUPPRESS, help="工作区根目录（默认当前目录）"
     )
     p_archive.add_argument(
         "-y", "--yes", action="store_true", help="非交互确认归档"

@@ -188,14 +188,13 @@ async def test_reasoning_stream_is_persisted_chunkwise_to_session_log(tmp_path: 
     log_path = Path(res["log_path"])
     assert log_path.exists()
     log_content = log_path.read_text(encoding="utf-8")
-    assert "[reasoning] 🔍Step 1: 检查边界安全性。" in log_content
-    assert "[reasoning] Step 2: verifying thread safety." in log_content
+    assert "🔍Step 1: 检查边界安全性。" in log_content
+    assert "Step 2: verifying thread safety." in log_content
 
-    # 断言每行均有 ISO8601 时间戳，且行数严格等于自然段落数（2 行），杜绝 12 个分片膨胀为 12 行
-    reasoning_lines = [line for line in log_content.splitlines() if "[reasoning]" in line]
-    assert len(reasoning_lines) == 2
-    for line in reasoning_lines:
-        assert re.match(r"^\d{4}-\d{2}-\d{2}T", line)
+    # 断言输出为纯净 Markdown 正文，无每行时间戳或 [reasoning] 污染，且行数严格等于自然段落数（2 行），杜绝 12 个分片膨胀为 12 行
+    body_lines = [line for line in log_content.splitlines() if line and not line.startswith("#")]
+    assert len(body_lines) == 2
+
 
 
 @pytest.mark.anyio
@@ -493,7 +492,7 @@ async def test_dev_reviewer_consult_heartbeat_dispatch_and_context_propagation(t
 
     # 断言 FILE 通道兜底存在 [progress] 心跳标记
     assert "[progress]" in log_content
-    assert "[reasoning] Checking boundaries..." in log_content
+    assert "Checking boundaries..." in log_content
 
     # 断言 mock_ctx 收到了至少一次通知
     assert mock_ctx.info.called or mock_ctx.report_progress.called

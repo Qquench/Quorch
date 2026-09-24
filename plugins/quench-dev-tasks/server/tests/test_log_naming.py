@@ -22,6 +22,7 @@ from log_naming import (
     allocate_log_file,
     list_log_files,
     gc_by_filename_order,
+    enforce_unified_log_quota,
 )
 
 
@@ -239,4 +240,75 @@ def test_allocator_retries_on_eexist(tmp_path: Path, monkeypatch: pytest.MonkeyP
     path, _ = allocate_log_file(tmp_path, "retry_test")
     assert os.path.basename(path).startswith(f"{date_str}_002_")
     assert slot1.read_text(encoding="utf-8") == "already here"
+
+
+def test_enforce_unified_log_quota_purges_legacy_first(tmp_path: Path):
+    """验证统一限额清理优先淘汰最老的旧格式 latest-*.log，且连带清理 .1.log。"""
+    # Create 5 legacy logs with staggered mtimes
+    base_time = 1700000000.0
+    for i in range(1, 6):
+        legacy = tmp_path / f"latest-session_{i}.log"
+        legacy.write_text(f"legacy {i}", encoding="utf-8")
+        os.utime(legacy, (base_time + i * 10, base_time + i * 10))
+        # Add a rotation backup for session_1
+        if i == 1:
+            rot = tmp_path / f"latest-session_{i}.1.log"
+            rot.write_text("rot 1", encoding="utf-8")
+
+    # Create 3 new-format logs
+    for i in range(1, 4):
+        new_log = tmp_path / f"20260924_{i:03d}_task.log"
+        new_log.write_text(f"new {i}", encoding="utf-8")
+
+    # Pointer latest.log (must never be deleted)
+    pointer = tmp_path / "latest.log"
+    pointer.write_text("pointer", encoding="utf-8")
+
+    # Total counted logs = 5 legacy + 3 new = 8 logs.
+    # Set keep=5 -> excess = 3. Oldest 3 legacy logs (1, 2, 3) must be purged.
+    pruned = enforce_unified_log_quota(tmp_path, keep=5)
+
+    assert len(pruned) == 3
+    assert "latest-session_1.log" in pruned
+    assert "latest-session_2.log" in pruned
+    assert "latest-session_3.log" in pruned
+
+    # Verify files on disk
+    assert not (tmp_path / "latest-session_1.log").exists()
+    assert not (tmp_path / "latest-session_1.1.log").exists()  # rotation file cascade deleted
+    assert not (tmp_path / "latest-session_2.log").exists()
+    assert not (tmp_path / "latest-session_3.log").exists()
+
+    assert (tmp_path / "latest-session_4.log").exists()
+    assert (tmp_path / "latest-session_5.log").exists()
+    assert (tmp_path / "20260924_001_task.log").exists()
+    assert (tmp_path / "20260924_002_task.log").exists()
+    assert (tmp_path / "20260924_003_task.log").exists()
+    assert pointer.exists()  # latest.log preserved
+
+
+def test_enforce_unified_log_quota_purges_new_format_when_legacy_exhausted(tmp_path: Path):
+    """当旧格式日志清理殆尽后，超额部分按字典序零 stat 淘汰新格式日志。"""
+    # 2 legacy logs
+    for i in range(1, 3):
+        legacy = tmp_path / f"latest-old_{i}.log"
+        legacy.write_text("old", encoding="utf-8")
+
+    # 4 new format logs
+    for i in range(1, 5):
+        (tmp_path / f"20260924_{i:03d}_task.log").write_text("new", encoding="utf-8")
+
+    # Total = 2 + 4 = 6. keep = 3 -> excess = 3.
+    # Must purge 2 legacy logs, then 1 oldest new log (001).
+    pruned = enforce_unified_log_quota(tmp_path, keep=3)
+
+    assert len(pruned) == 3
+    assert "latest-old_1.log" in pruned
+    assert "latest-old_2.log" in pruned
+    assert "20260924_001_task.log" in pruned
+
+    assert (tmp_path / "20260924_002_task.log").exists()
+    assert (tmp_path / "20260924_003_task.log").exists()
+    assert (tmp_path / "20260924_004_task.log").exists()
+
 

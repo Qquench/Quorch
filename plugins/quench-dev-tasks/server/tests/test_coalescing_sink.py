@@ -42,7 +42,7 @@ def test_coalescing_stats_dataclass():
 
 
 def test_basic_token_aggregation_with_newlines():
-    """验证细粒度分片按自然换行符聚合成完整行，且带有正确的时间戳和标签。"""
+    """验证细粒度分片按自然换行符聚合成完整行，默认无时间戳污染保持纯净 Markdown。"""
     emitted: List[str] = []
     sink = CoalescingTextSink(emitted.append, tag="reasoning")
 
@@ -52,18 +52,28 @@ def test_basic_token_aggregation_with_newlines():
         sink.feed(t)
 
     assert len(emitted) == 2
-    for line in emitted:
-        assert line.endswith("\n")
-        assert "[reasoning]" in line
-        assert re.match(r"^\d{4}-\d{2}-\d{2}T", line)
-
-    assert "Step 1: analyzing architecture." in emitted[0]
-    assert "Step 2: verifying safety." in emitted[1]
+    assert emitted[0] == "Step 1: analyzing architecture.\n"
+    assert emitted[1] == "Step 2: verifying safety.\n"
 
     sink.close()
     assert sink.stats.lines_emitted == 2
     assert sink.stats.chunks_fed == len(tokens)
     assert sink.stats.chars_currently_buffered == 0
+
+
+def test_timestamp_and_tag_opt_in():
+    """验证显式设置 include_timestamp=True 时正确输出 ISO 时间戳和 tag。"""
+    emitted: List[str] = []
+    sink = CoalescingTextSink(emitted.append, tag="reasoning", include_timestamp=True)
+
+    sink.feed("Audit line 1.\nAudit line 2.\n")
+    assert len(emitted) == 2
+    for line in emitted:
+        assert line.endswith("\n")
+        assert "[reasoning]" in line
+        assert re.match(r"^\d{4}-\d{2}-\d{2}T", line)
+
+    sink.close()
 
 
 def test_cjk_and_emoji_fragment_safety():
@@ -77,8 +87,7 @@ def test_cjk_and_emoji_fragment_safety():
         sink.feed(char)
 
     assert len(emitted) == 1
-    assert "💡架构审查正在深入分析中，发现高并发竞争风险🚨！" in emitted[0]
-    assert emitted[0].endswith("\n")
+    assert emitted[0] == "💡架构审查正在深入分析中，发现高并发竞争风险🚨！\n"
     sink.close()
 
 
@@ -91,11 +100,11 @@ def test_markdown_blank_line_preservation():
     sink.feed("Paragraph 1.\n\nParagraph 2.\n   \nParagraph 3.\n")
 
     assert len(emitted) == 5
-    assert "[reasoning] Paragraph 1." in emitted[0]
+    assert emitted[0] == "Paragraph 1.\n"
     assert emitted[1] == "\n"  # 纯空行
-    assert "[reasoning] Paragraph 2." in emitted[2]
+    assert emitted[2] == "Paragraph 2.\n"
     assert emitted[3] == "\n"  # 纯空格行
-    assert "[reasoning] Paragraph 3." in emitted[4]
+    assert emitted[4] == "Paragraph 3.\n"
 
     sink.close()
     assert sink.stats.lines_emitted == 5
@@ -114,16 +123,17 @@ def test_max_line_chars_clamping_and_forced_split():
 
     # 150 字符在 max_line_chars=64 下，应立即切出 2 行（64 + 64 = 128），剩余 22 字符滞留
     assert len(emitted) == 2
-    assert emitted[0].endswith("[audit] " + "A" * 64 + "\n")
-    assert emitted[1].endswith("[audit] " + "A" * 64 + "\n")
+    assert emitted[0] == "A" * 64 + "\n"
+    assert emitted[1] == "A" * 64 + "\n"
     assert sink.stats.chars_currently_buffered == 22
 
     # close() 强制刷盘剩余 22 字符
     sink.close()
     assert len(emitted) == 3
-    assert emitted[2].endswith("[audit] " + "A" * 22 + "\n")
+    assert emitted[2] == "A" * 22 + "\n"
     assert sink.stats.chars_currently_buffered == 0
     assert sink.stats.lines_emitted == 3
+
 
 
 def test_clock_injection_and_idle_flush():

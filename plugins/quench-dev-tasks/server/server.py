@@ -92,9 +92,16 @@ from manifest import (
     commit_lease,
     release_lease,
     load_manifest,
+    touch_heartbeat,
     FencedTokenError,
+    ManifestIntegrityError,
     MANIFEST_REL_PATH,
 )
+
+try:
+    from .reaper import reclaim_stale_task
+except (ImportError, ValueError):
+    from reaper import reclaim_stale_task
 
 mcp = FastMCP("quench-dev-tasks")
 
@@ -724,7 +731,23 @@ def dev_tasks_confirm(
     updated = []
     errors = []
 
+    tasks = parse_task_file(target_path) if os.path.isfile(target_path) else []
+    task_map = {str(t.id).strip(): t for t in tasks}
+
     for tid in task_ids:
+        clean_tid = str(tid).strip()
+        t_item = task_map.get(clean_tid)
+        if t_item and t_item.status == STATUS_IN_PROGRESS and target_status == STATUS_CONFIRMED:
+            errors.append({
+                "id": tid,
+                "error": (
+                    f"Cannot transition task '{tid}' from 'In Progress' to 'Confirmed' via dev_tasks_confirm. "
+                    f"This transition is strictly reserved for dev_tasks_reclaim to ensure fencing generation monotonicity / "
+                    f"禁止通过 dev_tasks_confirm 将执行中任务直接重置为已确认状态。该流转严格保留给 dev_tasks_reclaim 回收通道以确保代际递增。"
+                ),
+            })
+            continue
+
         try:
             res = transition_task(target_path, str(tid), target_status)
             updated.append({"id": res.id, "title": res.title, "new_status": res.status})
@@ -935,9 +958,16 @@ def _resolve_handoff_envelope(
     return envelope
 
 
-def _issue_checkout_lease(workspace_root: str, task_file: str, task_id: str) -> tuple[str, int]:
+def _issue_checkout_lease(workspace_root: str, task_file: str, task_id: str, session_id: Optional[str] = None) -> tuple[str, int]:
     """签发独占 Fencing Token 租约并原子记录至 manifest.json。"""
-    holder_token = f"token_{int(time.time()*1000)}_{os.getpid()}"
+    if session_id:
+        try:
+            clean_sid = _validate_session_id(session_id)
+            holder_token = f"token_{clean_sid}_{int(time.time()*1000)}_{os.getpid()}"
+        except Exception:
+            holder_token = f"token_{int(time.time()*1000)}_{os.getpid()}"
+    else:
+        holder_token = f"token_{int(time.time()*1000)}_{os.getpid()}"
     namespaced_id = f"{Path(task_file).stem}::{task_id}"
     m = load_manifest(workspace_root)
     existing_rec = m.records.get(namespaced_id)
@@ -960,6 +990,7 @@ def dev_tasks_checkout(
     workspace_root: str,
     task_file: Optional[str] = None,
     task_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Check out a confirmed task, automatically transitioning it to '🔨 执行中' and returning detailed implementation instructions. Supports directed checkout via task file and ID.
 
@@ -969,7 +1000,15 @@ def dev_tasks_checkout(
         workspace_root: Root path of the target workspace / 项目根目录绝对路径。
         task_file: Optional task file name / 可选指定任务文件。
         task_id: Optional task ID for directed checkout / 可选指定任务ID定向领单。
+        session_id: Optional session UUID for multi-session isolation / 可选多会话隔离标识。
     """
+    clean_session_id = None
+    if session_id:
+        try:
+            clean_session_id = _validate_session_id(session_id)
+        except ValueError as ve:
+            return {"error": f"Invalid session_id format / 非法的 session_id 格式: {ve}"}
+
     try:
         config = load_project_config(workspace_root)
     except Exception as e:
@@ -1011,8 +1050,11 @@ def dev_tasks_checkout(
                     if t.status == STATUS_IN_PROGRESS:
                         detail = _extract_task_detail(f_path, t.id)
                         namespaced_id = f"{Path(f_path).stem}::{t.id}"
-                        m = load_manifest(workspace_root)
-                        existing_rec = m.records.get(namespaced_id)
+                        try:
+                            m = load_manifest(workspace_root)
+                            existing_rec = m.records.get(namespaced_id)
+                        except ManifestIntegrityError as mie:
+                            return {"error": f"Manifest integrity compromised (Fail-Closed): {mie} / 清单完整性受损阻断"}
                         resp = {
                             "task_file": f_path,
                             "task_id": t.id,
@@ -1024,13 +1066,15 @@ def dev_tasks_checkout(
                         if existing_rec:
                             resp["holder_token"] = existing_rec.holder_token
                             resp["generation"] = existing_rec.generation
+                        if clean_session_id:
+                            resp["session_id"] = clean_session_id
                         return resp
                     if t.status == STATUS_CONFIRMED:
                         try:
                             updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS)
                             detail = _extract_task_detail(f_path, t.id)
-                            holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id)
-                            return {
+                            holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
+                            resp_data = {
                                 "task_file": f_path,
                                 "task_id": updated.id,
                                 "title": updated.title,
@@ -1039,6 +1083,9 @@ def dev_tasks_checkout(
                                 "holder_token": holder_token,
                                 "generation": gen,
                             }
+                            if clean_session_id:
+                                resp_data["session_id"] = clean_session_id
+                            return resp_data
                         except Exception as e:
                             return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
                     return {
@@ -1056,8 +1103,8 @@ def dev_tasks_checkout(
                 try:
                     updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS)
                     detail = _extract_task_detail(f_path, t.id)
-                    holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id)
-                    return {
+                    holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
+                    resp_data = {
                         "task_file": f_path,
                         "task_id": updated.id,
                         "title": updated.title,
@@ -1066,6 +1113,9 @@ def dev_tasks_checkout(
                         "holder_token": holder_token,
                         "generation": gen,
                     }
+                    if clean_session_id:
+                        resp_data["session_id"] = clean_session_id
+                    return resp_data
                 except Exception as e:
                     return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
 
@@ -1177,7 +1227,13 @@ def dev_tasks_complete(
 
     # 校验租约归属与代际有效性（防分裂脑）
     namespaced_id = f"{Path(target_path).stem}::{cur_task.id}"
-    m = load_manifest(workspace_root)
+    try:
+        m = load_manifest(workspace_root)
+    except ManifestIntegrityError as mie:
+        return {
+            "status": "rejected",
+            "reason": f"Manifest integrity compromised (Fail-Closed) for task {task_id}: {mie} / 清单完整性受损阻断",
+        }
     active_lease = m.records.get(namespaced_id)
     if active_lease is not None and not active_lease.released:
         if holder_token is not None and active_lease.holder_token != holder_token:
@@ -1243,6 +1299,262 @@ def dev_tasks_complete(
 
     except Exception as e:
         return {"status": "rejected", "reason": f"Failed to transition task to completed / 流转为已完成失败: {e}"}
+
+
+@mcp.tool()
+async def dev_tasks_heartbeat(
+    workspace_root: str = ".",
+    task_id: Optional[str] = None,
+    holder_token: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Refresh active lease heartbeat for current or specified task, supporting multi-session isolation.
+
+    [中文对照] 刷新当前检出任务或指定任务的存活心跳租约，支持多会话隔离。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录路径（默认当前目录）。
+        task_id: Optional task ID (e.g. '2.1' or 'spec::2.1') / 可选指定任务ID，缺省自动解析当前执行中任务。
+        holder_token: Optional fencing lease holder token / 可选独占持有者令牌校验。
+        session_id: Optional session UUID for multi-session disambiguation / 可选用于跨会话防歧义鉴权的会话ID。
+    """
+    ws = os.path.abspath(workspace_root)
+    clean_session_id = None
+    if session_id:
+        try:
+            clean_session_id = _validate_session_id(session_id)
+        except ValueError as ve:
+            return {"status": "rejected", "reason": f"Invalid session_id format / 非法的 session_id 格式: {ve}"}
+
+    try:
+        config = load_project_config(ws)
+    except Exception as e:
+        return {"status": "rejected", "reason": f"Configuration error / 配置错误: {e}"}
+
+    try:
+        m = load_manifest(ws)
+    except ManifestIntegrityError as mie:
+        return {
+            "status": "rejected",
+            "reason": f"Manifest integrity compromised (Fail-Closed) / 清单完整性受损阻断: {mie}",
+        }
+    except Exception as e:
+        return {"status": "rejected", "reason": f"Failed to load manifest / 加载清单失败: {e}"}
+
+    namespaced_id: Optional[str] = None
+
+    if task_id:
+        target_tid = str(task_id).strip()
+        if "::" in target_tid:
+            namespaced_id = target_tid
+        else:
+            suffix = f"::{target_tid}"
+            namespaced_id = next((k for k in m.records if k == target_tid or k.endswith(suffix)), None)
+            if not namespaced_id:
+                dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+                if os.path.isdir(dev_tasks_dir):
+                    for f_path in sorted(glob.glob(os.path.join(dev_tasks_dir, "*.md")), reverse=True):
+                        if os.path.basename(f_path).lower() == "readme.md":
+                            continue
+                        for t in parse_task_file(f_path):
+                            if str(t.id).strip() == target_tid:
+                                namespaced_id = f"{Path(f_path).stem}::{t.id}"
+                                break
+                        if namespaced_id:
+                            break
+            if not namespaced_id:
+                namespaced_id = target_tid
+    else:
+        # 自动解析当前处于 🔨 执行中 的任务
+        active_task = None
+        dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+        if os.path.isdir(dev_tasks_dir):
+            for f_path in sorted(glob.glob(os.path.join(dev_tasks_dir, "*.md")), reverse=True):
+                if os.path.basename(f_path).lower() == "readme.md":
+                    continue
+                for t in parse_task_file(f_path):
+                    if t.status == STATUS_IN_PROGRESS:
+                        active_task = (f_path, t.id)
+                        break
+                if active_task:
+                    break
+        if not active_task:
+            return {
+                "status": "rejected",
+                "reason": "No active task currently in progress / 当前无执行中任务",
+            }
+        f_path, tid = active_task
+        namespaced_id = f"{Path(f_path).stem}::{tid}"
+
+    record = m.records.get(namespaced_id)
+    if record is None:
+        return {
+            "status": "rejected",
+            "task_id": namespaced_id,
+            "reason": f"No lease record found for task '{namespaced_id}' / 未找到任务租约记录",
+        }
+
+    if record.released:
+        return {
+            "status": "rejected",
+            "task_id": namespaced_id,
+            "generation": record.generation,
+            "reason": f"Task lease for '{namespaced_id}' has already been released / 任务租约已释放",
+        }
+
+    # 跨会话防歧义鉴权
+    if clean_session_id and record.holder_token.startswith("token_"):
+        parts = record.holder_token.split("_")
+        if len(parts) >= 4:
+            recorded_session = "_".join(parts[1:-2])
+            if recorded_session and recorded_session != clean_session_id:
+                return {
+                    "status": "rejected",
+                    "task_id": namespaced_id,
+                    "generation": record.generation,
+                    "reason": f"Cross-session conflict: task lease belongs to session '{recorded_session}', got '{clean_session_id}' / 跨会话租约冲突",
+                }
+
+    token_to_renew = str(holder_token).strip() if holder_token else record.holder_token
+
+    try:
+        success = touch_heartbeat(
+            ws,
+            task_id=namespaced_id,
+            holder_token=token_to_renew,
+            generation=record.generation,
+        )
+    except ManifestIntegrityError as mie:
+        return {
+            "status": "rejected",
+            "task_id": namespaced_id,
+            "generation": record.generation,
+            "reason": f"Manifest integrity compromised during heartbeat: {mie} / 心跳刷新期清单完整性受损",
+        }
+    except Exception as e:
+        return {
+            "status": "rejected",
+            "task_id": namespaced_id,
+            "generation": record.generation,
+            "reason": f"Failed to touch heartbeat: {e} / 心跳续约异常: {e}",
+        }
+
+    if success:
+        _append_hook_log(
+            ws,
+            f"[HEARTBEAT RENEWED] Task '{namespaced_id}' lease heartbeat refreshed (gen={record.generation}, token={token_to_renew})",
+        )
+        resp = {
+            "status": "ok",
+            "task_id": namespaced_id,
+            "generation": record.generation,
+            "holder_token": token_to_renew,
+            "message": f"Heartbeat successfully renewed for task '{namespaced_id}' / 心跳租约续期成功",
+        }
+        if clean_session_id:
+            resp["session_id"] = clean_session_id
+        return resp
+    else:
+        return {
+            "status": "rejected",
+            "task_id": namespaced_id,
+            "generation": record.generation,
+            "reason": "Heartbeat rejected: generation or holder token mismatch, or lease released / 心跳续约被拒：代际或令牌不匹配，或租约已释放",
+        }
+
+
+@mcp.tool()
+async def dev_tasks_reclaim(
+    workspace_root: str = ".",
+    task_id: str = "",
+    expected_generation: int = 0,
+    expected_holder_token: str = "",
+    force: bool = False,
+) -> dict[str, Any]:
+    """CAS 幂等回收疑似僵尸任务并重置为已确认待执行状态。
+
+    [中文对照] 针对疑似假死或心跳超时的僵尸任务执行 CAS 幂等回收。验证预期代际与持有者令牌，在双锁保护下复核健康探针，回收成功后递增代际作废旧令牌并将任务重置为已确认待执行状态。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录路径（默认当前目录）。
+        task_id: Target task ID (e.g. '2.1' or 'spec::2.1') / 目标任务ID。
+        expected_generation: Expected lease generation for CAS verification / 用于 CAS 比对的预期代际。
+        expected_holder_token: Expected holder token for CAS verification / 用于 CAS 比对的预期持有者令牌。
+        force: Force reclaim even if health probes judge target as healthy / 是否无视探针健康度判定强制回收。
+    """
+    ws = os.path.abspath(workspace_root)
+    clean_tid = str(task_id).strip()
+    if not clean_tid:
+        return {
+            "status": "rejected",
+            "reason": "missing_task_id",
+            "message": "task_id is required / 必须提供 task_id",
+        }
+
+    try:
+        ok, reason = reclaim_stale_task(
+            ws,
+            task_id=clean_tid,
+            expected_generation=expected_generation,
+            expected_holder_token=expected_holder_token,
+            force=force,
+        )
+    except ManifestIntegrityError as mie:
+        return {
+            "status": "rejected",
+            "task_id": clean_tid,
+            "reason": "manifest_integrity_compromised",
+            "message": f"Manifest integrity compromised during reclaim: {mie} / 回收期清单完整性受损阻断",
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "task_id": clean_tid,
+            "reason": str(e),
+            "message": f"Failed to reclaim task '{clean_tid}': {e} / 回收任务异常: {e}",
+        }
+
+    if ok:
+        if reason == "reclaimed":
+            _append_hook_log(
+                ws,
+                f"[TASK RECLAIMED] Stale task '{clean_tid}' reclaimed (expected gen={expected_generation}) and reset to confirmed",
+            )
+            return {
+                "status": "reclaimed",
+                "task_id": clean_tid,
+                "reason": reason,
+                "message": f"Task '{clean_tid}' successfully reclaimed and reset to confirmed / 任务成功回收并重置为已确认",
+            }
+        else:
+            return {
+                "status": "already_reclaimed_or_fenced",
+                "task_id": clean_tid,
+                "reason": reason,
+                "message": f"Task '{clean_tid}' already reclaimed or fenced (idempotent success) / 任务租约已在先前回收或已被更新代际屏蔽（幂等成功）",
+            }
+    else:
+        if reason == "target_is_healthy":
+            return {
+                "status": "rejected",
+                "task_id": clean_tid,
+                "reason": reason,
+                "message": f"Task '{clean_tid}' is currently healthy based on health probes; use force=True to override / 探针判定目标任务当前健康活跃，拒绝回收；如确需强制回收请指定 force=True",
+            }
+        elif reason == "no_such_lease":
+            return {
+                "status": "rejected",
+                "task_id": clean_tid,
+                "reason": reason,
+                "message": f"No lease record found for task '{clean_tid}' / 未找到任务租约记录",
+            }
+        else:
+            return {
+                "status": "rejected",
+                "task_id": clean_tid,
+                "reason": reason,
+                "message": f"Task '{clean_tid}' reclaim rejected: {reason} / 任务回收被拒: {reason}",
+            }
 
 
 @mcp.tool()

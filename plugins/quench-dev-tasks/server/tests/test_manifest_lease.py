@@ -15,6 +15,7 @@ import yaml
 from manifest import (
     FencedTokenError,
     Manifest,
+    ManifestIntegrityError,
     TaskRecord,
     MANIFEST_REL_PATH,
     atomic_replace_manifest,
@@ -137,14 +138,13 @@ def test_load_and_atomic_replace_manifest(mock_workspace):
     assert reloaded.records["test_spec::1.1"].generation == 1
     assert reloaded.records["test_spec::1.1"].holder_token == "tok_test_001"
 
-    # 损坏恢复：故意破坏 manifest.json
+    # 损坏阻断：故意破坏 manifest.json，验证 Fail-Closed 抛出 ManifestIntegrityError
     manifest_file = os.path.join(ws, MANIFEST_REL_PATH)
     with open(manifest_file, "w", encoding="utf-8") as f:
         f.write("{invalid_json: true, broken...")
 
-    recovered = load_manifest(ws)
-    assert recovered.schema_version == "1.0"
-    assert len(recovered.records) == 0
+    with pytest.raises(ManifestIntegrityError):
+        load_manifest(ws)
 
 
 def test_commit_lease_lifecycle_and_split_brain_prevention(mock_workspace):

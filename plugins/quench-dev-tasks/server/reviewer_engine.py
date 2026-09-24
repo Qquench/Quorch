@@ -418,8 +418,9 @@ class CoalescingTextSink:
     """将流式文本分片聚合并按行/尺寸/空闲边界落盘，杜绝分片级写行。
 
     - 按自然换行 `\n` 切分完整行输出；
-    - 空白行直接写 `\n`，严保 Markdown 语义完整，不掺时间戳；
-    - 非空行前缀 `<iso_ts> [<tag>] <line>\n`；
+    - 空白行直接写 `\n`，严保 Markdown 语义完整；
+    - 默认 include_timestamp=False，输出原始纯净 Markdown 文本，绝不在标题/代码块/正文前置时间戳与标签；
+    - 若 include_timestamp=True，非空行前缀 `<iso_ts> [<tag>] <line>\n`（用于系统审计流）；
     - 超过 max_line_chars 强制切分；
     - 空闲超时 (idle_flush_seconds) 后台 watchdog 自动刷盘，保障实时可观测性；
     - close() / flush(force=True) 强制刷盘尾残内容（零丢损）；
@@ -434,12 +435,14 @@ class CoalescingTextSink:
         max_line_chars: int = 400,
         idle_flush_seconds: float = 0.4,
         clock: Optional[Callable[[], float]] = None,
+        include_timestamp: bool = False,
     ) -> None:
         self._emit_line = emit_line
         self.tag = tag or "reasoning"
         self.max_line_chars = max(int(max_line_chars), 64)
         self.idle_flush_seconds = float(idle_flush_seconds)
         self._clock = clock if clock is not None else (lambda: time.monotonic())
+        self.include_timestamp = bool(include_timestamp)
         self._lock = threading.Lock()
         self._pending = ""
         self._lines_emitted = 0
@@ -575,9 +578,12 @@ class CoalescingTextSink:
     def _emit_formatted_locked(self, raw_line: str, *, is_close: bool = False) -> None:
         if not raw_line.strip():
             formatted = "\n"
-        else:
+        elif self.include_timestamp:
             iso_ts = datetime.now(timezone.utc).isoformat()
-            formatted = f"{iso_ts} [{self.tag}] {raw_line}\n"
+            tag_str = f" [{self.tag}]" if self.tag else ""
+            formatted = f"{iso_ts}{tag_str} {raw_line}\n"
+        else:
+            formatted = f"{raw_line}\n"
 
         try:
             self._emit_line(formatted)
