@@ -102,6 +102,7 @@ from manifest import (
     reconcile_workspace,
     ReconcileReport,
     ReconcileClass,
+    capture_baseline,
 )
 
 try:
@@ -1113,7 +1114,11 @@ def dev_tasks_checkout(
                         return resp
                     if t.status == STATUS_CONFIRMED:
                         try:
-                            updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS)
+                            updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS, workspace_root=workspace_root)
+                            try:
+                                capture_baseline(workspace_root, updated.id, clean_session_id or "default")
+                            except Exception:
+                                pass
                             detail = _extract_task_detail(f_path, t.id)
                             holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
                             resp_data = {
@@ -1148,7 +1153,11 @@ def dev_tasks_checkout(
         for t in tasks:
             if t.status == STATUS_CONFIRMED:
                 try:
-                    updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS)
+                    updated = transition_task(f_path, t.id, STATUS_IN_PROGRESS, workspace_root=workspace_root)
+                    try:
+                        capture_baseline(workspace_root, updated.id, clean_session_id or "default")
+                    except Exception:
+                        pass
                     detail = _extract_task_detail(f_path, t.id)
                     holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
                     resp_data = {

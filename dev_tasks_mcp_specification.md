@@ -166,19 +166,22 @@ stateDiagram-v2
 
 ## 4. MCP Tools Specification
 
-The server exposes 11 atomic FastMCP tools:
+The server exposes 14 atomic FastMCP tools:
 
 1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status.
 3. **`dev_tasks_confirm`**: Advances tasks to `[Confirmed]`, `[Skipped]`, or transitions them to `[Rework]`.
-4. **`dev_tasks_checkout`**: Checks out the next confirmed task, sets its state to `[In Progress]`, and provides step-by-step guidance.
-5. **`dev_tasks_complete`**: Submits a completed task, requiring DoD test command output and physical test assertion auditing.
+4. **`dev_tasks_checkout`**: Checks out the next confirmed task, sets its state to `[In Progress]`, captures a physical baseline snapshot, and provides step-by-step guidance.
+5. **`dev_tasks_complete`**: Submits a completed task, requiring DoD test command output, physical test assertion auditing, and physical scope reconciliation against the declared whitelist.
 6. **`dev_tasks_escalate`**: Awakens the Reviewer role with focused contextual snippets when encountering roadblocks.
 7. **`dev_tasks_refine_spec`**: Runs multi-turn architectural reasoning via `ReviewerClient`, streaming reasoning logs and enforcing the physical lint gate.
 8. **`dev_tasks_promote_draft`**: Validates physical feasibility of a draft task and promotes it to formal `[Pending]` state.
 9. **`dev_tasks_archive`**: Retires closed tasks to `archive/` and increments the changelog.
 10. **`dev_tasks_set_bypass`**: Manages temporary time-bound bypass tokens with strict audit logging.
 11. **`dev_reviewer_consult`**: Direct ad-hoc architecture consultation tool with read-only sandbox guards, 4 modes, and real-time streaming thinking logs.
+12. **`dev_tasks_heartbeat`**: Refreshes the active lease heartbeat for current or specified tasks, supporting multi-session isolation.
+13. **`dev_tasks_reclaim`**: CAS-guaranteed zombie task reclamation with dual-process contention safety and monotonic generation increments.
+14. **`dev_tasks_export_handoff_card`**: Generates a standard markdown Reviewer handoff card for a task.
 
 ---
 
@@ -189,7 +192,7 @@ All specifications are verified across the codebase:
 | Spec Section | Implementation Files | Key Mechanism |
 | :--- | :--- | :--- |
 | **Review Protocols & Anti-Roleplay** | `rules/dev-tasks-discipline.md`<br>`skills/dev-tasks-review/` | Read-only planning constraints, anti-roleplay invariant (`findings == ""`), and triage decision tree |
-| **State Machine** | `server/state_machine.py` | Strict enum transitions, cross-process `FileLock`, Unicode emoji regex normalization |
+| **State Machine** | `server/state_machine.py` | Strict enum transitions, cross-process `FileLock`, Unicode emoji regex normalization, and scope reconciliation pre-flight gate |
 | **Six Core Fields** | `server/schema_validator.py` | Bilingual field aliases, markdown block parsing, granularity warnings |
 | **Draft & Feasibility Gate** | `server/schema_validator.py`<br>`server/server.py` | Physical existence checks, dry-run `--collect-only`, atomic `dev_tasks_promote_draft` |
 | **Reviewer Engine & Presets** | `server/reviewer_engine.py` | Pluggable vendor-neutral `ReviewerClient`, declarative `PROVIDER_PRESETS`, generic CoT probe |
@@ -198,10 +201,12 @@ All specifications are verified across the codebase:
 | **Observability Sinks** | `server/reviewer_engine.py`<br>`server/observability.py` | `RotatingFileSink`, bounded disk writes, 1.0s low-frequency MCP heartbeats, zero stdout pollution |
 | **Physical Guards** | `server/hooks/file_scope_guard.py`<br>`server/hooks/context_injector.py`<br>`scripts/git_pre_commit_guard.py` | `PreToolUse` physical interception (`force_ask`), `PreInvocation` reminder injection, Git pre-commit barrier |
 | **Decoupled Config** | `server/project_config.py`<br>`templates/quench_stack.yaml` | Workspace `.agents/quench_stack.yaml` integration with migration engine |
-| **11 MCP Tools** | `server/server.py` | FastMCP tool registration with bilingual docstrings and argument descriptions |
+| **Baseline Snapshot & Scope Reconciliation** | `server/manifest.py`<br>`server/state_machine.py`<br>`server/path_guard.py` | Checkout baseline snapshot (`size`, `mtime_ns`, `inode`, `sha256`), dual-path fast/slow reconciliation, 50ms circuit breaker timeout, cross-platform path normalization |
+| **Client Capability Probe** | `scripts/probe_client_capabilities.py` | Zero-dependency stdio/SSE/HTTP client capabilities handshake probe, diffing, and baseline emission |
+| **14 MCP Tools** | `server/server.py` | FastMCP tool registration with bilingual docstrings and argument descriptions |
 | **Cross-Tool Adapters** | `server/adapters/` | Multi-host adapter layer supporting Antigravity, Cursor, and generic CLI |
 | **Rules Exporter** | `scripts/rules_exporter.py` | Exports `.cursorrules` and modern `.cursor/rules/quench-dev-tasks.mdc` |
 | **Unified CLI** | `server/cli.py` | Standalone `quorch status/check/init/archive` terminal command suite |
 | **Installer** | `scripts/install.py`<br>`scripts/init_project.py` | Pre-flight health checks, snapshot backup/rollback, automated IDE configuration |
-| **Test Matrix** | `server/tests/` (308+ tests) | 100% passing test coverage across Windows and Ubuntu environments |
+| **Test Matrix** | `server/tests/` (497+ tests) | 100% passing test coverage across Windows and Ubuntu environments |
 

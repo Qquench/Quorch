@@ -6,10 +6,14 @@ Guarantees consistent security semantics across POSIX (Linux/macOS) and Windows 
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
+import sys
+import unicodedata
 import urllib.parse
-from typing import Final, Sequence
+from dataclasses import dataclass
+from typing import Final, Optional, Sequence
 
 _NUL_BYTE_RE: Final = re.compile(r"\x00")
 _DRIVE: Final = re.compile(r"^[a-zA-Z]:")
@@ -184,3 +188,175 @@ def to_workspace_relative_path(
     real_ws = os.path.realpath(os.path.abspath(workspace_root))
     rel = os.path.relpath(abs_path, real_ws).replace("\\", "/")
     return rel
+
+
+def canonicalize_path(
+    raw_path: str | os.PathLike[str],
+    *,
+    base_dir: str | os.PathLike[str],
+    follow_symlinks: bool = True,
+) -> str:
+    """Return a canonical POSIX-style relative path relative to base_dir.
+
+    Normalizes Unicode (NFC), collapses redundant segments (./..), and verifies
+    confinement within base_dir.
+    Raises PathTraversalError on traversal attempts, NUL bytes, or invalid paths.
+    """
+    if raw_path is None:
+        raise PathTraversalError("Path cannot be None")
+    raw_str = str(raw_path)
+    if not raw_str.strip():
+        raise PathTraversalError("Path cannot be empty or whitespace only")
+    if _NUL_BYTE_RE.search(raw_str):
+        raise PathTraversalError(f"NUL byte injection detected in path: {raw_path!r}")
+
+    # NFC normalization
+    raw_str = unicodedata.normalize("NFC", raw_str)
+
+    # Host-invariant separator normalization
+    clean = raw_str.replace("\\", "/")
+
+    # Check for direct escape prefixes
+    if clean.startswith("../") or clean == "..":
+        raise PathTraversalError(f"Parent directory traversal escapes base directory: {raw_path!r}")
+
+    base_str = str(base_dir)
+    real_base = os.path.realpath(os.path.abspath(base_str)) if follow_symlinks else os.path.abspath(base_str)
+
+    if os.path.isabs(clean):
+        target_abs = os.path.realpath(os.path.abspath(clean)) if follow_symlinks else os.path.abspath(clean)
+    else:
+        target_abs = os.path.realpath(os.path.abspath(os.path.join(real_base, clean))) if follow_symlinks else os.path.abspath(os.path.join(real_base, clean))
+
+    try:
+        common = os.path.commonpath([real_base, target_abs])
+    except ValueError:
+        raise PathTraversalError(f"Cross-drive path escapes base directory: {raw_path!r}")
+
+    if os.path.normcase(common) != os.path.normcase(real_base):
+        raise PathTraversalError(f"Path escapes base directory: {raw_path!r}")
+
+    rel = os.path.relpath(target_abs, real_base).replace("\\", "/")
+    if rel == "." or rel == "":
+        return "."
+    if rel.startswith(".."):
+        raise PathTraversalError(f"Parent directory traversal escapes base directory: {raw_path!r}")
+
+    return unicodedata.normalize("NFC", rel)
+
+
+def comparison_key(canonical_path: str, *, case_sensitive: bool) -> str:
+    """Generate platform-aware comparison key (casefold when case_sensitive=False)."""
+    norm = unicodedata.normalize("NFC", str(canonical_path).replace("\\", "/"))
+    if not case_sensitive:
+        return norm.casefold()
+    return norm
+
+
+def _glob_to_regex(pattern: str, case_sensitive: bool = True) -> re.Pattern:
+    """Translate glob pattern with ** (recursive) and * (single segment) into regex."""
+    clean = pattern.replace("\\", "/").strip()
+    res = []
+    i = 0
+    n = len(clean)
+    while i < n:
+        c = clean[i]
+        if c == "*":
+            if i + 1 < n and clean[i + 1] == "*":
+                # '**'
+                if i + 2 < n and clean[i + 2] == "/":
+                    res.append("(?:.*/)?")
+                    i += 3
+                    continue
+                else:
+                    res.append(".*")
+                    i += 2
+                    continue
+            else:
+                # '*' single segment
+                res.append("[^/]*")
+                i += 1
+                continue
+        elif c == "?":
+            res.append("[^/]")
+            i += 1
+        elif c in r".^$+-=!()[]{}\|":
+            res.append(re.escape(c))
+            i += 1
+        else:
+            res.append(c)
+            i += 1
+    flags = 0 if case_sensitive else re.IGNORECASE
+    return re.compile(f"^{''.join(res)}$", flags)
+
+
+def is_within_whitelist(
+    canonical_rel_path: str,
+    whitelist: Sequence[str | os.PathLike[str]],
+    *,
+    case_sensitive: bool = True,
+) -> bool:
+    """Check if canonical relative path matches any pattern or path in whitelist."""
+    norm_path = unicodedata.normalize("NFC", str(canonical_rel_path).replace("\\", "/")).strip("/")
+    basename = os.path.basename(norm_path)
+
+    for item in whitelist:
+        pat_str = unicodedata.normalize("NFC", str(item).replace("\\", "/")).strip()
+
+        # Exact match
+        if case_sensitive:
+            if norm_path == pat_str:
+                return True
+        else:
+            if norm_path.casefold() == pat_str.casefold():
+                return True
+
+        regex = _glob_to_regex(pat_str, case_sensitive=case_sensitive)
+        if regex.match(norm_path):
+            return True
+
+        # If pattern has no directory separators (e.g. *.md), allow matching basename
+        if "/" not in pat_str and regex.match(basename):
+            return True
+
+    return False
+
+
+@dataclass(frozen=True)
+class SubsetCheckResult:
+    is_subset: bool
+    violating_paths: tuple[str, ...]
+    normalized_whitelist: frozenset[str]
+
+
+def check_whitelist_subset(
+    touched_paths: Sequence[str | os.PathLike[str]],
+    whitelist: Sequence[str | os.PathLike[str]],
+    *,
+    base_dir: str | os.PathLike[str],
+    case_sensitive: Optional[bool] = None,
+) -> SubsetCheckResult:
+    """Verify that all touched paths fall strictly within declared whitelist."""
+    cs = (sys.platform != "win32") if case_sensitive is None else bool(case_sensitive)
+    norm_whitelist = frozenset(
+        comparison_key(str(w).replace("\\", "/"), case_sensitive=cs)
+        for w in whitelist
+    )
+
+    violating: list[str] = []
+    for p in touched_paths:
+        try:
+            can_rel = canonicalize_path(p, base_dir=base_dir)
+        except PathTraversalError:
+            violating.append(str(p).replace("\\", "/"))
+            continue
+
+        if not is_within_whitelist(can_rel, whitelist, case_sensitive=cs):
+            violating.append(can_rel)
+
+    return SubsetCheckResult(
+        is_subset=len(violating) == 0,
+        violating_paths=tuple(sorted(violating)),
+        normalized_whitelist=norm_whitelist,
+    )
+

@@ -22,6 +22,10 @@
 4. [跨平台编码安全准则 (Defensive Guidelines)](#4-跨平台编码安全准则-defensive-guidelines)
 5. [CI 验证与双向回归自检矩阵](#5-ci-验证与双向回归自检矩阵)
 6. [新增 CI 异常案例归档规范与模板](#6-新增-ci-异常案例归档规范与模板)
+7. [客户端能力独立探针实测矩阵与采样不可行熔断规程](#7-客户端能力独立探针实测矩阵与采样不可行熔断规程)
+   - [7.1 独立探针定位与架构设计](#71-独立探针定位与架构设计)
+   - [7.2 主流客户端实测能力基线矩阵](#72-主流客户端实测能力基线矩阵)
+   - [7.3 采样 (Sampling) 不可行熔断规程](#73-采样-sampling-不可行熔断规程)
 
 ---
 
@@ -255,3 +259,61 @@ foreach ($job in $jobs.jobs) {
   2. 测试用例防护与隔离：...
   3. 静态门禁或流程防线：...
 ```
+
+---
+
+## 7. 客户端能力独立探针实测矩阵与采样不可行熔断规程
+
+### 7.1 独立探针定位与架构设计
+
+在 Model Context Protocol (MCP) 生态中，宿主客户端（如 Google Antigravity, Claude Code, Cursor, Codex CLI 等）对规范各特性的支持度存在显著异构性。若 FastMCP 服务假设下游客户端具备特定反向调用能力（典型如 LLM 采样 `sampling`、工作区动态根路径通知 `roots` 等），一旦客户端实际未实现该能力，在单通道 stdio JSON-RPC 传输下，服务端的反向请求将得不到任何响应，导致**单管协议永久死锁或静默挂起**。
+
+为了以客观、物理可复现的方式确立各客户端的兼容边界，Quench 提供了**独立客户端能力探针**：
+- **脚本入口**: `plugins/quench-dev-tasks/scripts/probe_client_capabilities.py`
+- **依赖约束**: 纯标准库实现（`argparse`, `asyncio`, `json`, `subprocess`, `urllib`），零第三方外部依赖。
+- **原子基线输出**: 基于 `tempfile` + `os.replace` 实现基线文件的跨平台原子写盘，防止竞争写入破损。
+
+#### 标准数据契约 (`ClientCapabilityReport`)
+
+```json
+{
+  "schema_version": "1.0",
+  "client_name": "claude-code",
+  "client_version": "0.2.29",
+  "protocol_version": "2024-11-05",
+  "transports": ["stdio"],
+  "capabilities": {
+    "roots": true,
+    "roots.listChanged": true,
+    "sampling": false
+  },
+  "status": "ok",
+  "probed_at_utc": "2026-09-24T12:00:00Z",
+  "probe_duration_ms": 32
+}
+```
+
+### 7.2 主流客户端实测能力基线矩阵
+
+下表基于 `probe_client_capabilities.py` 在主流环境与客户端实测采样所得基线：
+
+| 客户端名称 | 客户端版本 | 推荐传输方式 | `roots` 支持 | `sampling` 支持 | 兼容状态判定 | 典型行为特征与注意点 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Google Antigravity IDE** | 2.0+ (Preview) | stdio / SSE | ✅ 支持 (`listChanged`) | ❌ 未开放反调 | 兼容 (基线) | 严格 PreToolUse 钩子拦截，不支持反向 sampling 订阅扣费 |
+| **Claude Code (CLI)** | 0.2.x+ | stdio | ✅ 支持 | ❌ 不支持 | 兼容 (基线) | 外部无头 CLI 执行器，单通道通信，反向采样会触发悬挂 |
+| **Cursor IDE** | 0.45.x+ | stdio / HTTP | ✅ 支持 | ❌ 不支持 | 兼容 (基线) | 支持标准 tools 与 prompts，未开放服务端发起的采样反调 |
+| **Codex CLI / Generic** | Standard | stdio | ⚠️ 部分支持 | ❌ 不支持 | 需白名单降级 | 仅消费 tools，任何反向通知需做存在性降级检查 |
+
+### 7.3 采样 (Sampling) 不可行熔断规程
+
+根据实测基线数据，**当前所有主流 MCP 客户端在 stdio 传输下均未开放或不支持服务端的反向 `sampling` 反调**。
+
+#### 熔断铁律 (Hard Invariants)
+
+1. **零盲目反向调用 (No Blind Reverse Calls)**:
+   - FastMCP 服务端**绝对禁止**在未经握手探针确权的情况下向下游客户端发起 `sampling/createMessage` 请求。
+2. **探针短路与不可行熔断 (Circuit Breaker on Probe Missing)**:
+   - 握手阶段若未探测到 `capabilities.get("sampling") is True`，或探测返回 `status in ('unavailable', 'timeout', 'error')`，服务端核心必须**立刻物理熔断采样调用链**。
+3. **降级与本地兜底原则**:
+   - 凡涉及需要 LLM 辅助的评审决策、规范推断或日志摘要，必须降级为本地规则引擎（如 `schema_validator.py`、静态正则与 AST 分析），或通过 MCP 标准返回向用户交还人工决策，绝不允许单管 stdio 挂起等待。
+

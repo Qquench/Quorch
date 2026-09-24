@@ -10,18 +10,24 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 import filelock
 
 try:
     from .observability_policy import MAX_RECORD_BYTES
 except (ImportError, ValueError):
     from observability_policy import MAX_RECORD_BYTES
+
+try:
+    from .path_guard import is_within_whitelist
+except (ImportError, ValueError):
+    from path_guard import is_within_whitelist
 
 MANIFEST_REL_PATH = ".agents/.quorch/manifest.json"
 
@@ -635,4 +641,360 @@ def reconcile_workspace(workspace_root: str, dev_tasks_dir: str) -> ReconcileRep
         drift_queue=tuple(drift_list),
         matched_queue=tuple(matched_list),
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 1.2: Baseline Snapshot & Physical Scope Reconciliation Gate
+# ---------------------------------------------------------------------------
+
+EXCLUDED_WORKSPACE_DIRS: Final[frozenset[str]] = frozenset({
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+})
+
+
+@dataclass(frozen=True)
+class FileFingerprint:
+    rel_path: str
+    size: int
+    mtime_ns: int
+    digest: str  # sha256:<hex>
+    inode: int = 0
+
+
+@dataclass(frozen=True)
+class BaselineSnapshot:
+    schema_version: int
+    task_id: str
+    session_id: str
+    head_commit: str
+    fingerprints: Mapping[str, FileFingerprint]
+    created_at_utc: str
+    snapshot_digest: str
+
+
+@dataclass(frozen=True)
+class ReconciliationReport:
+    verdict: Literal["allow", "deny", "degraded"]
+    violating_files: tuple[str, ...]
+    checked_count: int
+    fast_path_hits: int
+    elapsed_ms: float
+    degraded_reason: str | None
+
+
+def _get_git_head_commit(workspace_root: str) -> str:
+    """Safely obtain Git HEAD commit or fallback to 'no-git'."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=workspace_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return "no-git"
+
+
+def _safe_baseline_filename(task_id: str) -> str:
+    cleaned = re.sub(r"[^\w\.-]", "_", str(task_id).strip())
+    return f"{cleaned}.json"
+
+
+def get_baseline_path(workspace_root: str, task_id: str) -> str:
+    """Return canonical path to baseline snapshot JSON file."""
+    return os.path.join(
+        workspace_root, ".agents", ".quorch", "baselines", _safe_baseline_filename(task_id)
+    )
+
+
+def save_baseline_snapshot(workspace_root: str, snapshot: BaselineSnapshot) -> str:
+    """Atomically save baseline snapshot to disk using tempfile + os.replace."""
+    target_path = get_baseline_path(workspace_root, snapshot.task_id)
+    target_dir = os.path.dirname(target_path)
+    os.makedirs(target_dir, exist_ok=True)
+
+    data = {
+        "schema_version": snapshot.schema_version,
+        "task_id": snapshot.task_id,
+        "session_id": snapshot.session_id,
+        "head_commit": snapshot.head_commit,
+        "created_at_utc": snapshot.created_at_utc,
+        "snapshot_digest": snapshot.snapshot_digest,
+        "fingerprints": {
+            k: {
+                "rel_path": v.rel_path,
+                "size": v.size,
+                "mtime_ns": v.mtime_ns,
+                "digest": v.digest,
+                "inode": v.inode,
+            }
+            for k, v in snapshot.fingerprints.items()
+        },
+    }
+
+    temp_fd, temp_path = tempfile.mkstemp(
+        dir=target_dir, prefix=".tmp_baseline_", suffix=".json"
+    )
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, target_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        raise
+    return target_path
+
+
+def load_baseline_snapshot(path: str) -> BaselineSnapshot:
+    """Load baseline snapshot from file."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    fps = {
+        k: FileFingerprint(
+            rel_path=v["rel_path"],
+            size=v["size"],
+            mtime_ns=v["mtime_ns"],
+            digest=v["digest"],
+            inode=v.get("inode", 0),
+        )
+        for k, v in data.get("fingerprints", {}).items()
+    }
+    return BaselineSnapshot(
+        schema_version=data.get("schema_version", 1),
+        task_id=data["task_id"],
+        session_id=data.get("session_id", "default"),
+        head_commit=data.get("head_commit", "no-git"),
+        fingerprints=fps,
+        created_at_utc=data.get("created_at_utc", ""),
+        snapshot_digest=data.get("snapshot_digest", ""),
+    )
+
+
+def capture_baseline(
+    workspace_root: str, task_id: str, session_id: str
+) -> BaselineSnapshot:
+    """Capture physical workspace baseline snapshot at checkout."""
+    real_ws = os.path.realpath(os.path.abspath(workspace_root))
+    fingerprints: dict[str, FileFingerprint] = {}
+
+    for root, dirs, files in os.walk(real_ws):
+        dirs[:] = [
+            d for d in dirs if d not in EXCLUDED_WORKSPACE_DIRS and not d.startswith(".tmp_")
+        ]
+        rel_root = os.path.relpath(root, real_ws).replace("\\", "/")
+        if rel_root.startswith(".agents/.quorch/baselines"):
+            continue
+
+        for fname in files:
+            if fname.endswith(".lock") or fname.endswith(".tmp") or fname.startswith(".tmp_"):
+                continue
+            abs_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(abs_path, real_ws).replace("\\", "/")
+            try:
+                st = os.stat(abs_path)
+                mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+                size = st.st_size
+                inode = getattr(st, "st_ino", 0)
+
+                h = hashlib.sha256()
+                with open(abs_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        h.update(chunk)
+                digest = f"sha256:{h.hexdigest()}"
+
+                fingerprints[rel_path] = FileFingerprint(
+                    rel_path=rel_path,
+                    size=size,
+                    mtime_ns=mtime_ns,
+                    digest=digest,
+                    inode=inode,
+                )
+            except (OSError, PermissionError):
+                continue
+
+    head_commit = _get_git_head_commit(real_ws)
+    now_utc = datetime.now(timezone.utc).isoformat()
+
+    items = [
+        {
+            "rel_path": fp.rel_path,
+            "size": fp.size,
+            "mtime_ns": fp.mtime_ns,
+            "digest": fp.digest,
+        }
+        for fp in sorted(fingerprints.values(), key=lambda x: x.rel_path)
+    ]
+    raw_digest_content = json.dumps(items, sort_keys=True).encode("utf-8")
+    snapshot_digest = f"sha256:{hashlib.sha256(raw_digest_content).hexdigest()}"
+
+    snapshot = BaselineSnapshot(
+        schema_version=1,
+        task_id=str(task_id).strip(),
+        session_id=str(session_id).strip() if session_id else "default",
+        head_commit=head_commit,
+        fingerprints=fingerprints,
+        created_at_utc=now_utc,
+        snapshot_digest=snapshot_digest,
+    )
+
+    save_baseline_snapshot(real_ws, snapshot)
+    return snapshot
+
+
+def reconcile_workspace_against_whitelist(
+    workspace_root: str,
+    snapshot: BaselineSnapshot,
+    whitelist_paths: Sequence[str],
+    unmanaged_patterns: Sequence[str],
+    budget_ms: float = 50.0,
+) -> ReconciliationReport:
+    """Pure-function workspace reconciliation against baseline and whitelist. Zero write syscalls."""
+    start_time = time.perf_counter()
+    budget_sec = budget_ms / 1000.0
+    real_ws = os.path.realpath(os.path.abspath(workspace_root))
+
+    fast_path_hits = 0
+    checked_count = 0
+    modified_files: set[str] = set()
+
+    # Fast check: if budget is 0 or negative, degrade immediately
+    if budget_ms <= 0:
+        return ReconciliationReport(
+            verdict="degraded",
+            violating_files=(),
+            checked_count=0,
+            fast_path_hits=0,
+            elapsed_ms=0.0,
+            degraded_reason="Zero or negative reconciliation budget",
+        )
+
+    # 1. Quick + Slow path comparison against baseline fingerprints
+    for rel_path, fp in snapshot.fingerprints.items():
+        if (time.perf_counter() - start_time) > budget_sec:
+            elapsed = (time.perf_counter() - start_time) * 1000
+            return ReconciliationReport(
+                verdict="degraded",
+                violating_files=(),
+                checked_count=checked_count,
+                fast_path_hits=fast_path_hits,
+                elapsed_ms=elapsed,
+                degraded_reason="Reconciliation timeout budget exceeded during baseline comparison",
+            )
+
+        checked_count += 1
+        abs_path = os.path.join(real_ws, rel_path)
+        if not os.path.exists(abs_path):
+            # File was removed
+            modified_files.add(rel_path)
+            continue
+
+        try:
+            st = os.stat(abs_path)
+            st_mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+            st_size = st.st_size
+            st_ino = getattr(st, "st_ino", 0)
+
+            # Fast path hit: size, mtime_ns, and inode match exactly
+            if (
+                st_size == fp.size
+                and st_mtime_ns == fp.mtime_ns
+                and (fp.inode == 0 or st_ino == fp.inode)
+            ):
+                fast_path_hits += 1
+            else:
+                # Slow path: re-hash
+                h = hashlib.sha256()
+                with open(abs_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        h.update(chunk)
+                cur_digest = f"sha256:{h.hexdigest()}"
+                if cur_digest != fp.digest:
+                    modified_files.add(rel_path)
+        except (OSError, PermissionError):
+            modified_files.add(rel_path)
+
+    # 2. Check for newly introduced files in workspace
+    for root, dirs, files in os.walk(real_ws):
+        if (time.perf_counter() - start_time) > budget_sec:
+            elapsed = (time.perf_counter() - start_time) * 1000
+            return ReconciliationReport(
+                verdict="degraded",
+                violating_files=(),
+                checked_count=checked_count,
+                fast_path_hits=fast_path_hits,
+                elapsed_ms=elapsed,
+                degraded_reason="Reconciliation timeout budget exceeded during workspace scan",
+            )
+
+        dirs[:] = [
+            d for d in dirs if d not in EXCLUDED_WORKSPACE_DIRS and not d.startswith(".tmp_")
+        ]
+        rel_root = os.path.relpath(root, real_ws).replace("\\", "/")
+        if rel_root.startswith(".agents/.quorch/baselines"):
+            continue
+
+        for fname in files:
+            if fname.endswith(".lock") or fname.endswith(".tmp") or fname.startswith(".tmp_"):
+                continue
+            abs_p = os.path.join(root, fname)
+            rel_p = os.path.relpath(abs_p, real_ws).replace("\\", "/")
+            if rel_p not in snapshot.fingerprints:
+                modified_files.add(rel_p)
+
+    # 3. Filter modified files against unmanaged patterns and whitelist
+    cs = (sys.platform != "win32")
+    violating: list[str] = []
+
+    effective_unmanaged = list(unmanaged_patterns) + [
+        ".agents/.quorch/**",
+        ".agents/.quorch/baselines/**",
+    ]
+
+    for f_rel in modified_files:
+        if is_within_whitelist(f_rel, effective_unmanaged, case_sensitive=cs):
+            # Unmanaged path (e.g. docs, markdown, baselines), allowed to change freely
+            continue
+
+        if not is_within_whitelist(f_rel, whitelist_paths, case_sensitive=cs):
+            violating.append(f_rel)
+
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    if violating:
+        return ReconciliationReport(
+            verdict="deny",
+            violating_files=tuple(sorted(violating)),
+            checked_count=checked_count,
+            fast_path_hits=fast_path_hits,
+            elapsed_ms=elapsed_ms,
+            degraded_reason=None,
+        )
+
+    return ReconciliationReport(
+        verdict="allow",
+        violating_files=(),
+        checked_count=checked_count,
+        fast_path_hits=fast_path_hits,
+        elapsed_ms=elapsed_ms,
+        degraded_reason=None,
+    )
+
 

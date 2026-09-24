@@ -11,9 +11,19 @@ from typing import Dict, List, Optional
 import filelock
 
 try:
-    from .manifest import reconcile_workspace
+    from .manifest import (
+        reconcile_workspace,
+        get_baseline_path,
+        load_baseline_snapshot,
+        reconcile_workspace_against_whitelist,
+    )
 except (ImportError, ValueError):
-    from manifest import reconcile_workspace
+    from manifest import (
+        reconcile_workspace,
+        get_baseline_path,
+        load_baseline_snapshot,
+        reconcile_workspace_against_whitelist,
+    )
 
 STATUS_PENDING = "⬜ 待确认"
 STATUS_CONFIRMED = "✅ 已确认"
@@ -54,6 +64,11 @@ class TaskNotFoundError(StateMachineError):
 
 class InvalidTransitionError(StateMachineError):
     """Invalid state transition error. / 非法状态流转异常。"""
+    pass
+
+
+class ScopeViolationError(StateMachineError):
+    """Raised when physical scope reconciliation detects modifications outside whitelist. / 当工作树对账检测到白名单外未授权改动时抛出。"""
     pass
 
 
@@ -154,8 +169,92 @@ def parse_task_file(filepath: str) -> List[TaskItem]:
     return tasks
 
 
+def extract_task_whitelist(task_file_content: str, task_id: str) -> list[str]:
+    """Extract affected files whitelist from task markdown content."""
+    tid_pattern = re.escape(str(task_id).strip())
+    pattern = re.compile(
+        rf"###\s+(?:任务|Task)\s+{tid_pattern}\s+.*?####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```",
+        re.DOTALL | re.IGNORECASE,
+    )
+    m = pattern.search(task_file_content)
+    whitelist: list[str] = []
+    if m:
+        raw_block = m.group(1).strip()
+        for line in raw_block.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            cleaned = re.sub(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*", "", line).strip()
+            cleaned = cleaned.split("（")[0].split("(")[0].strip()
+            if cleaned:
+                whitelist.append(cleaned.replace("\\", "/"))
+    return whitelist
+
+
+def _verify_scope_reconciliation(
+    filepath: str,
+    task_id: str,
+    workspace_root: Optional[str] = None,
+) -> None:
+    """Pre-transition check: verify that all physical workspace edits adhere to whitelist."""
+    if workspace_root is None:
+        cand = os.path.dirname(os.path.abspath(filepath))
+        while cand and cand != os.path.dirname(cand):
+            if os.path.exists(os.path.join(cand, ".agents")) or os.path.exists(
+                os.path.join(cand, ".git")
+            ):
+                workspace_root = cand
+                break
+            cand = os.path.dirname(cand)
+        if not workspace_root:
+            workspace_root = os.getcwd()
+
+    ws = os.path.realpath(os.path.abspath(workspace_root))
+    baseline_path = get_baseline_path(ws, task_id)
+    if not os.path.isfile(baseline_path):
+        return
+
+    snapshot = load_baseline_snapshot(baseline_path)
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    whitelist = extract_task_whitelist(content, task_id)
+    unmanaged = ["docs/**", "*.md", ".agents/**"]
+    try:
+        from project_config import load_project_config
+
+        cfg = load_project_config(ws)
+        if isinstance(cfg.governance_scope, dict):
+            unmanaged = cfg.governance_scope.get("unmanaged_paths", unmanaged)
+    except Exception:
+        pass
+
+    report = reconcile_workspace_against_whitelist(
+        workspace_root=ws,
+        snapshot=snapshot,
+        whitelist_paths=whitelist,
+        unmanaged_patterns=unmanaged,
+    )
+
+    if report.verdict == "deny":
+        violating_str = ", ".join(report.violating_files)
+        raise ScopeViolationError(
+            f"Physical scope reconciliation denied for task {task_id}: modified files [{violating_str}] outside declared whitelist {whitelist}. / "
+            f"任务 {task_id} 物理对账拦截：改动文件 [{violating_str}] 超出任务单声明的涉及文件白名单。"
+        )
+    elif report.verdict == "degraded":
+        raise ScopeViolationError(
+            f"Physical scope reconciliation degraded for task {task_id} ({report.degraded_reason}). Fail-closed. / "
+            f"任务 {task_id} 物理对账超时降级阻断：{report.degraded_reason}。根据安全规则严格闭环阻断。"
+        )
+
+
 def transition_task(
-    filepath: str, task_id: str, new_status: str, timeout: float = 5.0
+    filepath: str,
+    task_id: str,
+    new_status: str,
+    timeout: float = 5.0,
+    workspace_root: Optional[str] = None,
 ) -> TaskItem:
     """Atomically transition task status with filelock: read -> validate -> replace -> write back. / 原子化状态转换：读取→校验合法性→替换写回。带 filelock 排他锁。"""
     norm_new = _normalize_status(new_status)
@@ -204,6 +303,10 @@ def transition_task(
                 f"Task {task_id} current status '{cur_status}' cannot transition to '{norm_new}'. Allowed: {allowed} / "
                 f"任务 {task_id} 当前状态为 '{cur_status}'，不允许流转至 '{norm_new}'。合法路径: {allowed}"
             )
+
+        # Physical scope reconciliation gate before completing or reworking
+        if norm_new in (STATUS_COMPLETED, STATUS_REWORK):
+            _verify_scope_reconciliation(filepath, target_item.id, workspace_root)
 
         old_line = lines[target_idx]
         new_line = old_line

@@ -117,7 +117,11 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 
 **Additional terminal states**: `⏭️ Skipped` (via `confirm action=skip`), `🔄 Rework` (via `confirm action=rework`), `🚫 Revoked` (via `confirm action=revoke`).
 
-### 3.2 Physical Interception Pipeline
+### 3.2 Physical Interception & Workspace Scope Reconciliation
+
+Quench provides defense-in-depth against unauthorized source code modifications across both native IDE hosts and headless/external runners (Codex CLI, Claude Code):
+
+1. **PreToolUse Hook Interception (IDE Host)**:
 
 ```
 IDE tool call (file write / shell exec)
@@ -134,6 +138,11 @@ IDE tool call (file write / shell exec)
 ```
 
 Latency target: **< 50ms** per hook invocation.
+
+2. **Workspace Baseline Snapshot & Scope Reconciliation (Server-Side Gate)**:
+- At `dev_tasks_checkout`, the server captures a physical snapshot (`BaselineSnapshot`) with file fingerprints (`size`, `mtime_ns`, `inode`, `sha256`);
+- At `dev_tasks_complete` / `dev_tasks_escalate`, the state machine runs `reconcile_workspace_against_whitelist` (pure function with dual fast-path / slow-path comparison and 50ms timeout circuit breaker);
+- Any modified or created files outside the declared `【涉及文件】` whitelist are rejected with `ScopeViolationError`, preventing external runners from bypassing file boundaries.
 
 ### 3.3 Async Reviewer Thinking-Stream Pipeline
 

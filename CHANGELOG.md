@@ -3,6 +3,20 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-25] 2026-09-24_v1.08_step01_probe_and_scope_reconciliation.md
+
+- **Task 1.1**: 客户端能力独立探针脚本与兼容性基线建立 (Client Capability Standalone Probe & Compatibility Baseline)
+  - Implemented zero-dependency `probe_client_capabilities.py` script for stdio/HTTP/SSE MCP handshake probing;
+  - Added baseline export with atomic tempfile replacement and circuit breaker timeout logic;
+  - Documented client probe matrix and sampling breaker rules in `docs/ci_incident_tracker_and_compatibility_guide.md`.
+- **Task 1.2**: 检出基线快照与工作树对账物理熔断门禁 (Checkout Baseline Snapshot & Scope Reconciliation Circuit Breaker)
+  - Implemented `capture_baseline`, `load_baseline_snapshot`, and pure function `reconcile_workspace_against_whitelist` in `manifest.py`;
+  - Injected physical `_verify_scope_reconciliation` check into `state_machine.py` before task completion;
+  - Automated baseline snapshot capture on `dev_tasks_checkout`.
+- **Task 1.3**: 跨平台工作树路径规范化与白名单子集校验 (Cross-Platform Path Normalization & Whitelist Subset Validation)
+  - Added `canonicalize_path`, `comparison_key`, and `is_within_whitelist` with platform-aware case folding and recursive glob support in `path_guard.py`;
+  - Built comprehensive unit test suite in `test_external_runner_scope_reconciliation.py`.
+
 ## [2026-09-24] 2026-09-24_v1.07_step02_decoupling_and_handoff.md
 
 - **Task 2.1**: Reviewer 引擎配置厂商彻底解耦与明文密钥防御 (Reviewer Config Vendor Decoupling & Plaintext Secret Defense)

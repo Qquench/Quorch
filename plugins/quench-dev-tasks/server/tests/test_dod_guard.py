@@ -337,7 +337,7 @@ def test_dod_guard_tracked_test_diff_inspection(git_workspace):
     prop = dev_tasks_propose(
         workspace_root=ws,
         task_file_name="task_test.md",
-        tasks=[_make_task_spec("1", "Needs new test", ["[NEW] src/service.py"])],
+        tasks=[_make_task_spec("1", "Needs new test", ["[NEW] src/service.py", "[MODIFY] tests/test_legacy.py"])],
     )
     assert prop["created"] is True
     task_file = prop["file_path"]
