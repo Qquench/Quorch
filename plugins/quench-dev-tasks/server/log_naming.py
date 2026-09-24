@@ -201,11 +201,13 @@ def list_log_files(directory: str | os.PathLike[str]) -> list[str]:
     ordering without any os.stat() / getmtime() calls.
     """
     target_dir = os.path.abspath(directory)
-    if not os.path.isdir(target_dir):
+    try:
+        entries = os.listdir(target_dir)
+    except (FileNotFoundError, NotADirectoryError, OSError):
         return []
 
     matched: list[str] = []
-    for entry in os.listdir(target_dir):
+    for entry in entries:
         if _LOG_FILENAME_REGEX.match(entry):
             matched.append(entry)
 
@@ -220,8 +222,15 @@ def gc_by_filename_order(
 ) -> list[str]:
     """Retain newest `keep` log files and prune older ones based purely on filename order.
 
-    ZERO stat calls are made. Never deletes the latest active file.
-    Also unlinks associated rotation backups (.1.log).
+    Syscall contract (zero-stat GC invariant):
+        ALLOWED: os.listdir, os.remove
+        FORBIDDEN: os.stat, os.lstat, os.path.exists, os.path.isfile,
+                   os.path.isdir, os.path.getmtime, os.path.getsize
+    Concurrency: idempotent against concurrent GC — FileNotFoundError
+    is absorbed as a benign success. PermissionError (Windows handle lock,
+    cf. cross_platform_ci_anomalies.md Case 4) is caught and skipped.
+
+    Never deletes the latest active file. Also unlinks associated rotation backups (.1.log).
     """
     if keep <= 0:
         raise ValueError(f"keep must be greater than 0, got {keep}")
@@ -238,14 +247,15 @@ def gc_by_filename_order(
     for fname in to_prune:
         fpath = os.path.join(target_dir, fname)
         try:
-            if os.path.exists(fpath):
-                os.remove(fpath)
-                pruned.append(fname)
-            # Cascade delete rotation backup if present
-            rot_path = os.path.splitext(fpath)[0] + ".1.log"
-            if os.path.exists(rot_path):
-                os.remove(rot_path)
-        except OSError:
+            os.remove(fpath)
+            pruned.append(fname)
+        except (FileNotFoundError, OSError):
+            pass
+        # Cascade delete rotation backup if present (atomic unlink without stat/exists)
+        rot_path = os.path.splitext(fpath)[0] + ".1.log"
+        try:
+            os.remove(rot_path)
+        except (FileNotFoundError, OSError):
             pass
 
     return pruned
@@ -292,18 +302,19 @@ def enforce_unified_log_quota(
     excess = total_logs - keep
     pruned: list[str] = []
 
-    # 1. Prune legacy logs first (oldest first)
+    # 1. Prune legacy logs first (oldest first, atomic remove without exists)
     while legacy_files and excess > 0:
         oldest_legacy = legacy_files.pop(0)
         fpath = os.path.join(target_dir, oldest_legacy)
         try:
-            if os.path.exists(fpath):
-                os.remove(fpath)
-                pruned.append(oldest_legacy)
-            rot_path = os.path.splitext(fpath)[0] + ".1.log"
-            if os.path.exists(rot_path):
-                os.remove(rot_path)
-        except OSError:
+            os.remove(fpath)
+            pruned.append(oldest_legacy)
+        except (FileNotFoundError, OSError):
+            pass
+        rot_path = os.path.splitext(fpath)[0] + ".1.log"
+        try:
+            os.remove(rot_path)
+        except (FileNotFoundError, OSError):
             pass
         excess -= 1
 
@@ -314,4 +325,5 @@ def enforce_unified_log_quota(
         pruned.extend(new_pruned)
 
     return pruned
+
 

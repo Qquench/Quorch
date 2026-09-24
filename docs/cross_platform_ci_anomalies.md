@@ -15,6 +15,7 @@
    - [案例 3: POSIX 与 Windows 路径反斜杠语义差异导致路径穿透守卫绕过 (CWE-22 / CWE-20)](#案例-3-posix-与-windows-路径反斜杠语义差异导致路径穿透守卫绕过-cwe-22--cwe-20)
    - [案例 4: Windows 专属文件句柄占用与并发重命名 PermissionError 锁死](#案例-4-windows-专属文件句柄占用与并发重命名-permissionerror-锁死)
    - [案例 5: Windows CMD/PowerShell 默认代码页 (GBK/CP936) 与 UTF-8 表情包编码冲突](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突)
+   - [案例 6: 生产 TOCTOU 违背零 stat 契约与测试全局 monkeypatch stdlib (os.stat) 导致 pytest session 级崩溃](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃)
 3. [跨平台编码安全准则 (Defensive Guidelines)](#3-跨平台编码安全准则-defensive-guidelines)
 4. [CI 验证与双向回归自检矩阵](#4-ci-验证与双向回归自检矩阵)
 
@@ -123,9 +124,33 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 
 ---
 
+### 案例 6: 生产 TOCTOU 违背零 stat 契约与测试全局 monkeypatch stdlib (os.stat) 导致 pytest session 级崩溃
+
+- **首次触发节点**: 提交 `8d8ec3c`（Milestone v1.06 任务发布阶段，CI Run 18237588722）
+- **现象**:
+  - GitHub Actions 4-job 矩阵中 3 个任务失败（Ubuntu Python 3.11, Ubuntu Python 3.12, Windows Python 3.11 均崩溃），仅 Windows Python 3.12 偶发通过。
+  - 报错信息为 `RuntimeError: os.stat was called on ...! Zero-stat violation!`，且伴随 pytest 的 `tmp_path` fixture teardown 和 `linecache` 源码读取崩溃，造成整场测试会话被终止。
+- **根因深度复盘**:
+  1. **生产代码缺陷与平台实现分歧**：
+     - `log_naming.py::gc_by_filename_order` 中存在 `if os.path.exists(fpath): os.remove(fpath)`。
+     - 在 POSIX (`posixpath.exists`) 与 Windows Python <=3.11 (`ntpath.exists`) 中，`os.path.exists` 内部调用 `os.stat`，既违背了模块声明的 zero-stat GC 契约，又引入了检查到删除之间的 TOCTOU 并发竞态。
+     - 而在 Windows Python 3.12 中，`ntpath.exists` 改用 C 语言底层内建 `nt._path_exists` 实现，绕过了 Python 层的 `os.stat`，导致该 bug 在 Windows Python 3.12 下被偶然掩盖。
+  2. **测试固件全局毒化反模式**：
+     - 测试用例 `test_gc_zero_stat_guarantee` 使用 `monkeypatch.setattr(os, "stat", _boom)` 全局抛错，未对被测对象施加路径过滤。
+     - 当 `gc_by_filename_order` 触发异常导致测试用例断言失败时，pytest 尝试通过 `linecache` 模块读取测试源代码以格式化失败堆栈，而 `linecache.checkcache` 内部调用了 `os.stat`，直接被全局桩二次拦截抛错，导致 pytest 崩溃；同时 `tmp_path` 临时目录清理也会被阻断。
+- **加固方案 (三重闭环)**:
+  1. **生产代码原子无 stat 删除**：
+     - 废除 `os.path.exists`，直接调用 `os.remove(fpath)`，并捕获 `(FileNotFoundError, OSError)`。并发场景下文件被提前清理视为幂等成功；Windows 下被占用的句柄（PermissionError，参考案例 4）安全跳过，绝不阻断后续文件清理。
+  2. **测试精准白名单与子进程隔离**：
+     - 单元测试重构为定向路径白名单过滤（`_guarded_stat` 仅拦截匹配 `_LOG_FILENAME_REGEX` 的日志目标，完全放行 pytest 内部路径）；同时增设 `test_gc_zero_stat_guarantee_subprocess` 在独立子进程中进行全量抛错验证，彻底杜绝主进程环境毒化。
+  3. **静态门禁阻断 (AST Lint)**：
+     - 新增 `test_no_global_os_stat_patch.py` 扫描所有测试文件，禁止注册无返回分支的裸抛错 `os.stat` monkeypatch；新增 `test_gc_source_has_no_stat_calls` 在 AST 级别断言 `gc_by_filename_order` 源码中严禁包含任何 stat 家族调用。
+
+---
+
 ## 3. 跨平台编码安全准则 (Defensive Guidelines)
 
-后续开发与代码审查（Reviewer）必须严格执行以下四项准则：
+后续开发与代码审查（Reviewer）必须严格执行以下五项准则：
 
 1. **路径分隔符归一化 (Separator Normalization)**:
    - 任何从外部参数、配置文件、任务单或网络载荷中获取的文件路径字符串，**进入任何处理前**一律执行：
@@ -144,6 +169,9 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
      ```
 4. **测试断言双引擎守护**:
    - 涉及路径防逃逸的单元测试，必须在用例内显式对 POSIX 和 Windows 风格同时测试，确保在单平台运行就能提前暴露出跨平台隐患。
+5. **系统底层调用 Mock 严禁全局毒化 (No Destructive Global Monkeypatching)**:
+   - 严禁在测试中对 Python 运行时底层的通用 C 函数（如 `os.stat`, `os.lstat`, `os.listdir`, `sys.modules`, `open` 等）注册无条件抛异常的全局 monkeypatch。
+   - 若必须断言“零系统调用”，优先采用**静态 AST 扫描 (AST Lint)**、**定向路径白名单过滤 (Target Path Filtering)** 或**隔离子进程 (Subprocess Isolation)** 执行，确保放行 pytest 内部设施（`tmp_path`、`linecache`、回溯格式化）。
 
 ---
 

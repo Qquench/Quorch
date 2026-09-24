@@ -6,9 +6,14 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import re
+import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
+
+server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if server_dir not in sys.path:
+    sys.path.insert(0, server_dir)
 
 from log_naming import (
     MAX_DAILY_SEQUENCE,
@@ -23,6 +28,7 @@ from log_naming import (
     list_log_files,
     gc_by_filename_order,
     enforce_unified_log_quota,
+    _LOG_FILENAME_REGEX,
 )
 
 
@@ -201,16 +207,124 @@ def test_gc_zero_stat_guarantee(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     for i in range(1, 6):
         (tmp_path / f"20260924_{i:03d}_test.log").write_text("x", encoding="utf-8")
 
-    # Monkeypatch os.stat and os.path.getmtime to raise RuntimeError
-    def _fail_stat(*args, **kwargs):
-        raise RuntimeError("os.stat was called! Zero-stat violation!")
+    real_stat = os.stat
+    real_lstat = getattr(os, "lstat", real_stat)
+    real_getmtime = os.path.getmtime
 
-    monkeypatch.setattr(os, "stat", _fail_stat)
-    monkeypatch.setattr(os.path, "getmtime", _fail_stat)
+    def _guarded_stat(path, *args, **kwargs):
+        base = os.path.basename(os.fspath(path))
+        if _LOG_FILENAME_REGEX.match(base) or base.endswith(".1.log"):
+            raise RuntimeError(f"os.stat was called on {base}! Zero-stat violation!")
+        return real_stat(path, *args, **kwargs)
+
+    def _guarded_lstat(path, *args, **kwargs):
+        base = os.path.basename(os.fspath(path))
+        if _LOG_FILENAME_REGEX.match(base) or base.endswith(".1.log"):
+            raise RuntimeError(f"os.lstat was called on {base}! Zero-stat violation!")
+        return real_lstat(path, *args, **kwargs)
+
+    def _guarded_getmtime(path, *args, **kwargs):
+        base = os.path.basename(os.fspath(path))
+        if _LOG_FILENAME_REGEX.match(base) or base.endswith(".1.log"):
+            raise RuntimeError(f"os.path.getmtime was called on {base}! Zero-stat violation!")
+        return real_getmtime(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", _guarded_stat)
+    monkeypatch.setattr(os, "lstat", _guarded_lstat)
+    monkeypatch.setattr(os.path, "getmtime", _guarded_getmtime)
 
     # gc_by_filename_order must succeed purely on string sorting
     pruned = gc_by_filename_order(tmp_path, keep=2)
     assert len(pruned) == 3
+
+
+def test_gc_zero_stat_guarantee_subprocess(tmp_path: Path):
+    """子进程强隔离验证：在子进程中将 os.stat/os.lstat 全局抛出异常，断言 GC 仍然完全成功。"""
+    import subprocess
+    import textwrap
+
+    script = textwrap.dedent(f"""
+        import os, sys
+        sys.path.insert(0, {server_dir!r})
+        import log_naming
+        target_dir = sys.argv[1]
+        for i in range(1, 6):
+            open(os.path.join(target_dir, f"20260924_{{i:03d}}_test.log"), "w", encoding="utf-8").close()
+        
+        def _boom(*a, **k):
+            raise RuntimeError("os.stat was invoked!")
+        os.stat = _boom
+        if hasattr(os, "lstat"):
+            os.lstat = _boom
+        
+        pruned = log_naming.gc_by_filename_order(target_dir, keep=2)
+        assert len(pruned) == 3, f"Expected 3 pruned, got {{len(pruned)}}"
+        print("OK")
+    """)
+    res = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert res.returncode == 0, f"Subprocess failed with stderr: {res.stderr}"
+    assert "OK" in res.stdout
+
+
+def test_gc_tolerates_vanished_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """并发容错：模拟待清理文件在调用 os.remove 时已被外部删除（FileNotFoundError），GC 不得崩溃。"""
+    for i in range(1, 6):
+        (tmp_path / f"20260924_{i:03d}_test.log").write_text("x", encoding="utf-8")
+
+    real_remove = os.remove
+
+    def _flaky_remove(path):
+        if "001" in str(path):
+            raise FileNotFoundError("Simulated external deletion")
+        return real_remove(path)
+
+    monkeypatch.setattr(os, "remove", _flaky_remove)
+    pruned = gc_by_filename_order(tmp_path, keep=2)
+    assert len(pruned) == 2
+
+
+def test_gc_tolerates_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Windows 句柄占用容错：模拟文件被进程锁定（PermissionError），GC 优雅跳过，不中断批次。"""
+    for i in range(1, 6):
+        (tmp_path / f"20260924_{i:03d}_test.log").write_text("x", encoding="utf-8")
+
+    real_remove = os.remove
+
+    def _locked_remove(path):
+        if "001" in str(path):
+            raise PermissionError("[WinError 32] File in use")
+        return real_remove(path)
+
+    monkeypatch.setattr(os, "remove", _locked_remove)
+    pruned = gc_by_filename_order(tmp_path, keep=2)
+    assert len(pruned) == 2
+    assert "20260924_001_test.log" not in pruned
+
+
+def test_gc_source_has_no_stat_calls():
+    """静态 AST 门禁：gc_by_filename_order 与 list_log_files 函数体内严禁包含任何 stat/exists/getmtime/isfile 等调用。"""
+    import ast
+    import log_naming
+
+    forbidden_attrs = {"exists", "isfile", "isdir", "getmtime", "getsize", "stat", "lstat"}
+    with open(log_naming.__file__, "r", encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=log_naming.__file__)
+
+    checked_funcs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in ("gc_by_filename_order", "list_log_files"):
+            checked_funcs.add(node.name)
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Attribute) and sub.attr in forbidden_attrs:
+                    pytest.fail(f"Forbidden stat-family attribute .{sub.attr} invoked inside {node.name}")
+
+    assert checked_funcs == {"gc_by_filename_order", "list_log_files"}, f"Expected to check both functions, got {checked_funcs}"
+
 
 
 def test_no_persistent_state_counter_created(tmp_path: Path):
