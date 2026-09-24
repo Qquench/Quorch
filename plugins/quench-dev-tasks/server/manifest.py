@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+import glob
 import hashlib
 import json
 import os
@@ -416,3 +418,193 @@ def touch_heartbeat(
         )
         atomic_replace_manifest(workspace_root, manifest)
         return True
+
+
+class ReconcileClass(str, Enum):
+    REGISTERED_MATCH      = "REGISTERED_MATCH"       # 已登记且哈希一致
+    REGISTERED_DRIFT      = "REGISTERED_DRIFT"       # 已登记但正文哈希不符（人工编辑 / 篡改）
+    BRANCH_CHANGED        = "BRANCH_CHANGED"         # git_head_sha 变更引发的正常分支切换漂移
+    UNAUTHORIZED_BYPASS   = "UNAUTHORIZED_BYPASS"    # 完全未在清单登记的非法旁路文件
+
+
+@dataclass(frozen=True)
+class ReconcileEntry:
+    rel_path: str
+    namespaced_id: Optional[str]
+    classification: ReconcileClass
+    md_sha256: str
+    drift_reason: str = ""
+
+
+@dataclass(frozen=True)
+class ReconcileReport:
+    entries: Tuple[ReconcileEntry, ...]
+    bypass_queue: Tuple[str, ...]     # 未经授权的隔离文件（仅在内存/报表呈现，不写回 Markdown）
+    drift_queue: Tuple[str, ...]      # 发生哈希漂移的文件
+    matched_queue: Tuple[str, ...]    # 正常通过核验的文件
+
+
+def register_proposal(workspace_root: str, *, task_id: str, md_path: str) -> str:
+    """在权威清单中登记新任务单的 SHA-256 哈希基线。"""
+    resolved_md_path = md_path if os.path.isabs(md_path) else os.path.join(workspace_root, md_path)
+    if not os.path.isfile(resolved_md_path):
+        raise FileNotFoundError(f"Task file not found / 任务文件不存在: {md_path}")
+
+    with open(resolved_md_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    current_hash = compute_normalized_md_hash(content)
+
+    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock = filelock.FileLock(lock_path, timeout=5.0)
+
+    with lock:
+        manifest = load_manifest(workspace_root)
+        namespaced_id = _resolve_namespaced_id(manifest, task_id, resolved_md_path)
+        git_head_sha, git_index_mtime = _get_git_metadata(workspace_root)
+
+        existing = manifest.records.get(namespaced_id)
+        gen = existing.generation if existing else 0
+        holder = existing.holder_token if existing else ""
+        released = existing.released if existing else False
+
+        manifest.records[namespaced_id] = TaskRecord(
+            task_id=namespaced_id,
+            md_sha256=current_hash,
+            generation=gen,
+            holder_token=holder,
+            last_heartbeat_monotonic_ns=time.monotonic_ns(),
+            last_heartbeat_wall_utc=datetime.now(timezone.utc).isoformat(),
+            git_head_sha=git_head_sha,
+            git_index_mtime=git_index_mtime,
+            released=released,
+        )
+        atomic_replace_manifest(workspace_root, manifest)
+        return current_hash
+
+
+def _get_git_tracked_files(workspace_root: str, target_dir: str) -> set[str]:
+    """获取 target_dir 下被 Git 明确跟踪的文件集合（相对 workspace_root）。"""
+    try:
+        rel_target_dir = os.path.relpath(target_dir, workspace_root).replace("\\", "/")
+        res = subprocess.run(
+            ["git", "-C", workspace_root, "ls-files", rel_target_dir],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            check=False,
+            timeout=5.0,
+        )
+        if res.returncode == 0:
+            return {line.strip().replace("\\", "/") for line in res.stdout.splitlines() if line.strip()}
+        return set()
+    except Exception:
+        return set()
+
+
+def reconcile_workspace(workspace_root: str, dev_tasks_dir: str) -> ReconcileReport:
+    """全盘扫描任务单目录并与清单执行后置对账。"""
+    resolved_dir = dev_tasks_dir if os.path.isabs(dev_tasks_dir) else os.path.join(workspace_root, dev_tasks_dir)
+    if not os.path.isdir(resolved_dir):
+        return ReconcileReport(entries=(), bypass_queue=(), drift_queue=(), matched_queue=())
+
+    manifest = load_manifest(workspace_root)
+    git_head_sha, _ = _get_git_metadata(workspace_root)
+    tracked_files = _get_git_tracked_files(workspace_root, resolved_dir)
+
+    entries: list[ReconcileEntry] = []
+    bypass_list: list[str] = []
+    drift_list: list[str] = []
+    matched_list: list[str] = []
+
+    md_files = sorted(glob.glob(os.path.join(resolved_dir, "*.md")))
+    for md_path in md_files:
+        basename = os.path.basename(md_path)
+        if basename.lower() == "readme.md":
+            continue
+
+        rel_path = os.path.relpath(md_path, workspace_root).replace("\\", "/")
+        stem = Path(md_path).stem
+
+        try:
+            with open(md_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            current_hash = compute_normalized_md_hash(content)
+        except Exception:
+            current_hash = ""
+
+        matching_records = [
+            rec for k, rec in manifest.records.items()
+            if k == stem or k.startswith(f"{stem}::")
+        ]
+
+        if matching_records:
+            primary_record = matching_records[0]
+            if any(rec.md_sha256 == current_hash for rec in matching_records):
+                entry = ReconcileEntry(
+                    rel_path=rel_path,
+                    namespaced_id=primary_record.task_id,
+                    classification=ReconcileClass.REGISTERED_MATCH,
+                    md_sha256=current_hash,
+                    drift_reason="",
+                )
+                entries.append(entry)
+                matched_list.append(rel_path)
+            else:
+                if primary_record.git_head_sha and git_head_sha and primary_record.git_head_sha != git_head_sha:
+                    entry = ReconcileEntry(
+                        rel_path=rel_path,
+                        namespaced_id=primary_record.task_id,
+                        classification=ReconcileClass.BRANCH_CHANGED,
+                        md_sha256=current_hash,
+                        drift_reason=f"Git HEAD changed ({primary_record.git_head_sha[:8]} -> {git_head_sha[:8]})",
+                    )
+                    entries.append(entry)
+                    matched_list.append(rel_path)
+                else:
+                    entry = ReconcileEntry(
+                        rel_path=rel_path,
+                        namespaced_id=primary_record.task_id,
+                        classification=ReconcileClass.REGISTERED_DRIFT,
+                        md_sha256=current_hash,
+                        drift_reason=f"Hash mismatch: expected {primary_record.md_sha256[:8]}..., got {current_hash[:8]}...",
+                    )
+                    entries.append(entry)
+                    drift_list.append(rel_path)
+        else:
+            # 未在清单中找到记录
+            if rel_path in tracked_files:
+                # Git 历史跟踪文件自动平滑录入
+                try:
+                    register_proposal(workspace_root, task_id=stem, md_path=md_path)
+                except Exception:
+                    pass
+                entry = ReconcileEntry(
+                    rel_path=rel_path,
+                    namespaced_id=f"{stem}::{stem}",
+                    classification=ReconcileClass.REGISTERED_MATCH,
+                    md_sha256=current_hash,
+                    drift_reason="Git-tracked historical file smoothly onboarded",
+                )
+                entries.append(entry)
+                matched_list.append(rel_path)
+            else:
+                # 未跟踪也未登记：非法旁路任务单，隔离入 bypass_queue
+                entry = ReconcileEntry(
+                    rel_path=rel_path,
+                    namespaced_id=None,
+                    classification=ReconcileClass.UNAUTHORIZED_BYPASS,
+                    md_sha256=current_hash,
+                    drift_reason="Untracked task file not registered in manifest",
+                )
+                entries.append(entry)
+                bypass_list.append(rel_path)
+
+    return ReconcileReport(
+        entries=tuple(entries),
+        bypass_queue=tuple(bypass_list),
+        drift_queue=tuple(drift_list),
+        matched_queue=tuple(matched_list),
+    )
+

@@ -67,6 +67,8 @@ def mock_workspace():
             "#### 【缺陷根因与修改目标】\n"
             "测试正文内容说明。\n"
         )
+    from manifest import register_proposal
+    register_proposal(temp_dir, task_id="1.1", md_path=task_file)
 
     yield temp_dir
     if os.path.exists(temp_dir):

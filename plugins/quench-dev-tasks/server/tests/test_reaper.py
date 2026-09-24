@@ -75,6 +75,9 @@ def reaper_workspace():
             "#### 【缺陷根因与修改目标】\n"
             "纯文档审查\n"
         )
+    from manifest import register_proposal
+    register_proposal(temp_dir, task_id="1.1", md_path=task_file)
+    register_proposal(temp_dir, task_id="1.2", md_path=task_file)
 
     yield temp_dir
     if os.path.exists(temp_dir):

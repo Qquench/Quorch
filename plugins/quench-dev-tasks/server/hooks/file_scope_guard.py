@@ -13,7 +13,7 @@ import logging.handlers
 import os
 import re
 import sys
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Pattern
 from filelock import FileLock, Timeout
 
 # 保证能加载上级 server 模块
@@ -183,30 +183,178 @@ def extract_statuses(text: str) -> List[str]:
     return cleaned
 
 
+def _strip_long_path_prefix(path: str) -> str:
+    """去除 Windows \\?\\ 长路径前缀，确保路径比较与 commonpath 兼容。"""
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+
+def resolve_realpath_under(workspace_root: str, target: str) -> Optional[str]:
+    """返回 realpath 绝对路径；必须严格位于 workspace_root 之下，且消解所有 symlink 与相对路径别名。
+    若目标文件尚未创建，对其父级目录执行 realpath 校验并规整。
+    捕获 ValueError（Windows 跨驱动器）与跨挂载点逃逸，统一安全返回 None。
+    """
+    if not workspace_root or not target:
+        return None
+
+    try:
+        real_root = _strip_long_path_prefix(os.path.realpath(workspace_root))
+
+        if os.path.isabs(target):
+            abs_target = os.path.abspath(target)
+        else:
+            abs_target = os.path.abspath(os.path.join(real_root, target))
+
+        abs_target = _strip_long_path_prefix(abs_target)
+
+        # 消解软链接、junction：直接调用 realpath 并对其父级目录递归 realpath 校验与规整
+        real_target = _strip_long_path_prefix(os.path.realpath(abs_target))
+        if not (os.path.exists(abs_target) or os.path.lexists(abs_target)):
+            curr = abs_target
+            unresolved = []
+            while curr and not (os.path.exists(curr) or os.path.lexists(curr)):
+                parent, tail = os.path.split(curr)
+                if parent == curr:
+                    break
+                unresolved.append(tail)
+                curr = parent
+            if curr != abs_target:
+                real_parent = _strip_long_path_prefix(os.path.realpath(curr))
+                unresolved.reverse()
+                real_target = os.path.join(real_parent, *unresolved) if unresolved else real_parent
+                real_target = _strip_long_path_prefix(os.path.realpath(real_target))
+
+        try:
+            common = os.path.commonpath([real_root, real_target])
+        except (ValueError, Exception):
+            return None
+
+        if os.path.normcase(common) != os.path.normcase(real_root):
+            return None
+
+        return real_target
+    except Exception:
+        return None
+
+
+def is_governed_task_file(workspace_root: str, target: str, *, dev_tasks_dir: Optional[str] = None) -> bool:
+    """判定目标路径物理上是否属于受管任务目录（支持自定义 dev_tasks_dir 配置）。"""
+    if not workspace_root or not target:
+        return False
+
+    if not target.lower().endswith(".md"):
+        return False
+    if os.path.basename(target).lower() == "readme.md":
+        return False
+
+    resolved = resolve_realpath_under(workspace_root, target)
+    if not resolved:
+        return False
+
+    if not resolved.lower().endswith(".md") or os.path.basename(resolved).lower() == "readme.md":
+        return False
+
+    if dev_tasks_dir:
+        tasks_dir = os.path.abspath(os.path.join(workspace_root, dev_tasks_dir)) if not os.path.isabs(dev_tasks_dir) else os.path.abspath(dev_tasks_dir)
+    else:
+        tasks_dir = os.path.abspath(os.path.join(workspace_root, "docs", "dev_tasks"))
+
+    real_tasks_dir = _strip_long_path_prefix(os.path.realpath(tasks_dir))
+
+    try:
+        common = os.path.commonpath([real_tasks_dir, resolved])
+        return os.path.normcase(common) == os.path.normcase(real_tasks_dir)
+    except (ValueError, Exception):
+        return False
+
+
 def is_task_file(target_file: str, workspace_root: str, config) -> bool:
     """判断是否为 dev_tasks 目录下的任务单文件（排除规范说明 README.md）。"""
-    if not target_file or not target_file.lower().endswith(".md"):
-        return False
-    if os.path.basename(target_file).lower() == "readme.md":
-        return False
+    dev_tasks_dir = None
+    if config:
+        if hasattr(config, "resolve_path"):
+            dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+        elif hasattr(config, "dev_tasks_dir"):
+            dev_tasks_dir = config.dev_tasks_dir
+    return is_governed_task_file(workspace_root, target_file, dev_tasks_dir=dev_tasks_dir)
 
-    norm_target = os.path.normpath(target_file).replace("\\", "/").lower()
-    norm_root = os.path.normpath(workspace_root).replace("\\", "/").lower()
 
-    dev_tasks_dir = config.resolve_path("dev_tasks_dir").replace("\\", "/").lower()
-    if norm_target.startswith(dev_tasks_dir):
-        return True
+SHELL_TOOL_NAMES: frozenset[str] = frozenset({
+    "run_command",
+    "execute_command",
+    "bash",
+    "shell",
+    "terminal",
+    "powershell",
+    "cmd",
+})
 
-    rel_dev_tasks = (config.dev_tasks_dir or "docs/dev_tasks").replace("\\", "/").lower().strip("/")
-    if norm_target.startswith(norm_root):
-        rel_path = norm_target[len(norm_root):].lstrip("/")
-    else:
-        rel_path = norm_target
+SHELL_WRITE_PATTERN: Pattern[str] = re.compile(
+    r"""
+    # 1. 重定向输出 (> 或 >>，含文件描述符 1> 2> &>)
+    (?:>{1,2}|[&12]>{1,2})\s*["']?(?P<redir_target>[^\s|;&"'>]+)["']?
+    |
+    # 2. 管道传递至 tee
+    \|\s*tee(?:\s+-[a-zA-Z]+)*\s+["']?(?P<tee_target>[^\s|;&"'>]+)["']?
+    |
+    # 3. PowerShell 文件写入与创建 Cmdlets
+    (?:Out-File|Set-Content|Add-Content|New-Item)\s+(?:.*?-(?:FilePath|Path)\s+)?["']?(?P<ps_target>[^\s|;&"'>]+)["']?
+    |
+    # 4. .NET 物理写文件调用
+    \[(?:System\.)?IO\.File\]::(?:WriteAllText|WriteAllLines|AppendAllText|Create)\s*\(\s*["'](?P<dotnet_target>[^"']+)["']
+    |
+    # 5. Linux / Unix 复制、移动与修改命令 (cp, mv, touch, install, rsync, sed -i)
+    \b(?:cp|copy|mv|move|install|rsync|touch)\b.*?["']?(?P<cp_target>[^\s|;&"'>]+)["']?\s*(?:$|[|;&])
+    |
+    \bsed\b\s+-[a-zA-Z]*i[a-zA-Z]*\s+(?:-[eE]\s+)?(?:'[^']*'|"[^"]*"|\S+)\s+["']?(?P<sed_target>[^\s|;&"'>]+)["']?
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
 
-    if rel_path.startswith(rel_dev_tasks + "/") or rel_path == rel_dev_tasks:
-        return True
 
-    return False
+def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: str = "docs/dev_tasks") -> Optional[str]:
+    """保守检测 Shell 命令是否包含对受管任务目录的写入尝试（>、>>、tee、Out-File、Set-Content 等）。
+    命中返回检测到的相对路径，未命中返回 None。
+    """
+    if not command or not isinstance(command, str):
+        return None
+
+    clean_dir = (dev_tasks_dir or "docs/dev_tasks").replace("\\", "/").strip("/").lower()
+    cmd_lower = command.replace("\\", "/").lower()
+
+    # 快速短路：若命令中根本不包含任务目录关键字，平滑放行
+    if clean_dir not in cmd_lower and "dev_tasks" not in cmd_lower:
+        return None
+
+    # 1. 正则精确提取与判定
+    for m in SHELL_WRITE_PATTERN.finditer(command):
+        for val in m.groupdict().values():
+            if not val:
+                continue
+            norm_val = val.replace("\\", "/").strip("\"'").strip()
+            norm_val_lower = norm_val.lower()
+            if (
+                norm_val_lower.startswith(clean_dir + "/")
+                or norm_val_lower == clean_dir
+                or f"/{clean_dir}/" in norm_val_lower
+                or norm_val_lower.endswith("/" + clean_dir)
+                or "dev_tasks" in norm_val_lower
+            ):
+                return norm_val
+
+    # 2. Fail-Closed 兜底判定：包含任务目录关键字，且包含明显的写入重定向/覆盖原语
+    write_indicators = (">", "tee", "out-file", "set-content", "add-content", "[io.file]::", "new-item")
+    has_write_indicator = any(ind in cmd_lower for ind in write_indicators)
+    if has_write_indicator:
+        tokens = re.findall(r"[\"']?([^\s|;&\"'>]*dev_tasks[^\s|;&\"']*)[\"']?", command, re.IGNORECASE)
+        if tokens:
+            return tokens[0].strip("\"'")
+        return dev_tasks_dir
+
+    return None
 
 
 def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Optional[dict]:
@@ -287,8 +435,12 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
 
 def is_meta_file(target_file: str, workspace_root: str, config) -> bool:
     """识别 Quench 体系通用元数据文件（.agents、CHANGELOG、README），豁免拦截。"""
-    norm_target = os.path.normpath(target_file).replace("\\", "/").lower()
-    norm_root = os.path.normpath(workspace_root).replace("\\", "/").lower()
+    resolved = resolve_realpath_under(workspace_root, target_file)
+    if not resolved:
+        return False
+
+    norm_target = resolved.replace("\\", "/").lower()
+    norm_root = _strip_long_path_prefix(os.path.realpath(workspace_root)).replace("\\", "/").lower()
 
     if norm_target.startswith(norm_root):
         rel_path = norm_target[len(norm_root):].lstrip("/")
@@ -519,6 +671,37 @@ def main():
                 if decision in ("deny", "ask") and not adapter.supports_interactive_ask():
                     sys.exit(1)
 
+        # 专属分支：Shell 命令直接写入/重定向受管任务目录检测（废除“空 TargetFile 即盲目放行”漏洞）
+        if tool_name in SHELL_TOOL_NAMES:
+            command = args.get("CommandLine") or args.get("command") or args.get("cmd") or ""
+            if not command or not workspace_root:
+                emit_decision("allow", "Shell 命令为空或无工作区")
+                return
+
+            config_path = os.path.join(workspace_root, ".agents", "quench_stack.yaml")
+            if not os.path.isfile(config_path):
+                emit_decision("allow", "非Quench项目放行")
+                return
+
+            from project_config import load_project_config
+            config = load_project_config(workspace_root)
+            dev_tasks_dir = config.dev_tasks_dir or "docs/dev_tasks"
+
+            detected_target = detect_shell_write_bypass(command, workspace_root, dev_tasks_dir=dev_tasks_dir)
+            if detected_target:
+                reason = (
+                    f"【Shell 任务单篡写重定向拦截 / Shell Task Write Bypass Interception】\n"
+                    f"Detected shell command attempting to write to governed task directory: {detected_target}\n"
+                    f"检测到试图通过 Shell 写入/重定向受管任务目录：{detected_target}\n\n"
+                    f"Command / 执行命令: {command[:200]}\n\n"
+                    f"★ 核心防线：任务单必须通过 Quench MCP 工具受管流转，严禁通过 Shell 重定向或直接写文件进行旁路篡写！"
+                )
+                emit_decision("deny", reason, event_type="DENIED")
+                return
+
+            emit_decision("allow", "Shell 只读或非任务单操作放行")
+            return
+
         if not workspace_paths or not target_file:
             emit_decision("allow", "无工作区或无目标文件")
             return
@@ -536,9 +719,28 @@ def main():
         config = load_project_config(workspace_root)
         dev_tasks_dir = config.resolve_path("dev_tasks_dir")
 
+        # 0. 物理路径归一原语解析（消解软链接、junction 与跨驱动器/相对路径逃逸）
+        resolved_target = resolve_realpath_under(workspace_root, target_file)
+
+        # 检查是否发生任务单物理逃逸攻击（以任务目录为跳板逃逸出受管任务单）
+        rel_dev_tasks = (config.dev_tasks_dir or "docs/dev_tasks").replace("\\", "/").lower().strip("/")
+        raw_norm = target_file.replace("\\", "/").lower()
+        has_task_dir_marker = (
+            raw_norm.startswith(rel_dev_tasks + "/")
+            or f"/{rel_dev_tasks}/" in raw_norm
+            or raw_norm.endswith("/" + rel_dev_tasks)
+        )
+        if (
+            has_task_dir_marker
+            and not is_governed_task_file(workspace_root, target_file, dev_tasks_dir=dev_tasks_dir)
+            and os.path.basename(target_file).lower() != "readme.md"
+        ):
+            emit_decision("deny", "realpath_escape", event_type="DENIED")
+            return
+
         # 0. 任务单文件状态强守卫（严防任何 Agent 擅自修改状态，或初稿私自越级设为已确认）
-        if is_task_file(target_file, workspace_root, config):
-            guard_decision = check_task_status_guard(target_file, tool_name, args)
+        if is_governed_task_file(workspace_root, target_file, dev_tasks_dir=dev_tasks_dir):
+            guard_decision = check_task_status_guard(resolved_target or target_file, tool_name, args)
             if guard_decision:
                 emit_decision(guard_decision.get("decision", "ask"), guard_decision.get("reason", ""))
                 return
@@ -551,8 +753,10 @@ def main():
             emit_decision("allow", "治理通用元数据文件豁免放行")
             return
 
+        effective_target = resolved_target or target_file
+
         # 0.1 生产代码靶向识别（Dual-Track Boundary Engine）：非受管的纯文档/规划/素材天然豁免
-        if hasattr(config, "is_path_governed") and not config.is_path_governed(target_file):
+        if hasattr(config, "is_path_governed") and not config.is_path_governed(effective_target):
             emit_decision("allow", "非受管路径（双轨边界）天然豁免放行")
             return
 
@@ -606,7 +810,7 @@ def main():
                         allowed_files.add(norm_path)
                         allowed_files.add(os.path.normpath(cleaned).lower())
 
-            target_norm = os.path.normpath(target_file).lower()
+            target_norm = os.path.normpath(effective_target).lower()
             target_basename = os.path.basename(target_norm)
 
             is_in_allowed_scope = False
@@ -623,11 +827,11 @@ def main():
                 return
 
             # 任务外文件，先检查 Layer 1 静态白名单与 Layer 2 会话旁路（含会话锁核验）
-            if is_whitelist_matched(config, target_file, workspace_root):
+            if is_whitelist_matched(config, effective_target, workspace_root):
                 emit_decision("allow", "Matched static whitelist / 命中静态白名单配置放行")
                 return
 
-            if is_session_bypass_matched(workspace_root, target_file, conversation_id, logger=logger):
+            if is_session_bypass_matched(workspace_root, effective_target, conversation_id, logger=logger):
                 emit_decision("allow", "Matched session bypass / 命中动态会话旁路放行")
                 return
 
@@ -647,12 +851,12 @@ def main():
         # 情形 B：当前无任务处于 🔨 执行中（空载改动）
         # -------------------------------------------------------------
         # 第一层：检查静态白名单（配置文件）
-        if is_whitelist_matched(config, target_file, workspace_root):
+        if is_whitelist_matched(config, effective_target, workspace_root):
             emit_decision("allow", "Matched static whitelist / 命中静态白名单配置放行")
             return
 
         # 第二层：检查动态会话旁路（.agents/.quench_bypass.json，含会话锁核验）
-        if is_session_bypass_matched(workspace_root, target_file, conversation_id, logger=logger):
+        if is_session_bypass_matched(workspace_root, effective_target, conversation_id, logger=logger):
             emit_decision("allow", "Matched session bypass / 命中动态会话旁路放行")
             return
 

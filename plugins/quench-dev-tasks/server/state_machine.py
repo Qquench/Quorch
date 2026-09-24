@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 import filelock
 
+try:
+    from .manifest import reconcile_workspace
+except (ImportError, ValueError):
+    from manifest import reconcile_workspace
+
 STATUS_PENDING = "⬜ 待确认"
 STATUS_CONFIRMED = "✅ 已确认"
 STATUS_IN_PROGRESS = "🔨 执行中"
@@ -237,3 +242,19 @@ def get_status_summary(filepath: str) -> Dict[str, int]:
     for t in tasks:
         summary[t.status] = summary.get(t.status, 0) + 1
     return summary
+
+
+def assert_task_checkout_allowed(workspace_root: str, filepath: str) -> None:
+    """检查任务单是否已被隔离入 UNAUTHORIZED_BYPASS 队列，违者抛出 InvalidTransitionError。"""
+    workspace_root = os.path.abspath(workspace_root)
+    abs_path = os.path.abspath(os.path.join(workspace_root, filepath) if not os.path.isabs(filepath) else filepath)
+    rel_path = os.path.relpath(abs_path, workspace_root).replace("\\", "/")
+    dev_tasks_dir = os.path.dirname(abs_path)
+
+    report = reconcile_workspace(workspace_root, dev_tasks_dir)
+    norm_bypass = {p.replace("\\", "/").lower() for p in report.bypass_queue}
+    if rel_path.lower() in norm_bypass:
+        raise InvalidTransitionError(
+            f"Task file '{rel_path}' is quarantined in UNAUTHORIZED_BYPASS queue. Checkout is forbidden. / "
+            f"任务文件 '{rel_path}' 处于未授权旁路隔离队列中，已被物理阻断，禁止检出执行。"
+        )

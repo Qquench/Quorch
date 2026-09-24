@@ -86,6 +86,7 @@ from state_machine import (
     get_status_summary,
     parse_task_file,
     transition_task,
+    assert_task_checkout_allowed,
 )
 from pathlib import Path
 from manifest import (
@@ -96,6 +97,10 @@ from manifest import (
     FencedTokenError,
     ManifestIntegrityError,
     MANIFEST_REL_PATH,
+    register_proposal,
+    reconcile_workspace,
+    ReconcileReport,
+    ReconcileClass,
 )
 
 try:
@@ -253,6 +258,15 @@ def _append_hook_log(workspace_root: str, message: str) -> None:
                 f.write(f"{now_str} [INFO] {message}\n")
         except Exception:
             pass
+
+
+def check_shell_write_isolation(command: str, workspace_root: str, dev_tasks_dir: str = "docs/dev_tasks") -> Optional[str]:
+    """检测外部 Shell 写入旁路（与 file_scope_guard 对齐），保障 MCP 任务单工具通道安全隔离。"""
+    try:
+        from hooks.file_scope_guard import detect_shell_write_bypass
+        return detect_shell_write_bypass(command, workspace_root, dev_tasks_dir)
+    except Exception:
+        return None
 
 
 def _audit_test_changes(
@@ -533,6 +547,12 @@ def dev_tasks_status(
             "static_fast_track_patterns": config.get_fast_track_patterns(),
             "governance_scope": config.governance_scope,
             "last_hook_log_entries": _get_recent_hook_logs(workspace_root, max_lines=10),
+            "reconcile_report": {
+                "bypass_queue": [],
+                "drift_queue": [],
+                "matched_queue": [],
+            },
+            "bypass_queue": [],
             "message": f"Tasks directory created: {dev_tasks_dir}. No task files currently found. / 任务目录已创建: {dev_tasks_dir}，当前暂无任务单。",
         }
 
@@ -540,10 +560,15 @@ def dev_tasks_status(
     file_records = []
     active_task = None
 
+    reconcile_report = reconcile_workspace(workspace_root, dev_tasks_dir)
+    norm_bypass = {p.replace("\\", "/").lower() for p in reconcile_report.bypass_queue}
+
     for f_path in sorted(md_files, reverse=True):
         basename = os.path.basename(f_path)
         if basename.lower() == "readme.md":
             continue
+        rel_f_path = os.path.relpath(f_path, workspace_root).replace("\\", "/")
+        is_quarantined = rel_f_path.lower() in norm_bypass
         try:
             summary = get_status_summary(f_path)
             tasks = parse_task_file(f_path)
@@ -581,23 +606,26 @@ def dev_tasks_status(
             if draft_q:
                 summary["📝 草案"] = len(draft_q)
 
-            file_records.append(
-                {
-                    "name": basename,
-                    "path": f_path,
-                    "total_tasks": len(tasks),
-                    "summary": summary,
-                    "batches": {
-                        "confirmed_queue": confirmed_q,
-                        "rework_queue": rework_q,
-                        "pending_queue": pending_q,
-                        "draft_queue": draft_q,
-                        "in_progress": in_prog_q,
-                        "completed_count": len(completed_q),
-                    },
-                }
-            )
-            if not active_task:
+            file_rec = {
+                "name": basename,
+                "path": f_path,
+                "total_tasks": len(tasks),
+                "summary": summary,
+                "batches": {
+                    "confirmed_queue": confirmed_q,
+                    "rework_queue": rework_q,
+                    "pending_queue": pending_q,
+                    "draft_queue": draft_q,
+                    "in_progress": in_prog_q,
+                    "completed_count": len(completed_q),
+                },
+                "quarantined": is_quarantined,
+            }
+            if is_quarantined:
+                file_rec["quarantine_reason"] = "UNAUTHORIZED_BYPASS: Untracked task file not registered in manifest"
+            file_records.append(file_rec)
+
+            if not active_task and not is_quarantined:
                 for t in tasks:
                     if t.status == STATUS_IN_PROGRESS:
                         active_task = {
@@ -611,7 +639,7 @@ def dev_tasks_status(
         except Exception:
             continue
 
-    return {
+    result_data = {
         "project_name": config.project_name,
         "dev_tasks_dir": dev_tasks_dir,
         "files": file_records,
@@ -620,7 +648,19 @@ def dev_tasks_status(
         "static_fast_track_patterns": config.get_fast_track_patterns(),
         "governance_scope": config.governance_scope,
         "last_hook_log_entries": _get_recent_hook_logs(workspace_root, max_lines=10),
+        "reconcile_report": {
+            "bypass_queue": list(reconcile_report.bypass_queue),
+            "drift_queue": list(reconcile_report.drift_queue),
+            "matched_queue": list(reconcile_report.matched_queue),
+        },
+        "bypass_queue": list(reconcile_report.bypass_queue),
     }
+    if reconcile_report.bypass_queue:
+        result_data["bypass_warning"] = (
+            f"⚠️ Detected {len(reconcile_report.bypass_queue)} unauthorized rogue task files quarantined in bypass_queue: "
+            f"{list(reconcile_report.bypass_queue)} / 检测到未授权旁路任务单已物理隔离"
+        )
+    return result_data
 
 
 @mcp.tool()
@@ -691,6 +731,13 @@ def dev_tasks_propose(
     else:
         with open(target_path, "a", encoding="utf-8") as f:
             f.write(rendered_blocks)
+
+    try:
+        for t in tasks:
+            t_id = t.get("id") or "1"
+            register_proposal(workspace_root, task_id=str(t_id), md_path=target_path)
+    except Exception:
+        pass
 
     return {
         "created": True,
@@ -1019,6 +1066,10 @@ def dev_tasks_checkout(
         resolved_file = _resolve_task_file_path(workspace_root, task_file)
         if not os.path.isfile(resolved_file):
             return {"error": f"Specified task file does not exist: {task_file} / 指定的任务文件不存在: {task_file}"}
+        try:
+            assert_task_checkout_allowed(workspace_root, resolved_file)
+        except Exception as e:
+            return {"error": f"Checkout blocked by security policy / 检出被安全策略阻断: {e}"}
         md_files = [resolved_file]
     else:
         md_files = sorted(glob.glob(os.path.join(dev_tasks_dir, "*.md")), reverse=True)
@@ -1033,6 +1084,10 @@ def dev_tasks_checkout(
             tasks = parse_task_file(f_path)
             for t in tasks:
                 if str(t.id).strip() == target_tid:
+                    try:
+                        assert_task_checkout_allowed(workspace_root, f_path)
+                    except Exception as e:
+                        return {"error": f"Checkout blocked by security policy / 检出被安全策略阻断: {e}"}
                     if t.status == STATUS_REWORK:
                         return {
                             "error": f"Task {target_tid} is currently in '🔄 需返工' status. It must be revised and confirmed by senior Reviewer model before checkout / 任务 {target_tid} 当前处于 '🔄 需返工' 状态，必须先由高阶架构审查模型修订并确认后方可领单。",
@@ -1097,6 +1152,11 @@ def dev_tasks_checkout(
 
     # 场景 2: 顺序领单（寻找第一个 ✅ 已确认 的任务）
     for f_path in md_files:
+        try:
+            assert_task_checkout_allowed(workspace_root, f_path)
+        except Exception:
+            # 该任务单处于未授权旁路隔离队列，跳过该文件的任务
+            continue
         tasks = parse_task_file(f_path)
         for t in tasks:
             if t.status == STATUS_CONFIRMED:

@@ -33,6 +33,39 @@
       "git_head_sha": "05551a79043b78339e0a97af3dab35de47225000",
       "git_index_mtime": 1790181784.130028,
       "released": true
+    },
+    "2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock::3.1": {
+      "task_id": "2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock::3.1",
+      "md_sha256": "a28276ab47f4834c95148c9b657e9cff0dbc468744f70a77f8f3c8564e765845",
+      "generation": 1,
+      "holder_token": "token_1790221841224_4220",
+      "last_heartbeat_monotonic_ns": 445404125000000,
+      "last_heartbeat_wall_utc": "2026-09-24T04:00:26.878946+00:00",
+      "git_head_sha": "929544e702b8ecd8ea98b470324b620119845047",
+      "git_index_mtime": 1790220553.1063073,
+      "released": true
+    },
+    "2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock::3.2": {
+      "task_id": "2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock::3.2",
+      "md_sha256": "a28276ab47f4834c95148c9b657e9cff0dbc468744f70a77f8f3c8564e765845",
+      "generation": 1,
+      "holder_token": "token_1790222433394_4220",
+      "last_heartbeat_monotonic_ns": 445734093000000,
+      "last_heartbeat_wall_utc": "2026-09-24T04:05:56.852099+00:00",
+      "git_head_sha": "929544e702b8ecd8ea98b470324b620119845047",
+      "git_index_mtime": 1790220553.1063073,
+      "released": true
+    },
+    "2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock::3.3": {
+      "task_id": "2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock::3.3",
+      "md_sha256": "a28276ab47f4834c95148c9b657e9cff0dbc468744f70a77f8f3c8564e765845",
+      "generation": 1,
+      "holder_token": "token_1790222765694_4220",
+      "last_heartbeat_monotonic_ns": 446685859000000,
+      "last_heartbeat_wall_utc": "2026-09-24T04:21:48.614879+00:00",
+      "git_head_sha": "929544e702b8ecd8ea98b470324b620119845047",
+      "git_index_mtime": 1790220553.1063073,
+      "released": true
     }
   }
 }
