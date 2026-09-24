@@ -3,6 +3,22 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-24] 2026-09-24_v1.07_step02_decoupling_and_handoff.md
+
+- **Task 2.1**: Reviewer 引擎配置厂商彻底解耦与明文密钥防御 (Reviewer Config Vendor Decoupling & Plaintext Secret Defense)
+  - Decoupled `quench_stack.yaml` default provider to `"none"` with `quench_stack.sample.yaml` template;
+  - Added `.agents/quench_stack.local.yaml` deep merge overlay and automated plaintext secret detection (`ConfigError`).
+- **Task 2.2**: 交接卡片单一生成源抽取与 dev_tasks_export_handoff_card 工具开放 (SSOT Handoff Card & Export Tool)
+  - Implemented pure function `render_handoff_card` in `handoff_card.py` with GFM alerts and collapsible task context;
+  - Registered `dev_tasks_export_handoff_card` FastMCP tool (12 tools total).
+- **Task 2.3**: 同模型自我验证软预警机制与审查透明度增强 (Same-Model Self-Verification Advisory Warning)
+  - Added optional `runner_profile` configuration in `project_config.py` with model alias normalization;
+  - Injected `reviewer_identity` and non-blocking `self_verification_warning` into consultation response.
+- **Documentation Refinement & Path Consolidation**:
+  - Moved `docs/architecture.md` into `docs/architecture/README.md` to eliminate file/directory path collision;
+  - Cleaned up Chinese heading text in §3.2 interception diagram and established authoritative §3.4 Bilingual Task Specification Field Mappings table;
+  - Synchronized pointers in `AGENTS.md`, `README.md`, `README_zh.md`, and roadmap artifacts.
+
 ## [2026-09-24] 2026-09-24_v1.07_step01_architecture_doc_integrity.md
 
 - **Task 1.1**: 修复 docs/architecture.md 架构锚点失真与模块映射完整性 (Architecture Doc Anchor Integrity & Module Topology Sync)

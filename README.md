@@ -169,7 +169,7 @@ The `quench-dev-tasks` MCP Server provides a suite of 11 specialized tools:
 ## 📖 Documentation Directory
 
 - ⚙️ [docs/configuration.md](docs/configuration.md): Complete configuration reference for `quench_stack.yaml`.
-- 🏛️ [docs/architecture.md](docs/architecture.md): High-level system architecture (4-tier topology, invariants, module map).
+- 🏛️ [docs/architecture/](docs/architecture/README.md): High-level system architecture (4-tier topology, invariants, module map).
 - 🌐 [CHANGELOG.md](CHANGELOG.md): Historical releases and evolution milestones.
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines and testing instructions.
 - ❓ [docs/FAQ.md](docs/FAQ.md): Troubleshooting common environment, path, proxy, and encoding questions.

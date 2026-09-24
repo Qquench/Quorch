@@ -171,7 +171,7 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 ## 📖 相关文档
 
 - ⚙️ [docs/configuration.md](docs/configuration.md)：`quench_stack.yaml` 完整配置说明与字段手册 (English as SSOT)。
-- 🏛️ [docs/architecture.md](docs/architecture.md)：高层系统架构说明书（四层拓扑、8 大不变式、模块映射表）。
+- 🏛️ [docs/architecture/](docs/architecture/README.md)：高层系统架构说明书（四层拓扑、8 大不变式、模块映射表）。
 - 🌐 [CHANGELOG.md](CHANGELOG.md)：版本更新日志与历史架构演进记录。
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md)：开源贡献指南与本地测试规范。
 - ❓ [docs/FAQ.md](docs/FAQ.md)：常见环境问题、编码乱码、企业代理与 Hook 排查手册。

@@ -20,7 +20,13 @@ from uuid import uuid4
 import weakref
 
 from path_guard import sanitize_workspace_path, PathTraversalError
-from project_config import QuenchStackConfig, ReviewerEngineConfig, create_reviewer_client
+from project_config import (
+    QuenchStackConfig,
+    ReviewerEngineConfig,
+    RunnerProfile,
+    check_self_verification_warning,
+    create_reviewer_client,
+)
 from reviewer_engine import (
     AdaptiveHeartbeatSink,
     CoalescingTextSink,
@@ -91,6 +97,8 @@ class ConsultResult:
     degraded_reason: str | None = None      # "reviewer_not_configured" | "timeout" | "auth" | "network" | "reasoning_budget_exceeded"
     handoff_prompt: str | None = None
     suggested_task_draft: dict[str, Any] | None = None
+    reviewer_identity: dict[str, Any] = field(default_factory=dict)
+    self_verification_warning: Optional[str] = None
 
 
 def sanitize_session_id(raw: str | None) -> str:
@@ -405,7 +413,9 @@ async def run_consultation(
 
     # 1. 引擎未配置降级防御（严禁主模型扮演）
     if client is None or not client.is_available():
-        prov = getattr(re_cfg, "provider", "none")
+        prov = getattr(re_cfg, "provider", "none") if re_cfg else "none"
+        model = getattr(re_cfg, "model", "default") if re_cfg else "default"
+        thinking = bool(getattr(re_cfg, "thinking", True)) if re_cfg else False
         return ConsultResult(
             status="degraded",
             session_id=session_id,
@@ -423,7 +433,20 @@ async def run_consultation(
                 f"请配置 quench_stack.yaml 中的 reviewer_engine，或在 IDE 中开启新会话切换至旗舰 Reviewer 模型重新提问。"
             ),
             suggested_task_draft=None,
+            reviewer_identity={
+                "provider": prov,
+                "model": model,
+                "thinking": thinking,
+                "status": "degraded",
+            },
+            self_verification_warning="reviewer_not_configured",
         )
+
+    runner_profile = getattr(config, "runner_profile", None)
+    prov = getattr(re_cfg, "provider", "none") if re_cfg else "none"
+    model = getattr(re_cfg, "model", "default") if re_cfg else "default"
+    thinking = bool(getattr(re_cfg, "thinking", True)) if re_cfg else False
+    self_verification_warning = check_self_verification_warning(runner_profile, prov, model)
 
     # 2. 准备日志环境
     log_dir = Path(workspace_root) / ".agents" / "logs" / "reviewer"
@@ -464,6 +487,10 @@ async def run_consultation(
         flush_interval_s=0.2,
         log_file=allocated_log_path,
     )
+    if self_verification_warning:
+        sink.write_chunk_text(
+            f"{datetime.now(timezone.utc).isoformat()} [warning] {self_verification_warning}\n"
+        )
     heartbeat_sink = AdaptiveHeartbeatSink(
         file_emit=sink.write_chunk_text,
         mcp_context=ctx,
@@ -582,6 +609,13 @@ async def run_consultation(
                             f"审查引擎在 {timeout_s} 秒内未完成响应。部分思考流已保存在 {log_file}。\n"
                             f"请尝试缩小 context_files 或提高 timeout_seconds 配置。"
                         ),
+                        reviewer_identity={
+                            "provider": prov,
+                            "model": model,
+                            "thinking": thinking,
+                            "status": "degraded",
+                        },
+                        self_verification_warning=self_verification_warning,
                     )
                 except ReasoningBudgetExceededError:
                     sink.write_chunk_text(
@@ -602,6 +636,13 @@ async def run_consultation(
                             "[Reasoning Budget Exceeded]\n"
                             "思考流超出 32000 tokens 安全天花板，已主动熔断。部分思考轨迹已保存至日志，请精简问题或降低上下文量。"
                         ),
+                        reviewer_identity={
+                            "provider": prov,
+                            "model": model,
+                            "thinking": thinking,
+                            "status": "degraded",
+                        },
+                        self_verification_warning=self_verification_warning,
                     )
                 except ReviewerEngineError as ee:
                     err_msg = str(ee)
@@ -626,6 +667,13 @@ async def run_consultation(
                         skipped_files=active_skipped,
                         degraded_reason=deg_reason,
                         handoff_prompt=f"[Reviewer Error: {err_msg}]\n请检查引擎连接与 API 凭据配置，严禁由当前模型扮演 Reviewer。",
+                        reviewer_identity={
+                            "provider": prov,
+                            "model": model,
+                            "thinking": thinking,
+                            "status": "degraded",
+                        },
+                        self_verification_warning=self_verification_warning,
                     )
 
                 findings_text = raw_result.get("content", "")
@@ -686,6 +734,13 @@ async def run_consultation(
                 degraded_reason=None,
                 handoff_prompt=None,
                 suggested_task_draft=suggested_task_draft,
+                reviewer_identity={
+                    "provider": prov,
+                    "model": model,
+                    "thinking": thinking,
+                    "status": "active",
+                },
+                self_verification_warning=self_verification_warning,
             )
 
         finally:

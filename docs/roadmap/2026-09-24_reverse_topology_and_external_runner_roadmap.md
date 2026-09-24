@@ -5,8 +5,8 @@
 > **文档路径**：`docs/roadmap/2026-09-24_reverse_topology_and_external_runner_roadmap.md`  
 > **发布日期**：2026-09-24  
 > **当前状态**：Draft（架构红队裁决与推演草案）  
-> **关联 SSOT**：[`docs/architecture.md`](../architecture.md), [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md), [`docs/ci_incident_tracker_and_compatibility_guide.md`](../ci_incident_tracker_and_compatibility_guide.md)  
-> **权威性声明**：本文档仅供路线规划与方案推演。若本文档与 `docs/architecture.md` 或 `dev_tasks_mcp_specification.md` 产生冲突，一律以后两者（SSOT）为准。
+> **关联 SSOT**：[`docs/architecture/`](../architecture/README.md), [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md), [`docs/ci_incident_tracker_and_compatibility_guide.md`](../ci_incident_tracker_and_compatibility_guide.md)  
+> **权威性声明**：本文档仅供路线规划与方案推演。若本文档与 `docs/architecture/` 或 `dev_tasks_mcp_specification.md` 产生冲突，一律以后两者（SSOT）为准。
 
 ---
 

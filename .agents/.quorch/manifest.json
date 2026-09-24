@@ -143,6 +143,39 @@
       "git_head_sha": "8e1550a9ffab46c4ae4a84bb530c1e628d2a887f",
       "git_index_mtime": 1790242549.0523293,
       "released": true
+    },
+    "2026-09-24_v1.07_step02_decoupling_and_handoff::2.1": {
+      "task_id": "2026-09-24_v1.07_step02_decoupling_and_handoff::2.1",
+      "md_sha256": "e260216816497710cfb974b3f882bf7dd093f41a59c65e8efaf5049a708554fa",
+      "generation": 1,
+      "holder_token": "token_1790248471469_6808",
+      "last_heartbeat_monotonic_ns": 471945890000000,
+      "last_heartbeat_wall_utc": "2026-09-24T11:22:48.644911+00:00",
+      "git_head_sha": "d999a90f84a4a0431c3928018aa042b1224bbb8c",
+      "git_index_mtime": 1790248243.529088,
+      "released": true
+    },
+    "2026-09-24_v1.07_step02_decoupling_and_handoff::2.2": {
+      "task_id": "2026-09-24_v1.07_step02_decoupling_and_handoff::2.2",
+      "md_sha256": "e260216816497710cfb974b3f882bf7dd093f41a59c65e8efaf5049a708554fa",
+      "generation": 1,
+      "holder_token": "token_1790248990707_6808",
+      "last_heartbeat_monotonic_ns": 472646390000000,
+      "last_heartbeat_wall_utc": "2026-09-24T11:34:29.137836+00:00",
+      "git_head_sha": "d999a90f84a4a0431c3928018aa042b1224bbb8c",
+      "git_index_mtime": 1790248243.529088,
+      "released": true
+    },
+    "2026-09-24_v1.07_step02_decoupling_and_handoff::2.3": {
+      "task_id": "2026-09-24_v1.07_step02_decoupling_and_handoff::2.3",
+      "md_sha256": "e260216816497710cfb974b3f882bf7dd093f41a59c65e8efaf5049a708554fa",
+      "generation": 1,
+      "holder_token": "token_1790249691924_6808",
+      "last_heartbeat_monotonic_ns": 473462109000000,
+      "last_heartbeat_wall_utc": "2026-09-24T11:48:04.867727+00:00",
+      "git_head_sha": "d999a90f84a4a0431c3928018aa042b1224bbb8c",
+      "git_index_mtime": 1790248243.529088,
+      "released": true
     }
   }
 }

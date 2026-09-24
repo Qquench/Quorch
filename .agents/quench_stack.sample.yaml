@@ -1,0 +1,40 @@
+# ==============================================================================
+# Quench 项目配置模板 (Sample Configuration)
+# 可复制此文件为 .agents/quench_stack.local.yaml 进行本地个性化配置（已在 .gitignore 中忽略）
+# ==============================================================================
+
+# 基础配置已在 quench_stack.yaml 中声明。
+# 在本地覆盖配置 quench_stack.local.yaml 中，只需声明需要个性化覆盖的字段。
+
+# 示例 1: DeepSeek API (需在系统环境变量中配置对应 API Key)
+# reviewer_engine:
+#   provider: "deepseek"
+#   model: "deepseek-chat"
+#   api_key_env: "DEEPSEEK_API_KEY"
+#   thinking: true
+#   reasoning_effort: "high"
+
+# 示例 2: OpenAI API
+# reviewer_engine:
+#   provider: "openai"
+#   model: "o3-mini"
+#   api_key_env: "OPENAI_API_KEY"
+
+# 示例 3: 本地 Ollama (零配置免 Key)
+# reviewer_engine:
+#   provider: "ollama"
+#   model: "qwen2.5-coder:32b"
+#   base_url: "http://127.0.0.1:11434/v1"
+
+# 示例 4: 本地 vLLM (零配置免 Key)
+# reviewer_engine:
+#   provider: "vllm"
+#   model: "Qwen/Qwen2.5-Coder-32B-Instruct"
+#   base_url: "http://127.0.0.1:8000/v1"
+
+# 示例 5: 自定义 OpenAI 兼容服务
+# reviewer_engine:
+#   provider: "custom"
+#   model: "custom-model"
+#   base_url: "https://api.your-endpoint.com/v1"
+#   api_key_env: "CUSTOM_API_KEY"

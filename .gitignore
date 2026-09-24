@@ -38,6 +38,8 @@ coverage.xml
 plugins/quench-dev-tasks/mcp_config.json
 plugins/quench-dev-tasks/hooks.json
 .agents/hooks.json
+.agents/quench_stack.local.yaml
+*.local.yaml
 .cursor/mcp.json
 
 # IDE & OS

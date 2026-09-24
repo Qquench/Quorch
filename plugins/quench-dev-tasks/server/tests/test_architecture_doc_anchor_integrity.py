@@ -17,7 +17,9 @@ import pytest
 SERVER_DIR = Path(__file__).resolve().parent.parent
 PLUGIN_DIR = SERVER_DIR.parent
 WORKSPACE_ROOT = PLUGIN_DIR.parent.parent
-ARCH_DOC_PATH = WORKSPACE_ROOT / "docs" / "architecture.md"
+ARCH_DOC_PATH = WORKSPACE_ROOT / "docs" / "architecture" / "README.md"
+if not ARCH_DOC_PATH.is_file():
+    ARCH_DOC_PATH = WORKSPACE_ROOT / "docs" / "architecture.md"
 TESTS_DIR = SERVER_DIR / "tests"
 
 

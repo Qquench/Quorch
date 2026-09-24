@@ -13,16 +13,157 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Tuple, Literal
+import math
 import urllib.parse
 import yaml
 
 CURRENT_SCHEMA_VERSION = "1.0"
+
+
+class ConfigError(ValueError):
+    """配置校验失败异常（如误填入明文密钥或非法凭据配置）。"""
+    pass
+
+
+def _calculate_shannon_entropy(s: str) -> float:
+    """计算字符串香农熵，用于高熵随机密钥探测。"""
+    if not s:
+        return 0.0
+    counts: dict[str, int] = {}
+    for c in s:
+        counts[c] = counts.get(c, 0) + 1
+    length = len(s)
+    return -sum((cnt / length) * math.log2(cnt / length) for cnt in counts.values())
+
+
+def _looks_like_plaintext_secret(val: str) -> bool:
+    """检测是否为明文 API 密钥（如 sk- 开头或高熵密钥）而非合法环境变量名。"""
+    if not isinstance(val, str):
+        return False
+    s = val.strip()
+    if not s:
+        return False
+
+    s_lower = s.lower()
+    # 1. 显式常见 API 密钥特征前缀
+    if s_lower.startswith(("sk-", "key-", "secret-", "ghp_", "gho_", "glpat-", "xoxb-", "xoxp-")):
+        return True
+
+    # 包含 Bearer 凭据或内嵌典型密钥格式 (如 sk- 开头且含 8 位以上内容)
+    if "bearer " in s_lower:
+        return True
+    if re.search(r"sk-[a-zA-Z0-9_-]{8,}", s):
+        return True
+
+    # 2. 合法环境变量名规范 (大/小写字母、数字、下划线且首字符为字母或下划线)
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", s):
+        # 32 位及以上纯十六进制且无下划线，大概率为原始 API 密钥/哈希
+        if len(s) >= 32 and "_" not in s and re.match(r"^[0-9a-fA-F]+$", s):
+            return True
+        # 合法环境变量名
+        return False
+
+    # 3. 包含连字符、符号等非环境变量合法字符的字符串检测
+    parsed = urllib.parse.urlparse(s)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        # 如果是 URL，递归检查 query 参数是否携带密钥
+        query = parsed.query
+        if query:
+            for param in query.split("&"):
+                if "=" in param:
+                    _, param_val = param.split("=", 1)
+                    if _looks_like_plaintext_secret(param_val):
+                        return True
+        return False
+
+    # 4. 非 URL 的特殊长字符高熵检测
+    if len(s) >= 16 and _calculate_shannon_entropy(s) >= 3.5:
+        return True
+
+    return False
+
+
+def _reject_inline_credentials(url: str) -> None:
+    """校验 URL 中是否含有 user:pass@ 明文鉴权串，若存在抛出 ConfigError。"""
+    if not url or not isinstance(url, str):
+        return
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if "@" in parsed.netloc or parsed.username is not None or parsed.password is not None:
+            raise ConfigError(f"URL 不得包含明文鉴权凭据 (user:pass@): '{url}'")
+    except ConfigError:
+        raise
+    except Exception:
+        if "@" in url and "://" in url:
+            raise ConfigError(f"URL 不得包含明文鉴权凭据: '{url}'")
+
+
+def _validate_credentials_security(target_dict: dict[str, Any]) -> None:
+    """静态防御校验，仅限定扫描凭据承载字段（api_key_env、base_url、headers、api_key，
+    排除 model、provider 等非凭据字段以防误伤）；当发现明文密钥模式时抛出 ConfigError 阻断异常。
+    """
+    if not isinstance(target_dict, dict):
+        return
+
+    # 1. 扫描 api_key 字段（严禁明文凭据入库）
+    if "api_key" in target_dict:
+        val = target_dict.get("api_key")
+        if val is not None and str(val).strip():
+            raise ConfigError(
+                "配置文件中严禁出现 'api_key' 明文凭据字段，请使用 'api_key_env' 引用环境变量。"
+            )
+
+    # 2. 扫描 api_key_env 字段
+    if "api_key_env" in target_dict:
+        val = target_dict.get("api_key_env")
+        if isinstance(val, str) and val.strip():
+            if _looks_like_plaintext_secret(val):
+                raise ConfigError(
+                    f"api_key_env 字段不得填入明文 API 密钥，必须填写环境变量名 (如 'API_KEY_ENV'): '{val}'"
+                )
+
+    # 3. 扫描 base_url 字段
+    if "base_url" in target_dict:
+        val = target_dict.get("base_url")
+        if isinstance(val, str) and val.strip():
+            _reject_inline_credentials(val)
+            if _looks_like_plaintext_secret(val):
+                raise ConfigError(
+                    f"base_url 字段不得包含明文 API 密钥或凭据: '{val}'"
+                )
+
+    # 4. 扫描 headers 字段
+    if "headers" in target_dict:
+        headers = target_dict.get("headers")
+        if isinstance(headers, dict):
+            for h_key, h_val in headers.items():
+                if _looks_like_plaintext_secret(str(h_val)) or _looks_like_plaintext_secret(str(h_key)):
+                    raise ConfigError(
+                        f"headers 中不得包含明文 API 密钥或凭据: '{h_key}: {h_val}'"
+                    )
+        elif isinstance(headers, str) and _looks_like_plaintext_secret(headers):
+            raise ConfigError(
+                f"headers 字段不得包含明文凭据: '{headers}'"
+            )
+
+
+def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+    """递归合并两个字典，overlay 覆盖 base。"""
+    result = base.copy()
+    for k, v in overlay.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_dict(result[k], v)
+        else:
+            result[k] = v
+    return result
+
 
 _DEFAULT_SCHEMA_VERSION_PATCH = 'schema_version: "1.0"\n'
 _DEFAULT_FAST_TRACK_PATCH = """fast_track_rules:
   allow_untracked_patterns: []
 """
 _SEEN_DEPRECATED_PROVIDERS: set[str] = set()
+
 
 
 DEFAULT_UNMANAGED_EXTENSIONS = {
@@ -95,6 +236,12 @@ def _match_glob(target_rel: str, pattern: str) -> bool:
 DispatchStrategy = Literal["subagent", "engine", "manual"]
 
 
+@dataclass
+class RunnerProfile:
+    provider: str = "unknown"
+    model: str = "unknown"
+
+
 @dataclass(frozen=True)
 class ProviderPreset:
     base_url: str
@@ -115,6 +262,65 @@ PROVIDER_ALIASES: Mapping[str, str] = MappingProxyType({
     "deepseek-compatible": "deepseek",
     "openai-compatible": "openai",
 })
+
+DEFAULT_MODEL_BY_PROVIDER: Mapping[str, str] = MappingProxyType({
+    "openai": "gpt-4o",
+    "deepseek": "deepseek-chat",
+    "ollama": "llama3",
+    "vllm": "default",
+})
+
+MODEL_ALIASES: Mapping[str, str] = MappingProxyType({
+    "deepseek": "deepseek-chat",
+    "deepseek-v3": "deepseek-chat",
+    "deepseek-r1": "deepseek-reasoner",
+    "gpt4": "gpt-4o",
+    "gpt-4": "gpt-4o",
+})
+
+
+def normalize_model_identity(provider: str, model: str) -> tuple[str, str]:
+    """归一化 (provider, model) 用于同模型比对，解析别名与默认模型映射。"""
+    p = (provider or "").strip().lower()
+    if p in PROVIDER_ALIASES:
+        p = PROVIDER_ALIASES[p]
+    m = (model or "").strip().lower()
+    if m in ("default", ""):
+        m = DEFAULT_MODEL_BY_PROVIDER.get(p, m or "unknown")
+    if m in MODEL_ALIASES:
+        m = MODEL_ALIASES[m]
+    return p, m
+
+
+def check_self_verification_warning(
+    runner: RunnerProfile | None,
+    reviewer_provider: str,
+    reviewer_model: str,
+) -> Optional[str]:
+    """检测 Runner 与 Reviewer 是否配置为相同模型。
+    若任一方为 unknown 或 reviewer.provider 为 none，则不告警。
+    若归一化后 provider 与 model 均相同，则返回预警信息。
+    """
+    if not runner:
+        return None
+    r_prov = (runner.provider or "").strip().lower()
+    r_model = (runner.model or "").strip().lower()
+    if r_prov in ("unknown", "", "none") or r_model in ("unknown", ""):
+        return None
+
+    rev_prov = (reviewer_provider or "").strip().lower()
+    if rev_prov in ("none", "", "unknown"):
+        return None
+
+    norm_r_prov, norm_r_model = normalize_model_identity(r_prov, r_model)
+    norm_rev_prov, norm_rev_model = normalize_model_identity(rev_prov, reviewer_model)
+
+    if norm_r_prov == norm_rev_prov and norm_r_model == norm_rev_model:
+        return (
+            f"Advisory: Runner profile and Reviewer profile resolve to the same model identity "
+            f"('{norm_r_prov}/{norm_r_model}'). Beware of homogeneous bias (S1 self-verification trap)."
+        )
+    return None
 # -- vendor-presets:end
 
 
@@ -291,6 +497,7 @@ class QuenchStackConfig:
     governance_scope: dict[str, Any] = field(default_factory=dict)
     reviewer_engine: ReviewerEngineConfig = field(default_factory=ReviewerEngineConfig)
     reaper_policy: ReaperPolicyConfig = field(default_factory=ReaperPolicyConfig)
+    runner_profile: RunnerProfile = field(default_factory=RunnerProfile)
 
     def resolve_path(self, field_name: str) -> str:
         """将相对路径属性解析为基于 workspace_root 的绝对路径"""
@@ -514,6 +721,29 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     # 执行向后兼容自动升级迁移
     data, _ = migrate_config_if_needed(yaml_path, data)
 
+    # 检查本地私有覆盖配置 .agents/quench_stack.local.yaml (已在 .gitignore 中忽略)
+    local_yaml_path = os.path.join(root, ".agents", "quench_stack.local.yaml")
+    if os.path.isfile(local_yaml_path):
+        try:
+            with open(local_yaml_path, "r", encoding="utf-8") as f:
+                raw_local = f.read().lstrip("\ufeff")
+            if raw_local.strip():
+                local_data = yaml.safe_load(raw_local)
+                if isinstance(local_data, dict):
+                    data = _deep_merge_dict(data, local_data)
+        except yaml.YAMLError as e:
+            raise ValueError(f"解析本地覆盖配置 {local_yaml_path} 失败（YAML 语法错误）: {e}") from e
+        except Exception as e:
+            raise ValueError(f"读取本地覆盖配置 {local_yaml_path} 失败: {e}") from e
+
+    # 静态安全防御校验：严禁明文密钥或凭据落盘
+    if "api_key" in data and data.get("api_key"):
+        raise ConfigError("配置文件中严禁出现 'api_key' 明文凭据字段，请使用 'api_key_env' 引用环境变量。")
+
+    re_data_check = data.get("reviewer_engine")
+    if isinstance(re_data_check, dict):
+        _validate_credentials_security(re_data_check)
+
     # 必填项校验
     project_name = data.get("project_name")
     if not project_name:
@@ -625,6 +855,14 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         ),
     )
 
+    rp_raw = data.get("runner_profile")
+    if isinstance(rp_raw, dict):
+        rp_provider = str(rp_raw.get("provider", "unknown")).strip() or "unknown"
+        rp_model = str(rp_raw.get("model", "unknown")).strip() or "unknown"
+        runner_profile = RunnerProfile(provider=rp_provider, model=rp_model)
+    else:
+        runner_profile = RunnerProfile()
+
     return QuenchStackConfig(
         workspace_root=root,
         project_name=project_name,
@@ -640,6 +878,7 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         governance_scope=governance_scope_data,
         reviewer_engine=reviewer_engine,
         reaper_policy=reaper_policy,
+        runner_profile=runner_profile,
     )
 
 

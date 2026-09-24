@@ -52,6 +52,7 @@ import functools
 import anyio
 from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
+from handoff_card import render_handoff_card
 from path_guard import to_workspace_relative_path, PathTraversalError
 from project_config import (
     load_project_config,
@@ -968,27 +969,13 @@ def _resolve_handoff_envelope(
                 preferred = s["strategy"]  # type: ignore
                 break
 
-    card_lines = [
-        "================================================================================",
-        "📋 Quench 任务交接卡 / Quench Task Handoff Card",
-        "================================================================================",
-        f"• Task ID / 任务编号:       {task_id}",
-        f"• Task Path / 单据路径:     {rel_task_path}",
-        f"• Handoff Reason / 交接原因: {reason}",
-        f"• Preferred Mode / 推荐模式: {preferred}",
-        "--------------------------------------------------------------------------------",
-        "【核心指引 / Execution Instructions】",
-        "1. [禁止就地切换] 严禁在当前长会话内就地切换大模型（规避数万历史 Token 冗余重传与注意力稀释）；",
-        f"2. [执行交接] 当前推荐采用【{preferred}】策略进行审查与重构：",
-    ]
-    if preferred == "subagent":
-        card_lines.append("   - 宿主支持原生子代理调度：请调起 reviewer 子代理，并下发只读审查提示词；")
-    elif preferred == "engine":
-        card_lines.append(f"   - 审查引擎已就绪 ({re_cfg.provider} / {re_cfg.model})：请调用 dev_tasks_refine_spec 自动强化规约；")
-    else:
-        card_lines.append("   - 终局兜底模式：请在新的纯净会话中切换至高阶架构审查模型，粘贴本卡完成审查。")
-    card_lines.append("================================================================================")
-    legacy_card_markdown = "\n".join(card_lines)
+    legacy_card_markdown = render_handoff_card(
+        task_id=task_id,
+        task_file=rel_task_path,
+        reason=reason,
+        task_meta={"preferred": preferred},
+        include_context=False,
+    )
 
     manual_strat["payload"]["card_markdown"] = legacy_card_markdown
 
@@ -1999,6 +1986,90 @@ def dev_tasks_escalate(
             f"Escalation Reason / 升级原因: {reason}\n"
             f"Key Reference Files / 重点参考文件: {[c['file'] for c in context_snippets]}"
         ),
+    }
+
+
+@mcp.tool()
+def dev_tasks_export_handoff_card(
+    workspace_root: str,
+    task_id: str,
+    include_context: bool = False,
+) -> Dict[str, Any]:
+    """Export standard GFM handoff card for a task to facilitate seamless handover to a Reviewer model.
+    Supports optional <details> collapsible context embedding.
+
+    [中文对照] 导出指定任务的标准 GFM 架构交接卡，以便转交高阶架构审查模型。支持可选折叠任务上下文。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        task_id: Target task ID / 目标任务编号。
+        include_context: Whether to inject collapsible task context details / 是否折叠注入任务单上下文（涉及文件、缺陷根因、类型契约、DoD命令）。
+    """
+    clean_task_id = str(task_id).strip()
+    try:
+        config = load_project_config(workspace_root)
+        dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+    except Exception as e:
+        return {
+            "error": f"Failed to load project config: {e}",
+            "task_id": clean_task_id,
+            "status": "error",
+        }
+
+    if not os.path.exists(dev_tasks_dir):
+        return {
+            "error": f"Task directory not found: {dev_tasks_dir} / 任务目录不存在: {dev_tasks_dir}",
+            "task_id": clean_task_id,
+            "status": "not_found",
+        }
+
+    md_files = sorted(glob.glob(os.path.join(dev_tasks_dir, "*.md")), reverse=True)
+    target_fpath = None
+    target_task = None
+
+    for f_path in md_files:
+        try:
+            tasks = parse_task_file(f_path)
+            for t in tasks:
+                if str(t.id).strip() == clean_task_id:
+                    target_fpath = f_path
+                    target_task = t
+                    break
+            if target_task:
+                break
+        except Exception:
+            continue
+
+    if not target_task or not target_fpath:
+        return {
+            "error": f"Task ID '{clean_task_id}' not found in any task files under {dev_tasks_dir} / 在任务文件中未找到任务 ID '{clean_task_id}'",
+            "task_id": clean_task_id,
+            "status": "not_found",
+        }
+
+    try:
+        rel_task_path = os.path.relpath(target_fpath, workspace_root).replace("\\", "/")
+    except Exception:
+        rel_task_path = os.path.basename(str(target_fpath))
+    detail = _extract_task_detail(target_fpath, clean_task_id)
+
+    reason = f"Architecture review & plan revision (status: {target_task.status})"
+    handoff_card_text = render_handoff_card(
+        task_id=clean_task_id,
+        task_file=rel_task_path,
+        reason=reason,
+        task_meta=detail,
+        include_context=include_context,
+    )
+
+    return {
+        "status": "exported",
+        "task_id": clean_task_id,
+        "task_file": rel_task_path,
+        "title": target_task.title,
+        "task_status": target_task.status,
+        "handoff_card": handoff_card_text,
+        "include_context": include_context,
     }
 
 

@@ -2,7 +2,7 @@
 
 > **Document Type**: Architecture SSOT (High-Level System Design)  
 > **Scope**: Answers *Why* (design philosophy) and *Topology* (components, lifecycles, invariants).  
-> **Not covered here**: Individual tool parameters, field regex syntax, return-value types → see [`dev_tasks_mcp_specification.md`](../dev_tasks_mcp_specification.md) (FastMCP Tool & Protocol Specification SSOT).
+> **Not covered here**: Individual tool parameters, field regex syntax, return-value types → see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md) (FastMCP Tool & Protocol Specification SSOT).
 
 ---
 
@@ -48,7 +48,7 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 │  • Independent daemon process (server.py)                        │
 │  • Cross-platform path safety (path_guard.py)                    │
 │  • Handle isolation & stdout purity contract                     │
-│  • 11 registered MCP tool endpoints                              │
+│  • 12 registered MCP tool endpoints                              │
 └─────────────────────────┬────────────────────────────────────────┘
                           │ in-process calls
 ┌─────────────────────────▼────────────────────────────────────────┐
@@ -123,10 +123,10 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 IDE tool call (file write / shell exec)
         │
         ▼ PreToolUse hook (file_scope_guard.py)
-  ┌─────────────────────────────────┐
-  │ Is path in active task whitelist?│
-  │ (【涉及文件】 list + unmanaged)   │
-  └──────────┬──────────────────────┘
+  ┌──────────────────────────────────────────┐
+  │ Is path in active task whitelist?        │
+  │ ([Affected Files] list + unmanaged)      │
+  └──────────┬───────────────────────────────┘
       YES    │    NO
       │      │──→ Interactive confirmation dialog → user decides
       ▼
@@ -152,6 +152,19 @@ dev_reviewer_consult / dev_tasks_refine_spec
               verdicts.jsonl (append)
               MCP response → Runner
 ```
+
+### 3.4 Bilingual Task Specification Field Mappings
+
+Quench DevTasks natively support full bilingual specification authoring. The governance engine's `schema_validator.py` and `file_scope_guard.py` accept both English and Chinese heading notations interchangeably:
+
+| Canonical Field Key | English Heading | Chinese Heading | Purpose & Governance Contract |
+|---------------------|-----------------|-----------------|-------------------------------|
+| `affected_files` | `#### [Affected Files]` | `#### 【涉及文件】` | Whitelist of files allowed for modification by the Runner; enforced by PreToolUse hook. |
+| `root_cause_target` | `#### [Root Cause & Target]` | `#### 【缺陷根因与修改目标】` | Architectural defect analysis, rationale, and target state. |
+| `type_contracts` | `#### [Type Contracts]` | `#### 【目标签名与类型契约】` | Target signatures, dataclasses, interfaces, and invariants. |
+| `step_by_step` | `#### [Step-by-Step Instructions]` | `#### 【分步改造指引】` | Ordered sequential execution steps for the Runner. |
+| `defensive_checks` | `#### [Defensive & Edge Checks]` | `#### 【防御与边缘校验】` | Boundary conditions, error handling, backward compatibility constraints. |
+| `dod_commands` | `#### [DoD Verification Commands]` | `#### 【DoD 验证命令】` | Physical verification commands (pytest, lint) required to pass before `dev_tasks_complete`. |
 
 ---
 
@@ -190,6 +203,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `project_config.py` | T2/T3 | `quench_stack.yaml` loading, validation, migration | Single parse per session; cached after first load |
 | `observability_policy.py` | T4 | Verdict sink policy; log rotation policy | Append-only verdicts; policy-driven, not hard-coded |
 | `code_explorer.py` | T3 | AST symbol extraction for `dev_tasks_refine_spec` | Read-only; no side effects |
+| `handoff_card.py` | T2 | Single source of truth for handoff card rendering (GFM alerts, collapsible task context) | Pure function; zero side-effects; no network I/O |
 | `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`) | Interactive ANSI formatting; non-AI operator gateway |
 | `changelog_writer.py` | T3 | Atomic append of completed task deliveries to `CHANGELOG.md` | Non-destructive header-preserving updates |
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement | Must respond in < 50ms; no network calls |
@@ -208,6 +222,7 @@ server.py → consultation.py    (Reviewer consult path)
 server.py → reviewer_engine.py (ReviewerClient factory)
 server.py → manifest.py        (task CRUD)
 server.py → code_explorer.py   (AST slice for refine_spec)
+server.py → handoff_card.py    (pure handoff card rendering)
 
 reviewer_engine.py → adapters/* (vendor-specific HTTP)
 reviewer_engine.py → log_naming.py (session log paths)
@@ -219,9 +234,10 @@ hooks/* → project_config.py (stack config read)
 
 ---
 
-## 6. Cross-Reference
+## 6. Cross-Reference & Architectural Sub-Contracts
 
-- **FastMCP Tool & Protocol Specification** (tool parameters, field regex, return types): [`dev_tasks_mcp_specification.md`](../dev_tasks_mcp_specification.md)  
-- **Configuration Reference** (`quench_stack.yaml` fields): [`docs/configuration.md`](configuration.md)  
-- **CI Incident Tracker** (known compatibility cases, mitigation playbooks): [`docs/ci_incident_tracker_and_compatibility_guide.md`](ci_incident_tracker_and_compatibility_guide.md)  
-- **Execution Discipline Rules**: [`plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`](../plugins/quench-dev-tasks/rules/dev-tasks-discipline.md)
+- **Manifest Compaction & Generational Archiving Contract**: [`manifest_compaction_contract.md`](manifest_compaction_contract.md)  
+- **FastMCP Tool & Protocol Specification** (tool parameters, field regex, return types): [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)  
+- **Configuration Reference** (`quench_stack.yaml` fields): [`docs/configuration.md`](../configuration.md)  
+- **CI Incident Tracker** (known compatibility cases, mitigation playbooks): [`docs/ci_incident_tracker_and_compatibility_guide.md`](../ci_incident_tracker_and_compatibility_guide.md)  
+- **Execution Discipline Rules**: [`plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`](../../plugins/quench-dev-tasks/rules/dev-tasks-discipline.md)

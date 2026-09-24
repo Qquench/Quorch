@@ -12,6 +12,9 @@ from project_config import (
     load_project_config,
     DEFAULT_UNMANAGED_EXTENSIONS,
     CRITICAL_CODE_MANIFEST_PATTERNS,
+    ConfigError,
+    _looks_like_plaintext_secret,
+    _reject_inline_credentials,
 )
 
 
@@ -179,4 +182,126 @@ def test_load_project_config_dynamic_script_path(temp_workspace):
     msg = str(exc_info.value)
     assert expected_script in msg
     assert "D:\\Work\\Quench\\MCP" not in msg
+
+
+def test_looks_like_plaintext_secret():
+    """验证明文密钥探测函数：精准识别密钥模式且不误判合法环境变量名"""
+    # 正例（明文密钥/高危模式）
+    assert _looks_like_plaintext_secret("sk-1234567890abcdef") is True
+    assert _looks_like_plaintext_secret("sk-proj-abc123xyz456") is True
+    assert _looks_like_plaintext_secret("Bearer sk-ant-api03-xxxx") is True
+    assert _looks_like_plaintext_secret("key-9876543210abcdef") is True
+    assert _looks_like_plaintext_secret("ghp_1234567890abcdef1234567890abcdef") is True
+    assert _looks_like_plaintext_secret("e4d909c290d0fb1ca068ffaddf22cbd0") is True  # 32位纯hex
+    assert _looks_like_plaintext_secret("https://api.example.com/v1?api_key=sk-1234567890") is True
+
+    # 负例（合法环境变量名、普通字符串或URL）
+    assert _looks_like_plaintext_secret("OPENAI_API_KEY") is False
+    assert _looks_like_plaintext_secret("DEEPSEEK_API_KEY_Quench") is False
+    assert _looks_like_plaintext_secret("MY_API_KEY") is False
+    assert _looks_like_plaintext_secret("CUSTOM_TOKEN_ENV") is False
+    assert _looks_like_plaintext_secret("https://api.example.com/v1") is False
+    assert _looks_like_plaintext_secret("http://127.0.0.1:11434/v1") is False
+
+
+def test_reject_inline_credentials():
+    """验证 URL 明文鉴权串探测（user:pass@）防御"""
+    with pytest.raises(ConfigError) as exc_info:
+        _reject_inline_credentials("https://user:password@api.example.com/v1")
+    assert "不得包含明文鉴权凭据" in str(exc_info.value)
+
+    # 正常无凭据 URL 不抛异常
+    _reject_inline_credentials("https://api.example.com/v1")
+    _reject_inline_credentials("http://127.0.0.1:8000/v1")
+
+
+def test_config_credentials_security_rejections(temp_workspace):
+    """验证配置加载时的凭据防御拦截（抛出 ConfigError 且不误判 model/provider）"""
+    import yaml
+
+    agents_dir = temp_workspace / ".agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    yaml_file = agents_dir / "quench_stack.yaml"
+
+    # 1. 尝试在 api_key_env 中直接填入明文 sk- 密钥
+    base_data = {
+        "project_name": "test_sec",
+        "reviewer_engine": {
+            "provider": "custom",
+            "model": "gpt-4o",  # 连字符模型名不应被误判
+            "api_key_env": "sk-proj-1234567890abcdef123456",
+            "base_url": "https://api.example.com/v1",
+        }
+    }
+    yaml_file.write_text(yaml.dump(base_data), encoding="utf-8")
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "api_key_env 字段不得填入明文 API 密钥" in str(exc_info.value)
+
+    # 2. 尝试在 base_url 中夹带 user:pass@
+    base_data["reviewer_engine"]["api_key_env"] = "VALID_KEY_ENV"
+    base_data["reviewer_engine"]["base_url"] = "https://user:pass@api.example.com/v1"
+    yaml_file.write_text(yaml.dump(base_data), encoding="utf-8")
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "不得包含明文鉴权凭据" in str(exc_info.value)
+
+    # 3. 尝试在配置中写入 api_key 字段
+    base_data["reviewer_engine"]["base_url"] = "https://api.example.com/v1"
+    base_data["reviewer_engine"]["api_key"] = "any-key-here"
+    yaml_file.write_text(yaml.dump(base_data), encoding="utf-8")
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "严禁出现 'api_key' 明文凭据字段" in str(exc_info.value)
+
+    # 4. 尝试在 headers 中夹带明文 Bearer sk-
+    del base_data["reviewer_engine"]["api_key"]
+    base_data["reviewer_engine"]["headers"] = {"Authorization": "Bearer sk-1234567890abcdef"}
+    yaml_file.write_text(yaml.dump(base_data), encoding="utf-8")
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "headers 中不得包含明文 API 密钥" in str(exc_info.value)
+
+
+def test_quench_stack_local_yaml_overlay(temp_workspace):
+    """验证 .agents/quench_stack.local.yaml 本地私有覆盖机制"""
+    import yaml
+
+    agents_dir = temp_workspace / ".agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    yaml_file = agents_dir / "quench_stack.yaml"
+    local_yaml_file = agents_dir / "quench_stack.local.yaml"
+
+    base_data = {
+        "project_name": "base_project",
+        "reviewer_engine": {
+            "provider": "none",
+            "model": "default",
+            "timeout_seconds": 120,
+        }
+    }
+    yaml_file.write_text(yaml.dump(base_data), encoding="utf-8")
+
+    # 未提供 local 时加载 base
+    cfg = load_project_config(str(temp_workspace))
+    assert cfg.reviewer_engine.provider == "none"
+    assert cfg.reviewer_engine.timeout_seconds == 120
+
+    # 提供 local 时，覆盖相应字段且保留其余字段
+    local_data = {
+        "reviewer_engine": {
+            "provider": "ollama",
+            "model": "qwen2.5-coder",
+            "base_url": "http://127.0.0.1:11434/v1",
+        }
+    }
+    local_yaml_file.write_text(yaml.dump(local_data), encoding="utf-8")
+
+    cfg_overridden = load_project_config(str(temp_workspace))
+    assert cfg_overridden.reviewer_engine.provider == "ollama"
+    assert cfg_overridden.reviewer_engine.model == "qwen2.5-coder"
+    assert cfg_overridden.reviewer_engine.base_url == "http://127.0.0.1:11434/v1"
+    # timeout_seconds 依然保留基础配置
+    assert cfg_overridden.reviewer_engine.timeout_seconds == 120
+
 

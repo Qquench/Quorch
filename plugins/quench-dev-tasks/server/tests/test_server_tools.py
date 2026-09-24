@@ -14,6 +14,7 @@ from server import (
     dev_tasks_escalate,
     dev_tasks_archive,
     dev_tasks_set_bypass,
+    dev_tasks_export_handoff_card,
 )
 
 @pytest.fixture
@@ -311,6 +312,79 @@ def test_dev_tasks_set_bypass_sanitization_and_utc(mock_workspace):
     with open(bypass_file, "r", encoding="utf-8") as f:
         bdata = json.load(f)
     assert len(bdata["reason"]) == 500
+
+
+def test_dev_tasks_export_handoff_card_workflow(mock_workspace):
+    """验证 dev_tasks_export_handoff_card 在真实任务单流程下的导出能力"""
+    ws = mock_workspace
+    sample_tasks = [
+        {
+            "id": "1.1",
+            "title": "测试导出卡片任务",
+            "affected_files": ["[MODIFY] src/app.py"],
+            "root_cause_and_goal": "解决架构边界问题。",
+            "type_contracts": "def run() -> None: pass",
+            "steps": ["1. 改造", "2. 测试"],
+            "defensive_checks": ["无"],
+            "dod_commands": ["pytest"],
+        }
+    ]
+    dev_tasks_propose(ws, "export_card_test.md", sample_tasks)
+
+    # 1. 导出轻量卡片 (include_context=False)
+    res_light = dev_tasks_export_handoff_card(ws, "1.1", include_context=False)
+    assert res_light["status"] == "exported"
+    assert res_light["task_id"] == "1.1"
+    assert "> [!IMPORTANT]" in res_light["handoff_card"]
+    assert "<details>" not in res_light["handoff_card"]
+
+    # 2. 导出完整折叠卡片 (include_context=True)
+    res_full = dev_tasks_export_handoff_card(ws, "1.1", include_context=True)
+    assert res_full["status"] == "exported"
+    assert "<details>" in res_full["handoff_card"]
+    assert "【涉及文件】" in res_full["handoff_card"]
+    assert "src/app.py" in res_full["handoff_card"]
+
+    # 3. 不存在的任务 ID 返回结构化错误
+    res_err = dev_tasks_export_handoff_card(ws, "99.99")
+    assert res_err["status"] == "not_found"
+    assert "error" in res_err
+
+
+def test_registered_tools_count_and_list():
+    """断言 FastMCP 实例注册的工具清单及总数（包含新增的 dev_tasks_export_handoff_card）"""
+    import asyncio
+    import server
+
+    tools = asyncio.run(server.mcp.list_tools())
+    tool_names = [t.name for t in tools]
+    assert "dev_tasks_export_handoff_card" in tool_names
+
+    # 验证全部预期核心工具均在注册列表中
+    expected_tools = [
+        "dev_tasks_status",
+        "dev_tasks_propose",
+        "dev_tasks_confirm",
+        "dev_tasks_checkout",
+        "dev_tasks_complete",
+        "dev_tasks_heartbeat",
+        "dev_tasks_reclaim",
+        "dev_tasks_promote_draft",
+        "dev_tasks_refine_spec",
+        "dev_tasks_escalate",
+        "dev_tasks_archive",
+        "dev_tasks_set_bypass",
+        "dev_tasks_export_handoff_card",
+        "dev_reviewer_consult",
+    ]
+    for exp in expected_tools:
+        assert exp in tool_names, f"Missing registered tool: {exp}"
+
+    # 核心 dev_tasks_* 前缀工具总数
+    dev_task_tools = [t for t in tool_names if t.startswith("dev_tasks_")]
+    assert len(dev_task_tools) >= 12
+    assert len(tools) >= 12
+
 
 
 

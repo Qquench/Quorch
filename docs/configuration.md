@@ -33,7 +33,7 @@ This manifest completely decouples the governance engine from specific project b
 | `changelog_path` | `string` | `"CHANGELOG.md"` | Relative path to the project changelog file. |
 | `test_runner` | `string` | `null` | Default automated test command executed during DoD audit (e.g. `pytest tests/ -v` or `npm test`). |
 | `test_dir` | `string` | `"tests"` | Primary test suite directory. |
-| `architecture_doc`| `string` | `null` | Optional path to primary system architecture specification (e.g. `docs/architecture.md`). |
+| `architecture_doc`| `string` | `null` | Optional path to primary system architecture specification (e.g. `docs/architecture/README.md`). |
 
 ---
 
