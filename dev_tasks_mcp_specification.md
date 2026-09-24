@@ -77,27 +77,38 @@ Upstream providers are instantiated via the declarative `PROVIDER_PRESETS` regis
 
 ### 2.2 The Six-Core-Field Structured Contract
 
-Every DevTask must adhere to the structured six core fields. The schema validator natively validates canonical English headers (while retaining backwards compatibility for localized aliases):
+Every DevTask must adhere to the structured six core fields. The schema validator (`schema_validator.py`) enforces these fields at the protocol boundary. To ensure complete developer freedom while maintaining strict physical enforcement, Quench establishes the canonical bilingual heading contract below:
 
-#### 1. `[Affected Files]` (`#### [Affected Files]`)
+| Canonical Field Key | English Heading | Chinese Heading | Purpose & Physical Governance Contract |
+|---------------------|-----------------|-----------------|----------------------------------------|
+| `affected_files` | `#### [Affected Files]` | `#### 【涉及文件】` | Whitelist of files allowed for modification by the Runner; enforced by PreToolUse hook (`file_scope_guard.py`). |
+| `root_cause_target` | `#### [Root Cause & Target]` | `#### 【缺陷根因与修改目标】` | Architectural defect analysis, rationale, and target engineering state. |
+| `type_contracts` | `#### [Type Contracts]` | `#### 【目标签名与类型契约】` | Target signatures, dataclasses, interfaces, and invariants to prevent implicit typing drift. |
+| `step_by_step` | `#### [Step-by-Step Instructions]` | `#### 【分步改造指引】` | Ordered sequential execution steps with actionable verbs for the Runner. |
+| `defensive_checks` | `#### [Defensive & Edge Checks]` | `#### 【防御与边缘校验】` | Boundary conditions, null checks, error handling, backward compatibility constraints. |
+| `dod_commands` | `#### [DoD Verification Commands]` | `#### 【DoD 验证命令】` | Physical verification commands (pytest, lint) required to pass before `dev_tasks_complete`. |
+
+> **Language Mirroring Contract**: When creating or editing tasks, the AI must mirror the language style of the existing task sheet (e.g. Chinese headings for Chinese tasks, English headings for English tasks). Never unilaterally translate headings.
+
+#### 1. `[Affected Files]` (`#### [Affected Files]` / `#### 【涉及文件】`)
 - **Format**: File paths prefixed with operation tags: `[MODIFY]`, `[NEW]`, `[DELETE]`, `[RENAME]`.
 - **Granularity Guard**: If a single task touches more than 3 core files, a `TaskGranularityWarning` is issued suggesting decomposition.
 
-#### 2. `[Root Cause & Target]` (`#### [Root Cause & Target]`)
+#### 2. `[Root Cause & Target]` (`#### [Root Cause & Target]` / `#### 【缺陷根因与修改目标】`)
 - **Format**: 1–2 concise sentences stating the underlying root cause and the expected engineering outcome.
 
-#### 3. `[Type Contracts]` (`#### [Type Contracts]`)
+#### 3. `[Type Contracts]` (`#### [Type Contracts]` / `#### 【目标签名与类型契约】`)
 - **Principle**: Include only changed or introduced signatures; avoid duplicating entire classes.
 - **Strict Typing**: Explicit interfaces, Pydantic schemas, or function signatures to eliminate implicit typing ambiguity.
 
-#### 4. `[Step-by-Step Instructions]` (`#### [Step-by-Step Instructions]`)
+#### 4. `[Step-by-Step Instructions]` (`#### [Step-by-Step Instructions]` / `#### 【分步改造指引】`)
 - **Principle**: 3–5 numbered steps with sequential instructions.
 - **Skeleton vs. Implementation**: Steps provide action verbs with key pseudo-code/skeletons, preventing over-specification.
 
-#### 5. `[Defensive & Edge Checks]` (`#### [Defensive & Edge Checks]`)
+#### 5. `[Defensive & Edge Checks]` (`#### [Defensive & Edge Checks]` / `#### 【防御与边缘校验】`)
 - **Format**: Bulleted list detailing null checks, boundary overflows, concurrency locks, and fallback handling.
 
-#### 6. `[DoD Verification Commands]` (`#### [DoD Verification Commands]`)
+#### 6. `[DoD Verification Commands]` (`#### [DoD Verification Commands]` / `#### 【DoD 验证命令】`)
 - **Principle**: Verifiable terminal test commands that must be executed and pass 100%.
 - **Mandatory Assertion Rule**: Any alteration to business logic or interfaces must include accompanying unit test assertions.
 

@@ -153,18 +153,11 @@ dev_reviewer_consult / dev_tasks_refine_spec
               MCP response → Runner
 ```
 
-### 3.4 Bilingual Task Specification Field Mappings
+### 3.4 Task Contract & Bilingual Headings SSOT
 
-Quench DevTasks natively support full bilingual specification authoring. The governance engine's `schema_validator.py` and `file_scope_guard.py` accept both English and Chinese heading notations interchangeably:
+DevTask specifications are strictly validated against the Six-Core-Field structured contract. Both English (`#### [Affected Files]`, etc.) and Chinese (`#### 【涉及文件】`, etc.) heading aliases are natively accepted and physically enforced by `schema_validator.py`.
 
-| Canonical Field Key | English Heading | Chinese Heading | Purpose & Governance Contract |
-|---------------------|-----------------|-----------------|-------------------------------|
-| `affected_files` | `#### [Affected Files]` | `#### 【涉及文件】` | Whitelist of files allowed for modification by the Runner; enforced by PreToolUse hook. |
-| `root_cause_target` | `#### [Root Cause & Target]` | `#### 【缺陷根因与修改目标】` | Architectural defect analysis, rationale, and target state. |
-| `type_contracts` | `#### [Type Contracts]` | `#### 【目标签名与类型契约】` | Target signatures, dataclasses, interfaces, and invariants. |
-| `step_by_step` | `#### [Step-by-Step Instructions]` | `#### 【分步改造指引】` | Ordered sequential execution steps for the Runner. |
-| `defensive_checks` | `#### [Defensive & Edge Checks]` | `#### 【防御与边缘校验】` | Boundary conditions, error handling, backward compatibility constraints. |
-| `dod_commands` | `#### [DoD Verification Commands]` | `#### 【DoD 验证命令】` | Physical verification commands (pytest, lint) required to pass before `dev_tasks_complete`. |
+> For the authoritative canonical bilingual field mapping table, regex definitions, and authoring rules, see [`dev_tasks_mcp_specification.md` §2.2](../../dev_tasks_mcp_specification.md#22-the-six-core-field-structured-contract) and [`dev-tasks-workflow/SKILL.md` §2](../../plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md#2-the-six-core-fields-standard-任务六大字段编写规范).
 
 ---
 

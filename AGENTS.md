@@ -47,7 +47,7 @@ dev_tasks_status
 | Execution discipline rules | `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md` |
 | Coding standards | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 | System architecture | `docs/architecture/README.md` |
-| FastMCP protocol spec | `dev_tasks_mcp_specification.md` |
+| FastMCP protocol & task schema spec | `dev_tasks_mcp_specification.md` |
 
 ---
 
