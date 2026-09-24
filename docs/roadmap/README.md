@@ -13,6 +13,7 @@
 
 | Milestone | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
+| **v1.07** | 📋 **[v1.07_architecture_doc_integrity_and_neutrality_decoupling.md](./v1.07_architecture_doc_integrity_and_neutrality_decoupling.md)** | **Architecture Integrity, Neutrality Decoupling & Cross-Paradigm Handoff** | Architecture doc AST dual-signature guard, secret leakage prevention, vendor-neutral decoupling, and structured Handoff Card protocol | 🔨 **Active Development** |
 | **Prospective** | 📋 **[2026-09-24_reverse_topology_and_external_runner_roadmap.md](./2026-09-24_reverse_topology_and_external_runner_roadmap.md)** | **Reverse-Topology & External-Runner Governance: Asymmetric Dual-Host Architecture** | Hook-free whitelist sinking (B1), lease heartbeat (B3), dual-process CAS lock (B4), capability tokens & verdict provenance (B7) | 💡 **Planning / Red-Team Review** |
 
 ---
