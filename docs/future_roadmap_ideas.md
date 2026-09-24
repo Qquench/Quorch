@@ -143,3 +143,31 @@ Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、�
 - **Task Directory Physical Defense & Bypass Audit (任务目录物理防线与旁路拦截)**:
   - 封堵具备文件编辑权限的内生子代理直接通过 `write_to_file` 绕过 `dev_tasks_propose` 篡改任务的漏洞，确保所有任务创建与流转强制通过内核门禁。
 
+---
+
+## 2026-09-24 — Reviewer Live Heartbeat & Streaming TUI Watcher CLI (Reviewer 思考心跳前台实时透传与轻量 TUI 监视器)
+
+### 1. Motivation & Background (背景与契机)
+资深架构 Reviewer 在执行架构挑刺（`critique`）与审计复核（`audit`）时，通常需要进行数十秒乃至数分钟的高强度深层思维链（CoT）推理。
+目前 FastMCP 服务端内部已完整实现了每秒级进度心跳（`ctx.info()`）并以时间戳严格实时落盘至 `.agents/logs/reviewer/` 目录。
+然而，在当前的现代 AI IDE（如 Antigravity / Cursor）中，MCP Tool Call 协议在客户端交互视窗中默认表现为折叠状态卡片（仅展示旋转指示器与工具名，等待工具整体执行完毕后一次性渲染输出）。
+这导致开发者在前台无法直观感知 Reviewer 的实时推理心跳与 token 消耗节奏，极易引发“进程是否假死、断联或死锁”的焦虑感与不透明感。
+
+### 2. Why not now? (为什么当期不做)
+- 底层推理心跳已 100% 毫秒级流式落盘到 `.agents/logs/reviewer/` 目录，通过分屏终端 `Get-Content -Wait` 或在编辑器中打开日志文件即可实时查阅，核心能力与链路完全闭环。
+- IDE 客户端对于 MCP Tool Call 进度事件的 UI 渲染能力正在上游快速演进，过早在插件层硬编码私有桌面通知或伪交互界面，维护成本高且容易与上游原生演进冲突。
+
+### 3. Key Architecture & Preconditions (核心构想与前置条件)
+- **`quorch reviewer watch` CLI (独立轻量 TUI 监视器)**:
+  - 在 `quorch` CLI / `quench-dev-tasks` 中提供 `reviewer watch` 子命令，依托 `rich` 或原生 ANSI 转义序列渲染终端轻量级实时仪表盘。
+  - **自动日志寻址**: 自动嗅探工作区 `.agents/logs/reviewer/` 目录下最新的 active 日志（支持匹配当前会话的 `latest-<session_id>.log`），通过非阻塞流式 reader 持续读取。
+  - **实时度量指标展示**:
+    - 当前推理耗时（秒 / 动态计时器）；
+    - 累计消耗 token 估算与推理速率；
+    - 最新思考流片段摘要预览（CoT preview window，自动滚动展示最近 3 行思考动态）；
+    - 状态指示器（🟢 思考中 / 🔵 工具调用中 / 🟡 子进程扩展中 / ✅ 审核完成）。
+- **IDE 终端自动附着联动 (IDE Terminal Split Hook)**:
+  - 在发起 `dev_reviewer_consult` 或规划前，由 Agent 或 Hook 命令一键在 IDE 底部或侧边拉起一个专属观察终端（Split Terminal）并自动运行 `quorch reviewer watch`，无需开发者手动编写命令。
+- **前置依赖**: 轻量级终端流式格式化支持（零繁重依赖），跨平台文件变动监听机制。
+
+

@@ -1,23 +1,27 @@
-# 跨平台 CI 异常记录与兼容性防护手册 (Cross-Platform CI Anomalies & Compatibility Guide)
+# GitHub Actions CI 故障全景追踪与跨平台兼容性防护手册 (GitHub Actions CI Failure Tracker & Cross-Platform Compatibility Guide)
 
-> **文档性质**: 核心工程实践与长效知识沉淀 (Engineering Knowledge Base)  
-> **适用范围**: 所有涉及跨平台（Windows / Linux / macOS）路径、进程调度、编码与 CI 构建的模块  
-> **维护策略**: 遇到新的跨平台或 CI 边界缺陷时持续追加，作为后续大版本演进与回归测试设计的强制检查清单。
+> **文档性质**: 核心工程实践、全量 CI 失败记录追踪与长效知识沉淀 (CI Incident Tracker & Engineering Knowledge Base)  
+> **适用范围**: 所有涉及 GitHub Actions CI 矩阵构建（Ubuntu / Windows / macOS）、跨平台路径、进程调度、环境编码与测试隔离的模块  
+> **维护策略**: 本文档作为**全量 GitHub Actions 失败事件的单一事实源（SSOT）**。凡在 CI 矩阵中触发红灯、崩溃或偶发异常的事件，必须在本文档建档登记、完成根因复盘并提取防御准则。
 
 ---
 
 ## 目录
 
 1. [背景与核心设计原则](#1-背景与核心设计原则)
-2. [历史 CI 异常案例档案 (Case Archives)](#2-历史-ci-异常案例档案-case-archives)
+2. [GitHub Actions CI 故障总账与自动化排障协议](#2-github-actions-ci-故障总账与自动化排障协议)
+   - [2.1 CI 故障事件总账 (Incident Ledger)](#21-ci-故障事件总账-incident-ledger)
+   - [2.2 失败日志自动化检索协议 (GCM 凭据复用)](#22-失败日志自动化检索协议-gcm-凭据复用)
+3. [历史 CI 异常案例档案 (Case Archives)](#3-历史-ci-异常案例档案-case-archives)
    - [案例 1: 测试固件中硬编码 Windows 盘符路径导致 Linux 根目录解析异常](#案例-1-测试固件中硬编码-windows-盘符路径导致-linux-根目录解析异常)
    - [案例 2: Windows 嵌套双引号与 shlex.split 跨平台分词解析分歧](#案例-2-windows-嵌套双引号与-shlexsplit-跨平台分词解析分歧)
    - [案例 3: POSIX 与 Windows 路径反斜杠语义差异导致路径穿透守卫绕过 (CWE-22 / CWE-20)](#案例-3-posix-与-windows-路径反斜杠语义差异导致路径穿透守卫绕过-cwe-22--cwe-20)
    - [案例 4: Windows 专属文件句柄占用与并发重命名 PermissionError 锁死](#案例-4-windows-专属文件句柄占用与并发重命名-permissionerror-锁死)
    - [案例 5: Windows CMD/PowerShell 默认代码页 (GBK/CP936) 与 UTF-8 表情包编码冲突](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突)
    - [案例 6: 生产 TOCTOU 违背零 stat 契约与测试全局 monkeypatch stdlib (os.stat) 导致 pytest session 级崩溃](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃)
-3. [跨平台编码安全准则 (Defensive Guidelines)](#3-跨平台编码安全准则-defensive-guidelines)
-4. [CI 验证与双向回归自检矩阵](#4-ci-验证与双向回归自检矩阵)
+4. [跨平台编码安全准则 (Defensive Guidelines)](#4-跨平台编码安全准则-defensive-guidelines)
+5. [CI 验证与双向回归自检矩阵](#5-ci-验证与双向回归自检矩阵)
+6. [新增 CI 异常案例归档规范与模板](#6-新增-ci-异常案例归档规范与模板)
 
 ---
 
@@ -33,10 +37,56 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
    - 单元测试严禁出现任何硬编码盘符（如 `C:/`、`D:/`）或绝对路径（如 `/tmp/`、`/etc/`），必须统一依赖 pytest 的 `tmp_path` fixture。
 3. **断言必须具备宿主无关性 (Host-Invariant Assertions)**：
    - 如果测试是在 Linux CI 上运行，针对 Windows 语境（如反斜杠穿透）的守卫逻辑，必须通过组件级归一化或双引擎（`ntpath` / `posixpath`）注入进行无差别验证。
+4. **测试打桩严禁污染运行时基础设施**：
+   - 任何系统调用级别的 Mock 必须带有路径白名单或置于独立子进程中，严禁无差别抛错导致 pytest 自身设施（tmp_path、linecache、回溯生成）二次崩溃。
 
 ---
 
-## 2. 历史 CI 异常案例档案 (Case Archives)
+## 2. GitHub Actions CI 故障总账与自动化排障协议
+
+### 2.1 CI 故障事件总账 (Incident Ledger)
+
+| 事件编号 / Run ID | 触发时间 | 触发提交 / 分支 | 失败矩阵 (Failed Matrix) | 顶层症状简述 | 归属根因案例 | 修复提交 / PR | 终态 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **INC-20260913-01** | 2026-09-13 | `b38030b` / `i18n-align` | Ubuntu 22.04 (All Py) | `FileNotFoundError` 根路径解析偏离 | [案例 1](#案例-1-测试固件中硬编码-windows-盘符路径导致-linux-根目录解析异常) | `c912e4f` | ✅ 已闭环 |
+| **INC-20260913-02** | 2026-09-13 | `b38030b` / `i18n-align` | Ubuntu 22.04 (All Py) | `ValueError: No closing quotation` | [案例 2](#案例-2-windows-嵌套双引号与-shlexsplit-跨平台分词解析分歧) | `d041ab8` | ✅ 已闭环 |
+| **INC-20260914-01** | 2026-09-14 | `f28ebaf` / `main` (Run 35600561032) | Ubuntu 22.04 (Py 3.11, 3.12) | 反斜杠穿透向量未被拦截导致断言失败 | [案例 3](#案例-3-posix-与-windows-路径反斜杠语义差异导致路径穿透守卫绕过-cwe-22--cwe-20) | `8f21bc9` | ✅ 已闭环 |
+| **INC-20260920-01** | 2026-09-20 | Stage 2 / `main` | Windows Server (Py 3.11) | `PermissionError: [WinError 32]` 句柄占用 | [案例 4](#案例-4-windows-专属文件句柄占用与并发重命名-permissionerror-锁死) | `e184fa2` | ✅ 已闭环 |
+| **INC-20260921-01** | 2026-09-21 | Stage 1 / `main` | Windows CMD/PowerShell | `UnicodeEncodeError: 'gbk' codec` 输出崩溃 | [案例 5](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突) | `7c29be1` | ✅ 已闭环 |
+| **INC-20260924-01** | 2026-09-24 | `8d8ec3c` / `main` (Run 35961542829) | Ubuntu 3.11, 3.12, Win 3.11 | `RuntimeError: os.stat was called` + Session 级崩溃 | [案例 6](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃) | `4b85abc` | ✅ 已闭环 |
+
+---
+
+### 2.2 失败日志自动化检索协议 (GCM 凭据复用)
+
+在排查 GitHub Actions 失败日志时，**严禁依赖人工或浏览器截图**。  
+因 GitHub 对 Raw Action Logs 强制要求携带鉴权头（否则返回 `403 Forbidden`），开发者与 AI Agent 可直接复用本地 **Git Credential Manager (GCM)** 已缓存的凭据，全自动拉取 Run 状态与失败日志：
+
+#### 自动化日志拉取协议 (PowerShell / Python)
+
+```powershell
+# 1. 向 GCM 提取当前 GitHub 账户已授权的 Token
+$gcmOut = "protocol=https`nhost=github.com`n" | git credential fill
+$token = ($gcmOut | Select-String "password=").Line.Split("=")[1].Trim()
+
+# 2. 调用 API 查询最新 Run 与 Jobs 状态
+$headers = @{ "Authorization" = "Bearer $token"; "User-Agent" = "Quench-CI-Diagnoser" }
+$run = Invoke-RestMethod -Uri "https://api.github.com/repos/Qquench/Quorch/actions/runs?per_page=1" -Headers $headers
+$runId = $run.workflow_runs[0].id
+$jobs = Invoke-RestMethod -Uri "https://api.github.com/repos/Qquench/Quorch/actions/runs/$runId/jobs" -Headers $headers
+
+# 3. 输出失败矩阵与失败 Job 的日志下载地址
+foreach ($job in $jobs.jobs) {
+    Write-Host ("- Job: {0} | Status: {1} | Conclusion: {2}" -f $job.name, $job.status, $job.conclusion)
+    if ($job.conclusion -eq "failure") {
+        Write-Host ("  Logs URL: https://api.github.com/repos/Qquench/Quorch/actions/jobs/{0}/logs" -f $job.id)
+    }
+}
+```
+
+---
+
+## 3. 历史 CI 异常案例档案 (Case Archives)
 
 ### 案例 1: 测试固件中硬编码 Windows 盘符路径导致 Linux 根目录解析异常
 
@@ -126,29 +176,29 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 
 ### 案例 6: 生产 TOCTOU 违背零 stat 契约与测试全局 monkeypatch stdlib (os.stat) 导致 pytest session 级崩溃
 
-- **首次触发节点**: 提交 `8d8ec3c`（Milestone v1.06 任务发布阶段，CI Run 18237588722）
+- **首次触发节点**: 提交 `8d8ec3c`（Milestone v1.06 任务发布阶段，CI Run 35961542829）
 - **现象**:
   - GitHub Actions 4-job 矩阵中 3 个任务失败（Ubuntu Python 3.11, Ubuntu Python 3.12, Windows Python 3.11 均崩溃），仅 Windows Python 3.12 偶发通过。
   - 报错信息为 `RuntimeError: os.stat was called on ...! Zero-stat violation!`，且伴随 pytest 的 `tmp_path` fixture teardown 和 `linecache` 源码读取崩溃，造成整场测试会话被终止。
-- **根因深度复盘**:
-  1. **生产代码缺陷与平台实现分歧**：
-     - `log_naming.py::gc_by_filename_order` 中存在 `if os.path.exists(fpath): os.remove(fpath)`。
-     - 在 POSIX (`posixpath.exists`) 与 Windows Python <=3.11 (`ntpath.exists`) 中，`os.path.exists` 内部调用 `os.stat`，既违背了模块声明的 zero-stat GC 契约，又引入了检查到删除之间的 TOCTOU 并发竞态。
-     - 而在 Windows Python 3.12 中，`ntpath.exists` 改用 C 语言底层内建 `nt._path_exists` 实现，绕过了 Python 层的 `os.stat`，导致该 bug 在 Windows Python 3.12 下被偶然掩盖。
+- **根因深度复盘与证据链验证**:
+  1. **生产代码缺陷与跨版本底层实现分歧**：
+     - `log_naming.py::gc_by_filename_order` 中存在 `if os.path.exists(fpath): os.remove(fpath)`；`list_log_files` 中存在 `if not os.path.isdir(target_dir): return []`。
+     - **POSIX 环境与 Windows Python 3.11**：`ntpath.exists` 与 `posixpath.exists` 均由 Python 函数 `genericpath.exists` 实现（`<class 'function'>`），内部无条件调用 `os.stat`，违背了模块声明的 zero-stat GC 契约，并引入了 TOCTOU 竞态。
+     - **Windows Python 3.12 偶然存活原因**：在 Python 3.12 中，Windows 平台的 `ntpath.exists` 被 C 语言内建加速函数 `nt._path_exists`（`<class 'builtin_function_or_method'>`）替代，底层直调 Win32 `GetFileAttributesW`，绕过了 Python 层的 `os.stat`，使生产 Bug 被环境实现差异偶然掩盖。
   2. **测试固件全局毒化反模式**：
      - 测试用例 `test_gc_zero_stat_guarantee` 使用 `monkeypatch.setattr(os, "stat", _boom)` 全局抛错，未对被测对象施加路径过滤。
-     - 当 `gc_by_filename_order` 触发异常导致测试用例断言失败时，pytest 尝试通过 `linecache` 模块读取测试源代码以格式化失败堆栈，而 `linecache.checkcache` 内部调用了 `os.stat`，直接被全局桩二次拦截抛错，导致 pytest 崩溃；同时 `tmp_path` 临时目录清理也会被阻断。
+     - 当 `gc_by_filename_order` 触发异常导致测试断言失败时，pytest 尝试通过 `linecache.checkcache` 模块读取测试源文件以生成回溯报告，而 `linecache` 内部调用了 `os.stat`，被全局桩二次拦截抛错，导致 pytest session 级崩溃；同时 `tmp_path` 临时目录清理也被阻断。
 - **加固方案 (三重闭环)**:
   1. **生产代码原子无 stat 删除**：
-     - 废除 `os.path.exists`，直接调用 `os.remove(fpath)`，并捕获 `(FileNotFoundError, OSError)`。并发场景下文件被提前清理视为幂等成功；Windows 下被占用的句柄（PermissionError，参考案例 4）安全跳过，绝不阻断后续文件清理。
+     - 彻底废除 `os.path.exists` 与 `os.path.isdir`，改用原子物理删除 `os.remove` 与 `os.listdir`，捕获 `(FileNotFoundError, NotADirectoryError, OSError)`。并发删除视为幂等成功；Windows 下被占用的句柄（PermissionError，参考案例 4）安全跳过。
   2. **测试精准白名单与子进程隔离**：
-     - 单元测试重构为定向路径白名单过滤（`_guarded_stat` 仅拦截匹配 `_LOG_FILENAME_REGEX` 的日志目标，完全放行 pytest 内部路径）；同时增设 `test_gc_zero_stat_guarantee_subprocess` 在独立子进程中进行全量抛错验证，彻底杜绝主进程环境毒化。
+     - 单元测试重构为定向路径白名单过滤（`_guarded_stat` 仅拦截匹配 `_LOG_FILENAME_REGEX` 的日志目标，完全放行 pytest 内部路径）；同时增设 `test_gc_zero_stat_guarantee_subprocess` 在独立子进程中进行全量抛错验证，杜绝主进程环境毒化。
   3. **静态门禁阻断 (AST Lint)**：
-     - 新增 `test_no_global_os_stat_patch.py` 扫描所有测试文件，禁止注册无返回分支的裸抛错 `os.stat` monkeypatch；新增 `test_gc_source_has_no_stat_calls` 在 AST 级别断言 `gc_by_filename_order` 源码中严禁包含任何 stat 家族调用。
+     - 新增 `test_no_global_os_stat_patch.py` 递归扫描所有测试与 fixture，禁止对 `os.stat` / `os.path.*` 注册无条件抛错的 monkeypatch 或直接赋值；新增 `test_gc_source_has_no_stat_calls` 在 AST 级别断言 `gc_by_filename_order` 与 `list_log_files` 源码中严禁包含任何 stat 家族调用。
 
 ---
 
-## 3. 跨平台编码安全准则 (Defensive Guidelines)
+## 4. 跨平台编码安全准则 (Defensive Guidelines)
 
 后续开发与代码审查（Reviewer）必须严格执行以下五项准则：
 
@@ -175,12 +225,33 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 
 ---
 
-## 4. CI 验证与双向回归自检矩阵
+## 5. CI 验证与双向回归自检矩阵
 
 每次发布或合并前，必须确认以下自检矩阵全绿：
 
-| 平台 / 环境 | 关键检查点 | 典型验证命令 |
+| 平台 / 环境 | 关键检查点 | 本地复现 / 验证命令 |
 | :--- | :--- | :--- |
-| **Linux (Ubuntu 22.04 / 24.04)** | 路径无反斜杠混淆逃逸、shlex 严格模式、无硬编码盘符 | `pytest plugins/quench-dev-tasks/server/tests -v` |
-| **Windows (10 / 11 / Server)** | 句柄锁无 PermissionError、CP936 控制台编码安全、FileLock 正确释放 | `pytest plugins/quench-dev-tasks/server/tests -v` |
-| **Python 3.11 & 3.12** | 类型注解兼容、`datetime.UTC` / `timezone.utc` 语义一致 | GitHub Actions CI Matrix (4 jobs) |
+| **Linux (Ubuntu 22.04 / 24.04)** | 路径无反斜杠混淆逃逸、shlex 严格模式、无硬编码盘符、零 stat 契约 | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; uv run --python 3.11 pytest plugins/quench-dev-tasks/server/tests -v` |
+| **Windows (10 / 11 / Server)** | 句柄锁无 PermissionError、CP936 控制台编码安全、FileLock 正确释放 | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; uv run --python 3.12 pytest plugins/quench-dev-tasks/server/tests -v` |
+| **Python 3.11 & 3.12** | 类型注解兼容、`ntpath` / `posixpath` 底层实现差异对齐 | GitHub Actions CI Matrix (4 jobs 全绿) |
+
+---
+
+## 6. 新增 CI 异常案例归档规范与模板
+
+凡在 GitHub Actions 遇到新的构建红灯或环境特定异常，必须按下列模板向本文档追加归档：
+
+```markdown
+### 案例 N: <简洁明确的故障标题>
+
+- **首次触发节点**: 提交 `<commit_hash>` / PR `<pr_number>` (GitHub Actions Run `<run_id>`)
+- **现象**:
+  - 本地运行表现（例如 Windows 正常）；
+  - CI 矩阵失败表现（具体失败的任务、报错信息与关键 Traceback）。
+- **根因深度复盘**:
+  - 技术细节、底层系统调用、标准库在跨平台/跨版本下的行为差异剖析。
+- **加固方案 (三重闭环)**:
+  1. 生产代码加固：...
+  2. 测试用例防护与隔离：...
+  3. 静态门禁或流程防线：...
+```
