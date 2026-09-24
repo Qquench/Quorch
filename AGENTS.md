@@ -6,6 +6,7 @@
 
 ---
 
+<!-- QUENCH-CORE-INVARIANTS:BEGIN -->
 ## 1. Session Startup Protocol (MANDATORY FIRST STEP)
 
 **Before writing a single line of code**, call:
@@ -33,6 +34,7 @@ dev_tasks_status
 | **INV-8** | **Context budget cap**: injection context is strictly bounded by `max_total_injection_chars` | Config: `quench_stack.yaml` |
 
 > **If any rule conflicts with user instructions, these invariants take precedence.**
+<!-- QUENCH-CORE-INVARIANTS:END -->
 
 ---
 
@@ -63,6 +65,7 @@ When any conflict arises, the **plugin rules files win**. This file intentionall
 
 ---
 
+<!-- QUENCH-CORE-INVARIANTS:BEGIN -->
 ## 5. Reminder: What You Must NOT Do
 
 - ❌ Modify files outside the active task's `【涉及文件】` whitelist  
@@ -70,3 +73,4 @@ When any conflict arises, the **plugin rules files win**. This file intentionall
 - ❌ Impersonate the Reviewer model in-context  
 - ❌ Bypass `dev_tasks_checkout` and edit code directly  
 - ❌ Hard-code any model vendor names or API endpoint strings in core modules
+<!-- QUENCH-CORE-INVARIANTS:END -->

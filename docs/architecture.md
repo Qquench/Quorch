@@ -164,7 +164,7 @@ dev_reviewer_consult / dev_tasks_refine_spec
 | **INV-1** | Single-core serial execution | Cross-process `filelock` on manifest; second `checkout` rejected | `test_state_machine.py`, `test_reclaim_cas.py` |
 | **INV-2** | State machine is MCP-only | Server validates every transition; Markdown emoji never parsed as state source | `test_server_tools.py` |
 | **INV-3** | Anti-roleplay (no in-context Reviewer impersonation) | `findings == ""` in degraded fallback card; schema enforced | `test_anti_roleplay_discipline_contract.py` |
-| **INV-4** | Stdio channel purity (`stdout` = JSON-RPC only) | No `print()` in server modules; CI grep gate | `test_no_vendor_literals_in_core.py` |
+| **INV-4** | Stdio channel purity (`stdout` = JSON-RPC only) | No `print()` in server modules; CI grep gate | `test_anti_roleplay_discipline_contract.py` |
 | **INV-5** | Vendor neutrality | `PROVIDER_PRESETS` declarative registry; static AST neutrality scan | `test_reviewer_factory_neutrality.py`, `test_no_vendor_literals_in_core.py` |
 | **INV-6** | Review is read-only (no production file writes during review) | Consultation sandbox guard; read-only path assertions | `test_consultation_context_guard.py` |
 | **INV-7** | Physical feasibility gate (path + pytest dry-run before promotion) | `dev_tasks_promote_draft` enforces checks; lint gate blocks invalid paths | `test_draft_lint.py` |
@@ -174,14 +174,14 @@ dev_reviewer_consult / dev_tasks_refine_spec
 
 ## 5. Source Code Mapping (Module Topology)
 
-All production modules live under `plugins/quench-dev-tasks/server/`.
+Production modules are organized under `plugins/quench-dev-tasks/` across `server/` (MCP daemon, domain governance engine, reviewer engine), `server/hooks/` (IDE hooks), `server/adapters/` (vendor adapters), and `scripts/` (client-side export and pre-commit guards).
 
 | Module | Tier | Responsibility | Key Constraints |
 |--------|------|----------------|-----------------|
-| `server.py` | T2 | 11 FastMCP tool endpoint definitions; request routing | Must not import vendor SDK directly; delegates to Tier 3/4 |
+| `server.py` | T2 | FastMCP tool endpoint definitions; request routing; DoD output auditor (`dod_guard`) | Must not import vendor SDK directly; delegates to Tier 3/4 |
 | `state_machine.py` | T3 | CAS atomic state transitions backed by `filelock` | Single writer at a time; idempotent on repeated calls |
-| `schema_validator.py` | T3 | Six-field contract validation (regex, path checks) | No file writes; pure validation |
-| `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement | `manifest_lease.py` for TTL lease management |
+| `schema_validator.py` | T3 | Six-field contract validation; physical feasibility lint gate (`draft_lint`) | No file writes; pure validation |
+| `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement; CAS TTL lease management (`manifest_lease`) | Single lock holder per task; lease expiration safety |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; heartbeat | Vendor-neutral; zero hard-coded provider literals |
 | `consultation.py` | T4 | `dev_reviewer_consult` logic; context assembly; sandbox | Read-only guard enforced before any context injection |
 | `reaper.py` | T4 | Session log GC (`gc_by_filename_order`) | **Zero-stat contract**: only `os.listdir` + `os.remove`; no `os.stat`/`os.path.exists` |
@@ -190,8 +190,13 @@ All production modules live under `plugins/quench-dev-tasks/server/`.
 | `project_config.py` | T2/T3 | `quench_stack.yaml` loading, validation, migration | Single parse per session; cached after first load |
 | `observability_policy.py` | T4 | Verdict sink policy; log rotation policy | Append-only verdicts; policy-driven, not hard-coded |
 | `code_explorer.py` | T3 | AST symbol extraction for `dev_tasks_refine_spec` | Read-only; no side effects |
+| `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`) | Interactive ANSI formatting; non-AI operator gateway |
+| `changelog_writer.py` | T3 | Atomic append of completed task deliveries to `CHANGELOG.md` | Non-destructive header-preserving updates |
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement | Must respond in < 50ms; no network calls |
 | `hooks/context_injector.py` | T1 | PostToolUse context enrichment | Read-only; non-blocking |
+| `scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
+| `scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
+| `scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |
 | `adapters/` | T4 | Per-vendor HTTP adapter implementations | Each adapter: stateless, vendor-isolated |
 
 ### Call Constraint Summary

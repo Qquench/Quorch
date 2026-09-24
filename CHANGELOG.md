@@ -3,7 +3,14 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
----
+## [2026-09-24] 2026-09-24_v1.07_step01_architecture_doc_integrity.md
+
+- **Task 1.1**: 修复 docs/architecture.md 架构锚点失真与模块映射完整性 (Architecture Doc Anchor Integrity & Module Topology Sync)
+- **Task 1.2**: 消除根 AGENTS.md 与 templates/AGENTS.md 孪生源漂移风险 (Twin-Source AGENTS.md Invariants Synchronization)
+- **Task 1.3**: 项目官方定位术语规范化对齐（Enforcement-First 物理执法先行）(Terminology Alignment: Enforcement-First Dual-Model Governance)
+  - Upgraded project tagline to **"Enforcement-First Dual-Model Governance for AI Coding Agents"** (中译："AI 编程智能体的物理执法先行双模型治理引擎");
+  - Enforced dual-track subtitle: *"Physical enforcement where hooks are available; high-tension prompt discipline where they are not."* (有钩子处物理硬管控，无钩子处高张力提示词纪律);
+  - Aligned `README.md`, `README_zh.md`, `AGENTS.md`, and `docs/architecture.md`.
 
 ## [2026-09-24] 2026-09-24_ci_matrix_zero_stat_and_test_isolation_fix.md
 
