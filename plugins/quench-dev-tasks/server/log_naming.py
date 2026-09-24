@@ -228,7 +228,7 @@ def gc_by_filename_order(
                    os.path.isdir, os.path.getmtime, os.path.getsize
     Concurrency: idempotent against concurrent GC — FileNotFoundError
     is absorbed as a benign success. PermissionError (Windows handle lock,
-    cf. cross_platform_ci_anomalies.md Case 4) is caught and skipped.
+    cf. ci_incident_tracker_and_compatibility_guide.md Case 4) is caught and skipped.
 
     Never deletes the latest active file. Also unlinks associated rotation backups (.1.log).
     """
