@@ -3,6 +3,23 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-25] 2026-09-24_v1.08_step02_lease_heartbeat_and_dual_process_cas.md
+
+- **Task 2.1**: 隐式与显式租约心跳刷新及工作区沉浸防杀探针 (External Lease Heartbeat & Active Modifying Immersion Anti-Kill Probe)
+  - Implemented high-level `touch_lease_heartbeat` and `is_workspace_actively_modifying` APIs in `manifest_lease.py`;
+  - Injected immersion anti-kill probe into `reaper.py::probe_lease_health` to downgrade `STALE_SUSPECT` to `HEALTHY` when workspace files are actively modified.
+- **Task 2.2**: 锁内重读 CAS (Read-Under-Lock CAS) 与双进程并发加固 (Read-Under-Lock CAS & Dual-Process Hardening)
+  - Added `RetryableManifestError` and `ManifestConflictError` isolated from fatal `ManifestIntegrityError`;
+  - Implemented `mutate_manifest_under_lock` generic transaction helper with re-entrancy deadlock guard, fresh-fd disk read, and underlying CAS detection;
+  - Refactored `commit_lease`, `compare_and_swap`, `release_lease`, `touch_heartbeat`, and `register_proposal` through unified transaction helper.
+- **Task 2.3**: 租约心跳与防杀探针失败语义、绑定校验与全量回归加固 (Heartbeat Failure Semantics & Binding Hardening)
+  - Hardened `session_id ∧ holder_token ∧ generation` binding contract;
+  - Added traversal path silent filtering, fail-safe conservative alive on all stat failures, max_scan truncation, and cold-start parent directory mtime fallback.
+- **Task 2.4**: CAS 事务的异常安全、冲突语义与双进程测试确定性加固 (CAS Transaction Exception Safety & Deterministic Dual-Process Concurrency)
+  - Verified exception safety ensuring disk state and hash are completely untouched on mutator failure;
+  - Added `multiprocessing.Barrier` dual-process concurrent lease competition tests with strict single winner and zero dirty write assertions;
+  - Validated same-directory temporary file placement for cross-platform atomic replacement.
+
 ## [2026-09-25] 2026-09-24_v1.08_step01_probe_and_scope_reconciliation.md
 
 - **Task 1.1**: 客户端能力独立探针脚本与兼容性基线建立 (Client Capability Standalone Probe & Compatibility Baseline)

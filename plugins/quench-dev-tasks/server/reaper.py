@@ -26,6 +26,7 @@ try:
     )
     from .project_config import load_project_config
     from .state_machine import parse_task_file, transition_task, STATUS_CONFIRMED
+    from .manifest_lease import is_workspace_actively_modifying
 except (ImportError, ValueError):
     from manifest import (
         load_manifest,
@@ -37,6 +38,7 @@ except (ImportError, ValueError):
     )
     from project_config import load_project_config
     from state_machine import parse_task_file, transition_task, STATUS_CONFIRMED
+    from manifest_lease import is_workspace_actively_modifying
 
 
 class HealthVerdict(str, Enum):
@@ -259,14 +261,31 @@ def probe_lease_health(
     reasons: List[str] = []
 
     # 5. 判定矩阵严格遵循：STALE_SUSPECT ⟺ hb_stale ∧ (mtime_stale ∨ mtime_absent)
-    # 只要心跳或文件任意一维呈现新鲜活跃状态，即判定为 HEALTHY
+    # 【沉浸防杀前置条件】只要心跳或文件任意一维呈现新鲜活跃状态，即判定为 HEALTHY。
+    # 特别地，即便心跳静默超时 (hb_stale)，若工作区受管文件处于活跃修改状态（沉浸防杀探针命中），
+    # 则不触发 STALE_SUSPECT，降级判定为 HEALTHY。
+    # 【已知局限声明】
+    # 长时间纯计算/网络等待（>window_seconds）且不留白名单文件 mtime 时，hb_stale ∧ mtime_stale
+    # 两套机制同时失效，仍会触发 STALE_SUSPECT。此为设计已知局限。
     if hb_stale and (mtime_stale or mtime_absent):
-        verdict = HealthVerdict.STALE_SUSPECT
-        reasons.append(f"心跳静默超时 ({hb_silence:.1f}s > 阈值 {hb_thresh:.1f}s)")
-        if mtime_absent:
-            reasons.append(f"文件活跃度维度缺席降级 ({mtime_note})")
+        actively_modifying = False
+        if affected_files:
+            actively_modifying = is_workspace_actively_modifying(
+                ws, affected_files, window_seconds=int(mtime_thresh), now_ts=now_ts
+            )
+
+        if actively_modifying:
+            verdict = HealthVerdict.HEALTHY
+            reasons.append(
+                f"虽然心跳静默 ({hb_silence:.1f}s > 阈值 {hb_thresh:.1f}s)，但工作区受管文件处于活跃修改状态（沉浸防杀探针命中），降级判定为 HEALTHY"
+            )
         else:
-            reasons.append(f"受管文件修改超时 ({mtime_age:.1f}s > 阈值 {mtime_thresh:.1f}s)")
+            verdict = HealthVerdict.STALE_SUSPECT
+            reasons.append(f"心跳静默超时 ({hb_silence:.1f}s > 阈值 {hb_thresh:.1f}s)")
+            if mtime_absent:
+                reasons.append(f"文件活跃度维度缺席降级 ({mtime_note})")
+            else:
+                reasons.append(f"受管文件修改超时 ({mtime_age:.1f}s > 阈值 {mtime_thresh:.1f}s)")
     else:
         verdict = HealthVerdict.HEALTHY
         if not hb_stale:

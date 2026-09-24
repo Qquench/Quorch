@@ -12,12 +12,15 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple, TypeVar
 import filelock
+
+T = TypeVar("T")  # TypeVar 兼容 Python < 3.12，非 PEP 695 [T]
 
 try:
     from .observability_policy import MAX_RECORD_BYTES
@@ -39,6 +42,17 @@ class FencedTokenError(Exception):
 
 class ManifestIntegrityError(Exception):
     """清单物理文件损坏或校验不一致时抛出的 Fail-Closed 阻断异常。"""
+    pass
+
+
+class RetryableManifestError(Exception):
+    """可重试错误基类，与 ManifestIntegrityError（Fatal）严格隔离。"""
+    pass
+
+
+class ManifestConflictError(RetryableManifestError):
+    """CAS generation 不一致时抛出，调用方可捕获后有界重试。
+    ⚠️ 不继承 ManifestIntegrityError，防止 fatal 处理器误捕获。"""
     pass
 
 
@@ -257,6 +271,61 @@ def _resolve_namespaced_id(manifest: Manifest, task_id: str, md_path: Optional[s
     return task_id
 
 
+_lock_local = threading.local()
+
+
+def mutate_manifest_under_lock(
+    workspace_root: str,
+    mutator: Callable[[Manifest], Tuple[Manifest, T]],
+    *,
+    lock_timeout: float = 5.0,  # 取锁超时（非整体操作超时，仅控制获取物理锁等待上限；mutator 必须为轻量纯内存计算）
+) -> T:
+    """持锁 → 锁内 fresh-fd 重读 → mutator → 兜底 CAS → 原子覆写。
+    - mutator 必须为纯函数，禁止调用任何 manifest 取锁 API（违反 → RuntimeError，非死锁）；
+    - mutator 抛异常时：跳过 atomic_replace + 释放锁(finally) + 关闭 fd(finally)，原样重抛；
+    - helper 内部 fresh-fd 读时记录 generation，replace 前再断言未变（兜底 CAS）；
+    - 临时文件置于清单同目录（跨平台 os.replace 原子性）。
+    """
+    if getattr(_lock_local, "in_critical_section", False):
+        raise RuntimeError(
+            "Re-entrant manifest lock acquisition detected in mutator / mutator 中禁止调用取锁 API（重入死锁守护触发）"
+        )
+
+    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock = filelock.FileLock(lock_path, timeout=lock_timeout)
+
+    _lock_local.in_critical_section = True
+    try:
+        with lock:
+            initial_manifest = load_manifest(workspace_root)
+            initial_generations = {
+                tid: rec.generation for tid, rec in initial_manifest.records.items()
+            }
+
+            new_manifest, result = mutator(initial_manifest)
+
+            # 兜底 CAS 校验：在原子替换前重新检验磁盘代际是否被并发修改
+            manifest_path = os.path.join(workspace_root, MANIFEST_REL_PATH)
+            if os.path.exists(manifest_path):
+                current_disk = load_manifest(workspace_root)
+                current_generations = {
+                    tid: rec.generation for tid, rec in current_disk.records.items()
+                }
+                if current_generations != initial_generations:
+                    raise ManifestConflictError(
+                        f"Manifest generation on disk conflicted during mutation: "
+                        f"expected {initial_generations}, got {current_generations} / 清单代际在事务内发生冲突"
+                    )
+
+            if new_manifest is not initial_manifest or result is not False:
+                atomic_replace_manifest(workspace_root, new_manifest)
+
+            return result
+    finally:
+        _lock_local.in_critical_section = False
+
+
 def commit_lease(
     workspace_root: str,
     *,
@@ -274,12 +343,7 @@ def commit_lease(
         md_content = f.read()
     current_hash = compute_normalized_md_hash(md_content)
 
-    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    lock = filelock.FileLock(lock_path, timeout=5.0)
-
-    with lock:
-        manifest = load_manifest(workspace_root)
+    def _mutator(manifest: Manifest) -> Tuple[Manifest, int]:
         namespaced_id = _resolve_namespaced_id(manifest, task_id, resolved_md_path)
         existing = manifest.records.get(namespaced_id)
 
@@ -309,7 +373,8 @@ def commit_lease(
             new_generation = 1
 
         git_head_sha, git_index_mtime = _get_git_metadata(workspace_root)
-        record = TaskRecord(
+        new_manifest = Manifest(schema_version=manifest.schema_version, records=dict(manifest.records))
+        new_manifest.records[namespaced_id] = TaskRecord(
             task_id=namespaced_id,
             md_sha256=current_hash,
             generation=new_generation,
@@ -320,9 +385,9 @@ def commit_lease(
             git_index_mtime=git_index_mtime,
             released=False,
         )
-        manifest.records[namespaced_id] = record
-        atomic_replace_manifest(workspace_root, manifest)
-        return new_generation
+        return new_manifest, new_generation
+
+    return mutate_manifest_under_lock(workspace_root, _mutator)
 
 
 def compare_and_swap(
@@ -337,21 +402,17 @@ def compare_and_swap(
     if new_generation <= expected_generation:
         return False
 
-    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    lock = filelock.FileLock(lock_path, timeout=5.0)
-
-    with lock:
-        manifest = load_manifest(workspace_root)
+    def _mutator(manifest: Manifest) -> Tuple[Manifest, bool]:
         namespaced_id = _resolve_namespaced_id(manifest, task_id)
         record = manifest.records.get(namespaced_id)
         if record is None:
-            return False
+            return manifest, False
         if record.generation != expected_generation:
-            return False
+            return manifest, False
 
         git_head_sha, git_index_mtime = _get_git_metadata(workspace_root)
-        manifest.records[namespaced_id] = TaskRecord(
+        new_manifest = Manifest(schema_version=manifest.schema_version, records=dict(manifest.records))
+        new_manifest.records[namespaced_id] = TaskRecord(
             task_id=record.task_id,
             md_sha256=record.md_sha256,
             generation=new_generation,
@@ -362,8 +423,9 @@ def compare_and_swap(
             git_index_mtime=git_index_mtime,
             released=False,
         )
-        atomic_replace_manifest(workspace_root, manifest)
-        return True
+        return new_manifest, True
+
+    return mutate_manifest_under_lock(workspace_root, _mutator)
 
 
 def release_lease(
@@ -374,36 +436,34 @@ def release_lease(
     generation: int,
 ) -> bool:
     """释放租约：采用留痕墓碑（released=True），保留 generation，代际永不回退 (B5)。"""
-    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    lock = filelock.FileLock(lock_path, timeout=5.0)
-
-    with lock:
-        manifest = load_manifest(workspace_root)
+    def _mutator(manifest: Manifest) -> Tuple[Manifest, bool]:
         namespaced_id = _resolve_namespaced_id(manifest, task_id)
         record = manifest.records.get(namespaced_id)
         if record is None:
-            return False
+            return manifest, False
         if record.generation != generation:
-            return False
+            return manifest, False
         if record.holder_token != holder_token:
-            return False
+            return manifest, False
         if record.released:
-            return True
+            return manifest, True
 
-        manifest.records[namespaced_id] = TaskRecord(
+        git_head_sha, git_index_mtime = _get_git_metadata(workspace_root)
+        new_manifest = Manifest(schema_version=manifest.schema_version, records=dict(manifest.records))
+        new_manifest.records[namespaced_id] = TaskRecord(
             task_id=record.task_id,
             md_sha256=record.md_sha256,
             generation=record.generation,
             holder_token=record.holder_token,
             last_heartbeat_monotonic_ns=time.monotonic_ns(),
             last_heartbeat_wall_utc=datetime.now(timezone.utc).isoformat(),
-            git_head_sha=record.git_head_sha,
-            git_index_mtime=record.git_index_mtime,
+            git_head_sha=git_head_sha,
+            git_index_mtime=git_index_mtime,
             released=True,
         )
-        atomic_replace_manifest(workspace_root, manifest)
-        return True
+        return new_manifest, True
+
+    return mutate_manifest_under_lock(workspace_root, _mutator)
 
 
 def touch_heartbeat(
@@ -419,27 +479,23 @@ def touch_heartbeat(
     仅当 generation 与 holder_token 严格匹配活跃租约时刷新并返回 True；
     若代际失效或租约已释放，返回 False（fail-closed），防已回收的旧持有者误续命。
     """
-    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    lock = filelock.FileLock(lock_path, timeout=5.0)
-
-    with lock:
-        manifest = load_manifest(workspace_root)
+    def _mutator(manifest: Manifest) -> Tuple[Manifest, bool]:
         namespaced_id = _resolve_namespaced_id(manifest, task_id)
         record = manifest.records.get(namespaced_id)
         if record is None:
-            return False
+            return manifest, False
         if record.released:
-            return False
+            return manifest, False
         if record.generation != generation:
-            return False
+            return manifest, False
         if record.holder_token != holder_token:
-            return False
+            return manifest, False
 
         m_ns = now_monotonic_ns if now_monotonic_ns is not None else time.monotonic_ns()
         w_utc = now_wall_utc if now_wall_utc is not None else datetime.now(timezone.utc).isoformat()
 
-        manifest.records[namespaced_id] = TaskRecord(
+        new_manifest = Manifest(schema_version=manifest.schema_version, records=dict(manifest.records))
+        new_manifest.records[namespaced_id] = TaskRecord(
             task_id=record.task_id,
             md_sha256=record.md_sha256,
             generation=record.generation,
@@ -450,8 +506,9 @@ def touch_heartbeat(
             git_index_mtime=record.git_index_mtime,
             released=False,
         )
-        atomic_replace_manifest(workspace_root, manifest)
-        return True
+        return new_manifest, True
+
+    return mutate_manifest_under_lock(workspace_root, _mutator)
 
 
 class ReconcileClass(str, Enum):
@@ -488,12 +545,7 @@ def register_proposal(workspace_root: str, *, task_id: str, md_path: str) -> str
         content = f.read()
     current_hash = compute_normalized_md_hash(content)
 
-    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    lock = filelock.FileLock(lock_path, timeout=5.0)
-
-    with lock:
-        manifest = load_manifest(workspace_root)
+    def _mutator(manifest: Manifest) -> Tuple[Manifest, str]:
         namespaced_id = _resolve_namespaced_id(manifest, task_id, resolved_md_path)
         git_head_sha, git_index_mtime = _get_git_metadata(workspace_root)
 
@@ -502,7 +554,8 @@ def register_proposal(workspace_root: str, *, task_id: str, md_path: str) -> str
         holder = existing.holder_token if existing else ""
         released = existing.released if existing else False
 
-        manifest.records[namespaced_id] = TaskRecord(
+        new_manifest = Manifest(schema_version=manifest.schema_version, records=dict(manifest.records))
+        new_manifest.records[namespaced_id] = TaskRecord(
             task_id=namespaced_id,
             md_sha256=current_hash,
             generation=gen,
@@ -513,8 +566,9 @@ def register_proposal(workspace_root: str, *, task_id: str, md_path: str) -> str
             git_index_mtime=git_index_mtime,
             released=released,
         )
-        atomic_replace_manifest(workspace_root, manifest)
-        return current_hash
+        return new_manifest, current_hash
+
+    return mutate_manifest_under_lock(workspace_root, _mutator)
 
 
 def _get_git_tracked_files(workspace_root: str, target_dir: str) -> set[str]:

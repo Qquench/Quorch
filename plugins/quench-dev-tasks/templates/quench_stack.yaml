@@ -119,8 +119,27 @@ reviewer_engine:
   # Reasoning effort budget: "low" | "medium" | "high"
   reasoning_effort: "high"
 
-  # Network timeout in seconds / 单次请求超时时间（秒）
-  timeout_seconds: 60
+  # ==============================================================================
+  # 超时分层配置（Timeout Layer Configuration）
+  # 层间不变量：L1 ≤ L2_dynamic ≤ L3 < L4（宿主 MCP 传输超时）
+  # 当前 L4 = 宿主 IDE MCP 客户端传输超时（不在 quench 可控范围内）。
+  # 路径 A（当前有效，L4 未调大）：所有内部层压在 L4 以下；
+  # 路径 B（L4 调大后）：下方 soft/hard 可调至 360s/480s/600s，需同步调大 L4 ≥ 660s。
+  # ⚠️ 在 L4 未调大的前提下，将 soft/hard 设置为 8min/10min 是无效工程（死配置）。
+  # ==============================================================================
+
+  # L1 单跳传输超时（per-hop network timeout，非整体预算）
+  # 对旗舰推理模型 120s 更为合适；须满足 L1 × max_tool_hops ≤ soft_budget_cap_seconds
+  timeout_seconds: 120
+
+  # L2 软预算（动态公式：base + per_hop × hops，上限 cap）
+  # 当前路径 A：所有值必须 < L4（≈180s），留 10s 余量
+  soft_budget_base_seconds: 90      # 基础预算 base（秒）
+  soft_budget_per_hop_seconds: 20   # 每跳增量（秒），使 L1 × hops 不超 L2
+  soft_budget_cap_seconds: 170      # L2 软上限 cap（须 ≤ hard_ceiling_seconds）
+
+  # L3 硬天花板（整体最大允许时长，须 < L4）
+  hard_ceiling_seconds: 175         # 留 5s 余量给序列化/收尾
 
   # Max retry attempts on network error / 瞬态网络故障最大重试次数
   max_retries: 2
