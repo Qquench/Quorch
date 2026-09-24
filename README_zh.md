@@ -126,12 +126,42 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 | `dev_tasks_set_bypass`| 开启附带物理会话锁与过期倒计时的快速通道旁路 | 进行极轻量修补（如单点样式、错别字） |
 | `dev_tasks_archive` | 归档已闭环的任务单并自动追加记录至 `CHANGELOG.md` | 当前任务单全量完成闭环后 |
 
+## 🧑‍💻 3 分钟首个任务实战演练
+
+### 两种协作范式对比
+
+| | 范式 A — 零 API 纯 IDE 切会话（**推荐入门**） | 范式 B — API 驱动全自动代理 |
+|---|---|---|
+| **配置门槛** | 无需第三方 API Key | 在 `quench_stack.yaml` 中配置 `DeepSeek` / `OpenAI` / `Ollama` 端点 |
+| **审查者调用** | 手动切换 IDE 会话至旗舰模型，粘贴交接卡片 | `ReviewerClient` 在后台自动调用 API |
+| **适用场景** | 快速上手、阶段性架构审查 | 全流程自动化、批量任务规划 |
+
+### 端到端 5 步极简剧本（范式 A — IDE 模式）
+
+**Step 1 — 提出意图**（在 IDE 对话窗口向 Runner 模型输入）：
+> *"我想给配置模块新增一个路径白名单校验功能"*
+
+**Step 2 — 任务草拟**（Reviewer 或 Runner 调用 `dev_tasks_propose`）：
+> 在 `docs/dev_tasks/` 下生成包含六大字段的任务单，状态为 `📝 草案` 或 `⬜ 待确认`。
+
+**Step 3 — 人工确认**：
+> 审查通过后调用 `dev_tasks_confirm(action="confirm")` → 状态变更为 `✅ 已确认`。
+
+**Step 4 — 领单施工**（Runner 执行）：
+> Runner 调用 `dev_tasks_checkout` → 状态变更为 `🔨 执行中`。  
+> Runner 严格按【涉及文件】白名单与分步指引顺序施工。
+
+**Step 5 — DoD 验收与闭环**：
+> 执行任务单中的 DoD 验证命令，100% 通过后调用 `dev_tasks_complete` → `✔️ 已完成` → 自动归档至 `CHANGELOG.md`。
+
+---
+
 ## 💡 项目起源与作者手记 (Author's Note)
 
 > **作者说明与诚挚提示**  
 > 本项目源于我个人在 **Windows 环境下使用 Google Antigravity IDE** 进行日常开发时的实际工程痛点与治理需求。其底层核心状态机、治理引擎与 Antigravity 拦截链路已在本地经过充分实战跑通与验证。
 > 
-> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然已编写了全量自动化单元测试（230 项单测覆盖），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
+> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然已编写了全量自动化单元测试（308+ 项单测覆盖），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
 > 
 > 诚挚欢迎广大社区开发者提出 Issue、反馈实际使用体验或提交 PR，共同完善和加固各客户端适配层！
 
@@ -140,10 +170,11 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 ## 📖 相关文档
 
 - ⚙️ [docs/configuration.md](docs/configuration.md)：`quench_stack.yaml` 完整配置说明与字段手册 (English as SSOT)。
+- 🏛️ [docs/architecture.md](docs/architecture.md)：高层系统架构说明书（四层拓扑、8 大不变式、模块映射表）。
 - 🌐 [CHANGELOG.md](CHANGELOG.md)：版本更新日志与历史架构演进记录。
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md)：开源贡献指南与本地测试规范。
 - ❓ [docs/FAQ.md](docs/FAQ.md)：常见环境问题、编码乱码、企业代理与 Hook 排查手册。
-- 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md)：技术架构与规范设计说明书。
+- 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md)：FastMCP 工具与协议规格说明书（工具参数、字段 Schema、返回值类型）。
 - 📜 [LICENSE](LICENSE)：Mozilla Public License 2.0 (MPL-2.0)。
 
 ---

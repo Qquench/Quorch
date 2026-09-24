@@ -8,7 +8,7 @@ project_name: "quench-dev-orchestrator"
 dev_tasks_dir: "docs/dev_tasks"
 archive_dir: "docs/dev_tasks/archive"
 changelog_path: "CHANGELOG.md"
-architecture_doc: "dev_tasks_mcp_specification.md"
+architecture_doc: "docs/architecture.md"
 
 test_dir: "plugins/quench-dev-tasks/server/tests"
 test_runner: "pytest plugins/quench-dev-tasks/server/tests"

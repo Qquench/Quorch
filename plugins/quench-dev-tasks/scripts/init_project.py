@@ -428,6 +428,61 @@ def print_diagnostic_report(diag: dict, project_root: str) -> None:
     print("=" * 60)
 
 
+def generate_agents_md(
+    project_root: str,
+    project_name: str,
+    force: bool = False,
+) -> None:
+    """在目标项目根目录生成 AGENTS.md 跨 IDE 引导卡。
+
+    从 templates/AGENTS.md 读取通用模板，替换 {{PROJECT_NAME}} 占位符后写入目标根目录。
+    遵循幂等性：若已存在且未指定 force 则跳过。
+
+    Args:
+        project_root: 目标项目根目录路径（已 abspath 处理）。
+        project_name: 项目名称，用于替换模板中的 {{PROJECT_NAME}} 占位符。
+        force: 若为 True，强制覆盖已存在的 AGENTS.md。
+    """
+    root = os.path.abspath(project_root)
+    target_path = os.path.join(root, "AGENTS.md")
+
+    if os.path.isfile(target_path) and not force:
+        print("ℹ️ AGENTS.md 已存在，跳过覆盖。如需更新请配合 --force 覆盖。")
+        return
+
+    if os.path.isfile(target_path) and force:
+        print("⚠️ 检测到 --force 参数，正在覆盖已有 AGENTS.md...")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_dir = os.path.dirname(script_dir)
+    template_path = os.path.join(plugin_dir, "templates", "AGENTS.md")
+
+    if not os.path.isfile(template_path):
+        print(
+            f"❌ 错误: AGENTS.md 模板文件缺失: {template_path}\n"
+            f"请检查 quench-dev-tasks Plugin 安装完整性。",
+            file=sys.stderr,
+        )
+        return
+
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 替换项目名称占位符
+    content = content.replace("{{PROJECT_NAME}}", project_name)
+
+    with open(target_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    line_count = content.count("\n") + 1
+    print(f"✅ 已生成 AGENTS.md（{line_count} 行，跨 IDE 引导卡）")
+    if line_count > 120:
+        print(
+            f"  ⚠️ 警告: AGENTS.md 行数 ({line_count}) 超过 120 行预算，"
+            "请检查模板是否引入了多余内容。"
+        )
+
+
 def init_project(
     project_root: str,
     project_name: str | None = None,
@@ -597,6 +652,9 @@ def init_project(
     # 9. 安装 Git Pre-commit Hook (若指定 install_hook)
     if install_hook:
         install_git_pre_commit_hook(root, force=force)
+
+    # 10. 生成 AGENTS.md 跨 IDE 引导卡
+    generate_agents_md(root, effective_name, force=force)
 
     if ide == "cursor":
         print(f"\n🎉 项目 [{effective_name}] Cursor 接入初始化完成！随时可在 Cursor 中连接 MCP 并开始开发。")
