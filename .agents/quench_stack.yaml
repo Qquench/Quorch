@@ -38,9 +38,9 @@ governance_scope:
 schema_version: "1.0"
 
 reviewer_engine:
-  provider: "none"
-  model: "default"
-  api_key_env: null
+  provider: "deepseek"
+  model: "deepseek-chat"
+  api_key_env: "DEEPSEEK_API_KEY_Quench"
   thinking: true
   reasoning_effort: "high"
   timeout_seconds: 180
