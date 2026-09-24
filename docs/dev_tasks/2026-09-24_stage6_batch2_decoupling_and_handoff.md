@@ -1,0 +1,198 @@
+# 2026-09-24_stage6_batch2_decoupling_and_handoff Development Tasks / 开发任务单
+
+> **Execution Guidelines for AI Models / 执行模型须知**
+> - Strictly follow each task's [Step-by-Step Instructions / 分步改造指引] in sequential order
+> - Do not modify files outside the declared task scope / 不得修改任务未涉及的文件
+> - Preserve all existing comments and docstrings unless explicitly instructed / 保留所有现有注释和文档字符串
+> - **Mandatory Unit Test Assertions / 改逻辑必加单测断言**：Append assertions in the test directory to prevent regressions
+> - Upon starting a task, update its status to `🔨 执行中`; upon completion, update to `✔️ 已完成`
+> - **Environment Prerequisite / 环境准备**：运行前请确保虚拟环境已激活（如 `venv\Scripts\activate` 或 `source venv/bin/activate`），统一通过跨平台命令 `python -m pytest ...` 触发验证。
+> - **Dependency & Ordering / 依赖与顺序**：任务 2.1 与 2.3 均涉及 `project_config.py`，必须严格串行（2.1 基础配置与密钥校验 -> 2.3 runner_profile 扩展）；任务 2.2 新增工具致使工具数从 11 增至 12，在 2.2 完成后需将事实同步至 `docs/architecture.md`。
+
+- **Created Date / 创建日期**：2026-09-24
+
+---
+
+## Task List & Status / 任务清单与状态
+
+### 任务 2.1 ✅ 已确认 — Reviewer 引擎配置厂商彻底解耦与明文密钥防御
+
+#### 【涉及文件】
+```
+[MODIFY] plugins/quench-dev-tasks/server/project_config.py
+[MODIFY] .agents/quench_stack.yaml
+[NEW] .agents/quench_stack.sample.yaml
+[MODIFY] .gitignore
+```
+
+#### 【缺陷根因与修改目标】
+```
+【根因分析】
+1. 当前项目检入的 .agents/quench_stack.yaml 默认硬编码了 provider: "deepseek"，违反了核心不变量 INV-5（厂商中立性）；新克隆项目的环境在没有 DeepSeek API Key 时会引发混淆与不可用；
+2. project_config.py 缺乏对明文密钥误填入配置文件的防御性校验（如用户误将 sk-... 密钥直接写在 api_key_env 或 base_url 中，导致密钥泄漏进版本库）；
+3. 缺乏标准的 .agents/quench_stack.sample.yaml 样例配置引导用户；
+4. 用户本地覆盖配置 quench_stack.local.yaml 尚未在 .gitignore 中物理忽略，存在意外提交风险。
+
+【修改目标】
+1. 将 .agents/quench_stack.yaml 的默认 provider 设为 'none'，确立零配置安全降级；
+2. 新建 .agents/quench_stack.sample.yaml 作为厂商配置模板；
+3. 在 project_config.py 中添加 _looks_like_plaintext_secret() 与 _reject_inline_credentials() 静态防御校验，仅限定扫描凭据承载字段（api_key_env、base_url、headers、api_key，排除 model、provider 等非凭据字段以防误伤）；当发现明文密钥模式时抛出 ConfigError 阻断异常；
+4. 支持 .agents/quench_stack.local.yaml 私有覆盖机制，并在 .gitignore 中添加该项。
+```
+
+#### 【目标签名与类型契约】
+```
+def _looks_like_plaintext_secret(val: str) -> bool:
+    # 检测是否为明文 API 密钥（如 sk- 开头或高熵密钥）而非合法环境变量名
+
+def _reject_inline_credentials(url: str) -> None:
+    # 校验 URL 中是否含有 user:pass@ 明文鉴权串，若存在抛出 ConfigError
+```
+
+#### 【分步改造指引】
+1. 在 plugins/quench-dev-tasks/server/project_config.py 中实现密钥与凭据探测防御函数 _looks_like_plaintext_secret 与 _reject_inline_credentials，明确限定校验字段白名单；
+2. 在配置加载解析流程中注入该静态安全校验；
+3. 实现 quench_stack.local.yaml 可选合并机制；
+4. 在 .gitignore 中添加 `.agents/quench_stack.local.yaml` 与 `*.local.yaml`；
+5. 更新 .agents/quench_stack.yaml 默认配置，将 provider 设为 'none'；
+6. 新增 .agents/quench_stack.sample.yaml 提供常用厂商模板；
+7. 编写/更新针对中立性与密钥防御的单测并运行验证。
+
+#### 【防御与边缘校验】
+- 凭据扫描必须严格限定在 api_key_env、base_url、headers 字段，严禁扫描 model、provider 等正常包含小写/连字符的模型名字段，防止误伤（如 `deepseek-flash`、`gpt-4o`）；
+- 本地私有覆盖配置 quench_stack.local.yaml 缺失时不影响默认配置加载（平滑向后兼容）；
+- 厂商中立性扫描 CI 门禁（test_no_vendor_literals_in_core.py）必须顺利通过。
+
+#### 【DoD 验证命令】
+```bash
+python -m pytest plugins/quench-dev-tasks/server/tests/test_project_config.py -q
+python -m pytest plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py -q
+```
+
+---
+
+### 任务 2.2 ✅ 已确认 — 交接卡片单一生成源抽取与 dev_tasks_export_handoff_card 工具开放
+
+#### 【涉及文件】
+```
+[NEW] plugins/quench-dev-tasks/server/handoff_card.py
+[MODIFY] plugins/quench-dev-tasks/server/server.py
+[MODIFY] docs/architecture.md
+[MODIFY] plugins/quench-dev-tasks/server/tests/test_server_tools.py
+[NEW] plugins/quench-dev-tasks/server/tests/test_handoff_card.py
+```
+
+#### 【缺陷根因与修改目标】
+```
+【根因分析】
+1. 当前降级交接卡片（Handoff Card）的渲染逻辑内嵌在 server.py 的 legacy_card_markdown 局部代码中，未能抽取为纯函数，无法在返工（rework）、升级（escalate）或外部查询中复用；
+2. 缺乏暴露给模型的原生 FastMCP 工具来主动导出交接卡片，导致非 API 模式（范式 A）下人工转交摩擦力大；
+3. 卡片格式不统一，未遵循 GitHub GFM > [!IMPORTANT] 规范与可选折叠细节；
+4. 新增工具后，MCP 工具总数由 11 增至 12，需同步更新 docs/architecture.md 架构文档与 test_server_tools.py 工具集断言。
+
+【修改目标】
+1. 抽取独立的 handoff_card.py，确立单一签名纯函数：
+   render_handoff_card(task_id: str, task_file: str, reason: str, task_meta: Optional[Dict[str, Any]] = None, include_context: bool = False) -> str；
+2. 新增 FastMCP 工具 dev_tasks_export_handoff_card(workspace_root, task_id, include_context=False)；
+3. 当 include_context=True 时，将缺陷根因、涉及文件、类型契约及 DoD 命令以 <details> 方式折叠注入，兼顾极简复制与完整上下文自包含；
+4. 重构 server.py 中的内嵌卡片生成逻辑，统一接入该纯函数；
+5. 同步将 docs/architecture.md 与 test_server_tools.py 中的工具数量断言更新为 12。
+```
+
+#### 【目标签名与类型契约】
+```
+def render_handoff_card(
+    task_id: str,
+    task_file: str,
+    reason: str,
+    task_meta: Optional[Dict[str, Any]] = None,
+    include_context: bool = False,
+) -> str:
+    # 返回格式化 GFM Markdown 卡片文本
+
+@mcp.tool()
+def dev_tasks_export_handoff_card(
+    workspace_root: str,
+    task_id: str,
+    include_context: bool = False,
+) -> Dict[str, Any]:
+```
+
+#### 【分步改造指引】
+1. 新建 plugins/quench-dev-tasks/server/handoff_card.py，实现统一签名的 render_handoff_card 纯函数；
+2. 在 server.py 中注册 dev_tasks_export_handoff_card 工具并更新内部工具列表与 schema 说明；
+3. 重构 server.py 现有降级卡片生成逻辑，统一调用 render_handoff_card；
+4. 更新 docs/architecture.md §2 与 §5 的工具计数（11 -> 12）；
+5. 编写 test_handoff_card.py，断言卡片格式、GFM 警告框标记与折叠上下文正确性；更新 test_server_tools.py 断言工具列表与总数；
+6. 执行单测确认无回归。
+
+#### 【防御与边缘校验】
+- 当 task_id 不存在时，工具应优雅返回结构化错误信息，不抛未捕获异常；
+- 默认 include_context=False 保持卡片轻量，避免在会话中过度消耗 Token；
+- 折叠上下文时仅注入任务单规范字段（根因、文件、契约、DoD），严禁泄漏系统环境变量或未过滤私有配置；
+- 新增工具不得使用 print() 输出任何内容（维持 INV-4 stdio 通道纯洁性）。
+
+#### 【DoD 验证命令】
+```bash
+python -m pytest plugins/quench-dev-tasks/server/tests/test_handoff_card.py -q
+python -m pytest plugins/quench-dev-tasks/server/tests/test_server_tools.py -q
+```
+
+---
+
+### 任务 2.3 ✅ 已确认 — 同模型自我验证软预警机制与审查透明度增强
+
+#### 【涉及文件】
+```
+[MODIFY] plugins/quench-dev-tasks/server/consultation.py
+[MODIFY] plugins/quench-dev-tasks/server/project_config.py
+[NEW] plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py
+```
+
+#### 【缺陷根因与修改目标】
+```
+【根因分析】
+在双模型治理架构中，若执行者模型（Runner）与审查者模型（Reviewer）配置为同一厂商/同一模型权重，易产生同质化偏见（S1 风险：自我验证陷阱）。目前系统缺乏显式的身份感知与比对警示机制。此外，当 provider 为 'none'（零配置降级模式）时，比对逻辑需具备明确的 degraded 语义，不能静默放行或出现死逻辑。
+
+【修改目标】
+1. 在 quench_stack.yaml 中支持可选的 runner_profile: {provider: ..., model: ...} 声明；
+2. 在 dev_reviewer_consult 的响应字典中，新增显式字段 reviewer_identity: {provider, model, thinking, status}；
+3. 当 reviewer.provider 为 'none' 时，reviewer_identity.status 标为 'degraded'，且 self_verification_warning 明确提示 'reviewer_not_configured' 而非空转；
+4. 当检测到 runner_profile 与 reviewer_profile 完全重合时，注入非阻塞式的 self_verification_warning 提示字段与日志告警；
+5. 保持协议兼容性与执行非阻塞性，赋予用户与审查者透明审计能力。
+```
+
+#### 【目标签名与类型契约】
+```
+@dataclass
+class RunnerProfile:
+    provider: str = 'unknown'
+    model: str = 'unknown'
+
+# Consultation 返回结果字典规范扩展：
+# "reviewer_identity": {"provider": str, "model": str, "thinking": bool, "status": str}
+# "self_verification_warning": Optional[str]
+```
+
+#### 【分步改造指引】
+1. 在 project_config.py 中扩展 runner_profile 配置模型；
+2. 在 consultation.py 中添加同模型核对逻辑与 degraded 分支判定；
+3. 在 consult 响应字典中注入 reviewer_identity 与 self_verification_warning；
+4. 编写自动化单测断言：同模型时告警激活，不同模型时正常放行，provider:none 时指示 degraded；
+5. 运行单测验证全流程。
+
+#### 【防御与边缘校验】
+- runner_profile 为完全可选配置，未配置时系统平滑降级为 unknown，不报错；
+- 预警为 Advisory/Soft Warning 级别，绝不硬性阻断咨询流，避免影响正常开发流程；
+- 确保返回结构向后兼容原有消费端代码；
+- 支持模型别名等价映射（如 deepseek 与 deepseek-chat 的默认归一）。
+
+#### 【DoD 验证命令】
+```bash
+python -m pytest plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py -q
+python -m pytest plugins/quench-dev-tasks/server/tests -q
+```
+
+---
+
+

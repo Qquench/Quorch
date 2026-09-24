@@ -1,0 +1,162 @@
+# 2026-09-24_stage6_batch1_architecture_doc_integrity Development Tasks / 开发任务单
+
+> **Execution Guidelines for AI Models / 执行模型须知**
+> - Strictly follow each task's [Step-by-Step Instructions / 分步改造指引] in sequential order
+> - Do not modify files outside the declared task scope / 不得修改任务未涉及的文件
+> - Preserve all existing comments and docstrings unless explicitly instructed / 保留所有现有注释和文档字符串
+> - **Mandatory Unit Test Assertions / 改逻辑必加单测断言**：Append assertions in the test directory to prevent regressions
+> - Upon starting a task, update its status to `🔨 执行中`; upon completion, update to `✔️ 已完成`
+> - **Environment Prerequisite / 环境准备**：运行前请确保虚拟环境已激活（如 `venv\Scripts\activate` 或 `source venv/bin/activate`），统一通过跨平台命令 `python -m pytest ...` 触发验证。
+> - **Dependency & Ordering / 依赖与顺序**：任务 1.1 的架构文档更新与批次 2 任务 2.2 的新工具数量（11→12）存在事实关联，建议执行顺序为 2.2 -> 1.1 -> 1.2 -> 1.3。
+
+- **Created Date / 创建日期**：2026-09-24
+
+---
+
+## Task List & Status / 任务清单与状态
+
+### 任务 1.1 ✅ 已确认 — 修复 docs/architecture.md 架构锚点失真与模块映射完整性
+
+#### 【涉及文件】
+```
+[MODIFY] docs/architecture.md
+[NEW] plugins/quench-dev-tasks/server/tests/test_architecture_doc_anchor_integrity.py
+```
+
+#### 【缺陷根因与修改目标】
+```
+【根因分析】
+1. docs/architecture.md §4 核心不变量表格中，INV-4 (Stdio channel purity) 的测试文件锚点错误地指向 test_no_vendor_literals_in_core.py（与 INV-5 重复），属复制粘贴引发的虚假锚点（Anchor Forgery）。实际上 INV-4 是通过 CI grep 门禁与 test_anti_roleplay_discipline_contract.py 中的通道纯洁性约束进行治理；
+2. §5 模块映射节标题宣称 'All production modules live under plugins/quench-dev-tasks/server/'，但其下表格包含 hooks/file_scope_guard.py 与 hooks/context_injector.py，存在事实性表述矛盾；
+3. 拓扑图 Tier 1 列出的 rules_exporter.py、git_pre_commit_guard.py 以及核心并发锁 manifest_lease.py、draft_lint、dod_guard 未完整体现在 §5 映射表中，造成拓扑信息熵衰减。
+
+【修改目标】
+1. 修正 INV-4 锚点，准确反映其实施与门禁机制（如 CI grep gate 及对应测试断言）；
+2. 修正 §5 标题与路径基准，明确区分 server/、hooks/、adapters/ 及 scripts/ 各模块的物理归属；
+3. 补全缺失模块映射（manifest_lease.py、rules_exporter.py、git_pre_commit_guard.py 等）；
+4. 新增 test_architecture_doc_anchor_integrity.py，建立语义锚点与文件存在性双重校验单测，自动化断言 docs/architecture.md 中引用的测试文件与核心模块真实物理存在，根除虚假锚点与悬空引用。
+```
+
+#### 【目标签名与类型契约】
+```
+def test_architecture_inv_table_anchors_exist() -> None:
+    # 自动化解析 docs/architecture.md 表格，断言所有引用的测试文件与门禁脚本物理存在
+
+def test_architecture_module_mapping_files_exist() -> None:
+    # 依据基路径解析表，断言 §5 表格中所列出的源码文件真实存在于项目中
+```
+
+#### 【分步改造指引】
+1. 审查 docs/architecture.md §4 表格，将 INV-4 的 Test File 锚点修正为实际的验证测试或 CI 门禁脚本；
+2. 修正 §5 章节标题，消除 'All under server/' 的绝对化矛盾，并在模块清单中补全 hooks/、manifest_lease.py、rules_exporter.py、git_pre_commit_guard.py；
+3. 在 plugins/quench-dev-tasks/server/tests/ 下新增 test_architecture_doc_anchor_integrity.py；
+4. 实现基路径解析映射（server/ -> plugins/quench-dev-tasks/server/, hooks/ -> plugins/quench-dev-tasks/hooks/, scripts/ -> scripts/），并断言所有引用的源码模块与测试文件物理存在；
+5. 运行 pytest 验证单测 100% 通过。
+
+#### 【防御与边缘校验】
+- 解析 docs/architecture.md 时需使用稳健正则切分 Markdown 表格，容忍表格行首尾空格与格式微调；
+- 检查路径时需相对于工作区根目录解析，并在跨平台 Windows/Linux 路径分隔符下保持一致；
+- 保持 Thin View 设计原则，新增单测不引入沉重的外部 Markdown 解析依赖。
+
+#### 【DoD 验证命令】
+```bash
+python -m pytest plugins/quench-dev-tasks/server/tests/test_architecture_doc_anchor_integrity.py -q
+python -m pytest plugins/quench-dev-tasks/server/tests -q
+```
+
+---
+
+### 任务 1.2 ✅ 已确认 — 消除根 AGENTS.md 与 templates/AGENTS.md 孪生源漂移风险
+
+#### 【涉及文件】
+```
+[MODIFY] AGENTS.md
+[MODIFY] plugins/quench-dev-tasks/templates/AGENTS.md
+[NEW] plugins/quench-dev-tasks/server/tests/test_agents_md_sync.py
+```
+
+#### 【缺陷根因与修改目标】
+```
+【根因分析】
+根目录 AGENTS.md 与 templates/AGENTS.md 在核心规范（§1 启动协议、§2 八大不变量、§5 禁止红线）存在约 50 行的高度重叠内容，形成了双源维护（Twin-Source Duplication）。后续任何对核心不变量或启动流程的调整，若仅修改其中之一，将造成模板与根入口卡片语义分叉。
+注意：§3 SSOT 指针表与 §4 优先级层级在根文件（指向本仓库真实开发路径）与模板文件（指向消费者项目通用路径）中具有预期的语境差异，不可强行要求逐字等价。
+
+【修改目标】
+1. 在根 AGENTS.md 与 templates/AGENTS.md 中对真正共享的核心段落（§1 启动协议、§2 八大不变量表、§5 禁止红线列表）分别显式标记哨兵注释 <!-- QUENCH-CORE-INVARIANTS:BEGIN --> 与 <!-- QUENCH-CORE-INVARIANTS:END -->，显式排除存在定制差异的 §3/§4；
+2. 编写自动化校验单测 test_agents_md_sync.py，在 CI 门禁中断言两者受保护核心段落内容严格一致（将模板中的 {{PROJECT_NAME}} 替换为当前工程名 'quorch' 后进行逐行断言）；
+3. 确保两者总行数均严格限制在 120 行安全预算之内。
+```
+
+#### 【目标签名与类型契约】
+```
+def test_agents_md_core_block_byte_sync() -> None:
+    # 提取两文件核心哨兵段落，排除项目名变量后断言内容逐字等价
+
+def test_agents_md_line_budget_strict() -> None:
+    # 断言根文件与模板文件均 <= 120 行
+```
+
+#### 【分步改造指引】
+1. 在根目录 AGENTS.md 与 templates/AGENTS.md 中对公共不可变段落（§1、§2、§5）添加哨兵标记；
+2. 创建 plugins/quench-dev-tasks/server/tests/test_agents_md_sync.py；
+3. 实现测试用例：提取两文件的哨兵块内容，将模板中的 {{PROJECT_NAME}} 统一替换为 'quorch'，断言文本一致；
+4. 断言两个文件的有效行数均 <= 120 行；
+5. 运行单测确认同步门禁通过。
+
+#### 【防御与边缘校验】
+- 换行符统一使用 .splitlines() 处理，防御 Windows CRLF 与 Linux LF 差异导致的假阴性断言失败；
+- 当未检测到哨兵标记时，测试必须显式 fail，防止因误删注释而绕过一致性门禁；
+- 根 AGENTS.md 行数必须控制在 120 行安全预算内。
+
+#### 【DoD 验证命令】
+```bash
+python -m pytest plugins/quench-dev-tasks/server/tests/test_agents_md_sync.py -q
+python -m pytest plugins/quench-dev-tasks/server/tests/test_agents_md_template.py -q
+```
+
+---
+
+### 任务 1.3 ✅ 已确认 — 项目官方定位术语规范化对齐（Enforcement-First 物理执法先行）
+
+#### 【涉及文件】
+```
+[MODIFY] README.md
+[MODIFY] README_zh.md
+[MODIFY] CHANGELOG.md
+```
+
+#### 【缺陷根因与修改目标】
+```
+【根因分析】
+当前 README 及 README_zh 使用的标语 'Dual-Model Orchestration & Task Governance Suite for AI-Augmented IDEs' 偏向传统项目管理与流程编排（口头契约/软约束），未能准确体现 Quench 最核心的竞争壁垒——物理执法硬网关（PreToolUse 拦截、文件锁、CAS、Git 门禁与代码防篡改）。同时 'for AI-Augmented IDEs' 限制了跨平台与 CLI Agent 的定位。
+
+【修改目标】
+1. 采纳 Reviewer 评定结果，将官方主标语升级为：'Enforcement-First Dual-Model Governance for AI Coding Agents'（中译：'AI 编程智能体的物理执法先行双模型治理引擎'）；
+2. 增加副标语强化双轨机制：'Physical enforcement where hooks are available; high-tension prompt discipline where they are not.'（有钩子处物理硬管控，无钩子处高张力提示词纪律）；
+3. 同步更新 README.md、README_zh.md 及 CHANGELOG.md，并在全仓排查确保术语无残留漂移。
+```
+
+#### 【目标签名与类型契约】
+```
+None (纯文档与自述文件对齐，须保持中英双语结构严格对称)
+```
+
+#### 【分步改造指引】
+1. 修改 README.md 顶层标题与项目描述，替换为统一的 Enforcement-First 标语与副标语；
+2. 修改 README_zh.md 对应段落，镜像中文术语表达；
+3. 更新 CHANGELOG.md 记录本轮术语与文档架构重定位演进；
+4. 运行全量测试验证全局无破坏。
+
+#### 【防御与边缘校验】
+- README 与 README_zh 必须保持段落、链接与章节标题严格镜像；
+- 保留原有的 3-Minute Interactive Walkthrough 及核心工具表不受影响；
+- 检查 Markdown 链接有效性，避免断链。
+
+#### 【DoD 验证命令】
+```bash
+python -m pytest plugins/quench-dev-tasks/server/tests -q
+```
+
+---
+
+

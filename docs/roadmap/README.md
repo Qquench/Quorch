@@ -14,6 +14,7 @@
 | Milestone | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
 | **v1.06** | 📋 **[v1.06_microkernel_adaptive_observability_and_governance_interlock.md](./v1.06_microkernel_adaptive_observability_and_governance_interlock.md)** | **Microkernel Elevation: Adaptive Observability, Smart Conditional Reaper & Task Directory Two-Way Interlock** | Dynamic stream policy & verdict snapshot, Fencing Token CAS task lease reaper, and physical whitelist + manifest authority two-way interlock | 🔨 **Active Planning** |
+| **Prospective** | 📋 **[2026-09-24_reverse_topology_and_external_runner_roadmap.md](./2026-09-24_reverse_topology_and_external_runner_roadmap.md)** | **Reverse-Topology & External-Runner Governance: Asymmetric Dual-Host Architecture** | Hook-free whitelist sinking (B1), lease heartbeat (B3), dual-process CAS lock (B4), capability tokens & verdict provenance (B7) | 💡 **Planning / Red-Team Review** |
 
 ---
 
