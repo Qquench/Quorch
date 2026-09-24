@@ -5,6 +5,20 @@ Unlike real-time specification documents (which reflect only the active design),
 
 ---
 
+## [2026-09-24] 2026-09-23_v1.06_step02_smart_reaper_and_lease_governance.md
+
+- **Task 2.1**: 心跳续约与 Fencing Token 租约校验注入及清单 Fail-Closed 硬化 (Heartbeat Renewal, Fencing Token Lease Verification & Fail-Closed Manifest)
+- **Task 2.2**: 智能回收器核心：多维健康探针与配置扩展 (Smart Reaper Multi-Dimensional Health Probe & Policy)
+- **Task 2.3**: CAS 幂等回收工具 `dev_tasks_reclaim` 与跨文件锁序仲裁闭环 (CAS Idempotent Reclaim, Cross-File Lock Order & State Machine Gate)
+
+## [2026-09-24] 2026-09-23_v1.06_step01_observability_and_manifest.md
+
+- **Task 1.1**: 引入行聚合落盘 Sink，修复思考流单字分行破碎与测试保真度缺口 (CoalescingTextSink & Realistic Chunk Mock)
+- **Task 1.2**: 声明 MCP 上下文并重构自适应心跳为能力分发 + FILE 常驻兜底 (AdaptiveHeartbeatSink Multi-Channel Dispatch & Last-Resort FILE)
+- **Task 1.3**: 拓扑自适应观测分流：ObservabilityPolicy 与最终裁决快照通道 (Adaptive Observability & VerdictAuditSink)
+- **Task 1.4**: Fencing Token 租约底座与 manifest.json 权威清单 (Fencing Token Lease & Manifest SSOT)
+- **Task 1.5**: Reviewer 日志命名原子分配器（YYYYMMDD_NNN_slug 格式、O_EXCL 无状态探测、溢出硬失败、零 stat 字典序 GC）
+
 ## [2026-09-24] Consultation Context Guard & Declarative Budget Relaxation (议题一)
 
 - **Task 1.1**: 咨询上下文预算契约同步与声明式配置域校验门 (Context Budget Relaxation, Line Range Syntax & Declarative Clamping)
