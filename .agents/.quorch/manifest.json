@@ -66,6 +66,17 @@
       "git_head_sha": "929544e702b8ecd8ea98b470324b620119845047",
       "git_index_mtime": 1790220553.1063073,
       "released": true
+    },
+    "2026-09-24_v1.06_step04_manifest_bounds_and_compaction_contract::4.1": {
+      "task_id": "2026-09-24_v1.06_step04_manifest_bounds_and_compaction_contract::4.1",
+      "md_sha256": "cc3154c07dcaaa794e92b0a5a1597f0fed2e1166a1149139ef79c9d89041d2fd",
+      "generation": 1,
+      "holder_token": "token_1790227944523_4220",
+      "last_heartbeat_monotonic_ns": 451063125000000,
+      "last_heartbeat_wall_utc": "2026-09-24T05:34:45.877153+00:00",
+      "git_head_sha": "79486ae28ca23f233b8b418dfa1b5c994c665492",
+      "git_index_mtime": 1790226954.8873613,
+      "released": true
     }
   }
 }

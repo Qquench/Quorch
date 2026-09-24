@@ -5,6 +5,16 @@ Unlike real-time specification documents (which reflect only the active design),
 
 ---
 
+## [2026-09-24] 2026-09-24_v1.06_step04_manifest_bounds_and_compaction_contract.md
+
+- **Task 4.1**: 清单物理边界防护修复与分代归档契约冻结 (Manifest Bounds Protection & Compaction Contract Phase 0)
+
+## [2026-09-24] 2026-09-23_v1.06_step03_directory_physical_hardening_and_two_way_interlock.md
+
+- **Task 3.1**: FileScopeGuard 路径规范化硬化：跨驱动器与别名逃逸前置断绝 (Path Canonicalization & Cross-Drive Symlink Escape Defense)
+- **Task 3.2**: Shell 写入重定向正则拦截与工具通道安全隔离 (Shell Redirection Interception & Write Channel Isolation)
+- **Task 3.3**: 任务目录后置权威对账：Git 跟踪平滑迁移与未授权旁路隔离 (Manifest Reconcile, Git-Tracked Onboarding & Bypass Isolation)
+
 ## [2026-09-24] 2026-09-23_v1.06_step02_smart_reaper_and_lease_governance.md
 
 - **Task 2.1**: 心跳续约与 Fencing Token 租约校验注入及清单 Fail-Closed 硬化 (Heartbeat Renewal, Fencing Token Lease Verification & Fail-Closed Manifest)

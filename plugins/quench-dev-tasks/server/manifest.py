@@ -36,6 +36,30 @@ class ManifestIntegrityError(Exception):
     pass
 
 
+class ManifestRecordOverflowError(ManifestIntegrityError):
+    """单条记录 UTF-8 字节长度超过 MAX_RECORD_BYTES 时 Fail-Closed。"""
+    pass
+
+
+@dataclass(frozen=True)
+class ManifestMetrics:
+    record_count: int
+    total_bytes: int
+    max_record_bytes: int
+
+
+def compute_manifest_metrics(manifest: Manifest) -> ManifestMetrics:
+    """纯函数，无副作用；用于 telemetry 与触发决策。"""
+    records_dict = {tid: asdict(rec) for tid, rec in manifest.records.items()}
+    payload = {"schema_version": manifest.schema_version, "records": records_dict}
+    content_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return ManifestMetrics(
+        record_count=len(manifest.records),
+        total_bytes=len(content_bytes),
+        max_record_bytes=MAX_RECORD_BYTES,
+    )
+
+
 @dataclass(frozen=True)
 class TaskRecord:
     task_id: str                      # 命名空间格式: <md_stem>::<task_id> (B5)
@@ -180,9 +204,13 @@ def atomic_replace_manifest(workspace_root: str, manifest: Manifest) -> None:
     for tid, rec in manifest.records.items():
         rec_data = asdict(rec)
         rec_str = json.dumps(rec_data, ensure_ascii=False)
-        # 边界防护：单条记录不超过 MAX_RECORD_BYTES
-        if len(rec_str.encode("utf-8")) > MAX_RECORD_BYTES:
-            pass
+        rec_bytes = rec_str.encode("utf-8")
+        # 边界防护：单条记录不超过 MAX_RECORD_BYTES，违者 Fail-Closed 熔断阻断
+        if len(rec_bytes) > MAX_RECORD_BYTES:
+            raise ManifestRecordOverflowError(
+                f"Task record '{tid}' byte size ({len(rec_bytes)} bytes) exceeds MAX_RECORD_BYTES ({MAX_RECORD_BYTES} bytes). "
+                f"Fail-Closed protection triggered / 任务单记录字节大小超过物理上限，触发安全熔断阻断"
+            )
         records_dict[tid] = rec_data
 
     payload = {
