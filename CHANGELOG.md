@@ -5,6 +5,10 @@ Unlike real-time specification documents (which reflect only the active design),
 
 ---
 
+## [2026-09-24] 2026-09-24_ci_matrix_zero_stat_and_test_isolation_fix.md
+
+- **Task 1.1**: 修复 gc_by_filename_order 的 TOCTOU 与零 stat 契约违反，消除测试全局 os.stat 毒化
+
 ## [2026-09-24] 2026-09-24_v1.06_step04_manifest_bounds_and_compaction_contract.md
 
 - **Task 4.1**: 清单物理边界防护修复与分代归档契约冻结 (Manifest Bounds Protection & Compaction Contract Phase 0)
