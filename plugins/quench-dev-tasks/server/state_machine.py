@@ -219,13 +219,17 @@ def _verify_scope_reconciliation(
         content = f.read()
 
     whitelist = extract_task_whitelist(content, task_id)
-    unmanaged = ["docs/**", "*.md", ".agents/**"]
+    default_unmanaged = [".agents/**", "docs/**", "*.md"]
+    unmanaged = list(default_unmanaged)
     try:
         from project_config import load_project_config
 
         cfg = load_project_config(ws)
         if isinstance(cfg.governance_scope, dict):
-            unmanaged = cfg.governance_scope.get("unmanaged_paths", unmanaged)
+            configured_unmanaged = cfg.governance_scope.get("unmanaged_paths", [])
+            for pat in configured_unmanaged:
+                if pat not in unmanaged:
+                    unmanaged.append(pat)
     except Exception:
         pass
 
@@ -234,6 +238,7 @@ def _verify_scope_reconciliation(
         snapshot=snapshot,
         whitelist_paths=whitelist,
         unmanaged_patterns=unmanaged,
+        budget_ms=2000.0,
     )
 
     if report.verdict == "deny":

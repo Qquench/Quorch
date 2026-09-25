@@ -187,7 +187,7 @@ def test_windows_api_exit_code_scenarios(temp_workspace):
     mock_kernel32.GetExitCodeProcess.side_effect = lambda handle, byref_val: setattr(byref_val._obj, "value", STILL_ACTIVE) or 1
 
     with patch("sys.platform", "win32"):
-        with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32)):
+        with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32), create=True):
             res = WorkspaceLeaseGuard.probe_peer(12345, "nonce_win", temp_workspace)
             assert res.is_alive is True
             assert res.takeover_allowed is False
@@ -197,7 +197,7 @@ def test_windows_api_exit_code_scenarios(temp_workspace):
     mock_kernel32.GetExitCodeProcess.side_effect = lambda handle, byref_val: setattr(byref_val._obj, "value", EXITED_CODE) or 1
 
     with patch("sys.platform", "win32"):
-        with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32)):
+        with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32), create=True):
             res = WorkspaceLeaseGuard.probe_peer(12345, "nonce_win", temp_workspace)
             assert res.is_alive is False
             assert res.takeover_allowed is True
@@ -207,10 +207,24 @@ def test_windows_api_exit_code_scenarios(temp_workspace):
     mock_kernel32.GetLastError.return_value = 5
 
     with patch("sys.platform", "win32"):
-        with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32)):
+        with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32), create=True):
             res = WorkspaceLeaseGuard.probe_peer(12345, "nonce_win", temp_workspace)
             assert res.is_alive is True
             assert res.takeover_allowed is False
+
+
+def test_windll_patch_leaves_no_residue(temp_workspace):
+    """跨平台防污染断言：确保测试退出后在非 Windows 宿主环境下 ctypes 模块无 windll 残留。"""
+    import ctypes
+    import sys
+
+    # 无论在什么平台，退出 patch 上下文后都不应污染系统全局
+    with patch("sys.platform", "win32"):
+        with patch("ctypes.windll", MagicMock(), create=True):
+            pass
+
+    if sys.platform != "win32":
+        assert not hasattr(ctypes, "windll")
 
 
 def test_heartbeat_thread_updates_timestamp(temp_workspace):

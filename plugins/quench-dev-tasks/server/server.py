@@ -1338,7 +1338,7 @@ def dev_tasks_complete(
         }
 
     try:
-        updated = transition_task(target_path, task_id, STATUS_COMPLETED)
+        updated = transition_task(target_path, task_id, STATUS_COMPLETED, workspace_root=workspace_root)
         # 释放独占租约：留痕墓碑，保留代际 (B5)
         if active_lease is not None and not active_lease.released:
             tok = holder_token or active_lease.holder_token

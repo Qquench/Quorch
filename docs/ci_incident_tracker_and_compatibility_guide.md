@@ -19,6 +19,7 @@
    - [案例 4: Windows 专属文件句柄占用与并发重命名 PermissionError 锁死](#案例-4-windows-专属文件句柄占用与并发重命名-permissionerror-锁死)
    - [案例 5: Windows CMD/PowerShell 默认代码页 (GBK/CP936) 与 UTF-8 表情包编码冲突](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突)
    - [案例 6: 生产 TOCTOU 违背零 stat 契约与测试全局 monkeypatch stdlib (os.stat) 导致 pytest session 级崩溃](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃)
+   - [案例 7: 平台专属标准库属性 (ctypes.windll) 未做存在性守卫导致 mock.patch 在 POSIX 抛 AttributeError](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror)
 4. [跨平台编码安全准则 (Defensive Guidelines)](#4-跨平台编码安全准则-defensive-guidelines)
 5. [CI 验证与双向回归自检矩阵](#5-ci-验证与双向回归自检矩阵)
 6. [新增 CI 异常案例归档规范与模板](#6-新增-ci-异常案例归档规范与模板)
@@ -58,6 +59,7 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 | **INC-20260920-01** | 2026-09-20 | Stage 2 / `main` | Windows Server (Py 3.11) | `PermissionError: [WinError 32]` 句柄占用 | [案例 4](#案例-4-windows-专属文件句柄占用与并发重命名-permissionerror-锁死) | `e184fa2` | ✅ 已闭环 |
 | **INC-20260921-01** | 2026-09-21 | Stage 1 / `main` | Windows CMD/PowerShell | `UnicodeEncodeError: 'gbk' codec` 输出崩溃 | [案例 5](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突) | `7c29be1` | ✅ 已闭环 |
 | **INC-20260924-01** | 2026-09-24 | `8d8ec3c` / `main` (Run 35961542829) | Ubuntu 3.11, 3.12, Win 3.11 | `RuntimeError: os.stat was called` + Session 级崩溃 | [案例 6](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃) | `4b85abc` | ✅ 已闭环 |
+| **INC-20260925-01** | 2026-09-25 | `23e08a8` / `main` (Run 36136603921) | Ubuntu 22.04 (Py 3.11, 3.12) | `AttributeError: module 'ctypes' does not have attribute 'windll'` | [案例 7](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror) | 待合并 (Step 05) | ✅ 已闭环 |
 
 ---
 
@@ -202,9 +204,37 @@ foreach ($job in $jobs.jobs) {
 
 ---
 
+### 案例 7: 平台专属标准库属性 (ctypes.windll) 未做存在性守卫导致 mock.patch 在 POSIX 抛 AttributeError
+
+- **首次触发节点**: 提交 `23e08a8`（Milestone v1.08 发布合并至 main），GitHub Actions Run `36136603921`
+- **现象**:
+  - `test_workspace_lease.py::test_windows_api_exit_code_scenarios` 在 Windows (Python 3.11 / 3.12) 上 100% 通过；
+  - 在 Ubuntu 22.04 (Python 3.11 与 3.12) 上双轮均报错并失败：
+    ```text
+    FAILED plugins/quench-dev-tasks/server/tests/test_workspace_lease.py::test_windows_api_exit_code_scenarios
+    AttributeError: <module 'ctypes' from '/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/ctypes/__init__.py'> does not have the attribute 'windll'
+    ```
+- **根因深度复盘与机制原理**:
+  1. **CPython 跨平台底层注入差异**：
+     - 在 CPython 标准库实现中，`ctypes` 模块仅在 `os.name == "nt"` (Windows) 平台才会挂载 `windll = LibraryLoader(WinDLL)` 等 Win32 API 专有接口。
+     - 在 POSIX (Linux/macOS) 宿主上，`ctypes` 模块默认不包含任何 `windll` 属性。
+  2. **unittest.mock.patch 原型获取契约**：
+     - 单测使用 `with patch("ctypes.windll", MagicMock(kernel32=mock_kernel32)):` 注入打桩。
+     - `unittest.mock._patch.get_original()` 在上下文进入时会查询目标属性是否存在。当属性在目标模块中不存在且调用方未声明 `create=True` 时，哪怕调用方显式提供了 mock 实例作为 `new`，`patch` 仍会无条件抛出 `AttributeError: module 'ctypes' does not have the attribute 'windll'`。
+     - 这一平台特异性导致 Windows 平台真实存在该属性故顺利 mock，而在 Ubuntu CI 上测试解析即刻崩溃。
+- **加固方案 (三重闭环)**:
+  1. **测试平台解耦与安全回收 (`create=True`)**：
+     - 在 `test_windows_api_exit_code_scenarios` 中，对所有针对 `ctypes.windll` 的 patch 显式传入 `create=True`。在 POSIX 平台上，`patch` 自动以 `setattr` 临时生成属性，并在退出上下文时通过 `delattr` 彻底销毁，既恢复了跨平台可测试性，又绝不污染运行时。
+  2. **残留断言单测防护 (`test_windll_patch_leaves_no_residue`)**：
+     - 增加残留断言用例，确保在非 Windows 环境下单测执行退出后，`ctypes` 模块不会残留 `windll` 符号。
+  3. **防御准则沉淀 (Guideline 6)**：
+     - 将“平台专属标准库属性打桩必须显式声明 create=True 或采用平台独立加载 Seam”写入跨平台编码安全准则，杜绝平台专属符号直接绑死单测可执行性。
+
+---
+
 ## 4. 跨平台编码安全准则 (Defensive Guidelines)
 
-后续开发与代码审查（Reviewer）必须严格执行以下五项准则：
+后续开发与代码审查（Reviewer）必须严格执行以下六项准则：
 
 1. **路径分隔符归一化 (Separator Normalization)**:
    - 任何从外部参数、配置文件、任务单或网络载荷中获取的文件路径字符串，**进入任何处理前**一律执行：
@@ -226,6 +256,8 @@ foreach ($job in $jobs.jobs) {
 5. **系统底层调用 Mock 严禁全局毒化 (No Destructive Global Monkeypatching)**:
    - 严禁在测试中对 Python 运行时底层的通用 C 函数（如 `os.stat`, `os.lstat`, `os.listdir`, `sys.modules`, `open` 等）注册无条件抛异常的全局 monkeypatch。
    - 若必须断言“零系统调用”，优先采用**静态 AST 扫描 (AST Lint)**、**定向路径白名单过滤 (Target Path Filtering)** 或**隔离子进程 (Subprocess Isolation)** 执行，确保放行 pytest 内部设施（`tmp_path`、`linecache`、回溯格式化）。
+6. **平台专属标准库属性 Mock 必须显式声明 `create=True` (Platform-Specific Mock Guard)**:
+   - 针对非跨平台共享的标准库属性（如 Windows 专有的 `ctypes.windll`, `msvcrt`, `_winapi`，或 POSIX 专有的 `termios`, `fcntl` 等）进行打桩时，必须显式传递 `create=True`（或采用平台抽象 Seam 进行隔离），确保测试在跨宿主 CI 矩阵（Ubuntu / Windows / macOS）中均能无歧义执行，严禁由平台属性缺失导致单测直接挂起或抛 `AttributeError`。
 
 ---
 
