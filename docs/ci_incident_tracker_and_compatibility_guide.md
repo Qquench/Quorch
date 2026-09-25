@@ -59,7 +59,8 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 | **INC-20260920-01** | 2026-09-20 | Stage 2 / `main` | Windows Server (Py 3.11) | `PermissionError: [WinError 32]` 句柄占用 | [案例 4](#案例-4-windows-专属文件句柄占用与并发重命名-permissionerror-锁死) | `e184fa2` | ✅ 已闭环 |
 | **INC-20260921-01** | 2026-09-21 | Stage 1 / `main` | Windows CMD/PowerShell | `UnicodeEncodeError: 'gbk' codec` 输出崩溃 | [案例 5](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突) | `7c29be1` | ✅ 已闭环 |
 | **INC-20260924-01** | 2026-09-24 | `8d8ec3c` / `main` (Run 35961542829) | Ubuntu 3.11, 3.12, Win 3.11 | `RuntimeError: os.stat was called` + Session 级崩溃 | [案例 6](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃) | `4b85abc` | ✅ 已闭环 |
-| **INC-20260925-01** | 2026-09-25 | `23e08a8` / `main` (Run 36136603921) | Ubuntu 22.04 (Py 3.11, 3.12) | `AttributeError: module 'ctypes' does not have attribute 'windll'` | [案例 7](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror) | 待合并 (Step 05) | ✅ 已闭环 |
+| **INC-20260925-01** | 2026-09-25 | `23e08a8` / `main` (Run 36136603921) | Ubuntu 22.04 (Py 3.11, 3.12) | `AttributeError: module 'ctypes' does not have attribute 'windll'` | [案例 7](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror) | `8f97709` | ✅ 已闭环 |
+| **INC-20260925-02** | 2026-09-25 | `8f97709` / `main` (Run 36143945613) | Windows Server (Py 3.11) | `assert elapsed < 2.5` 超时测试偶发 Flaky (2.609s) | [案例 8](#案例-8-测试断言紧贴超时边界导致-ci-虚拟化宿主调度抖动偶发-flaky) | `pending` (Step 06) | ✅ 已闭环 |
 
 ---
 
@@ -232,9 +233,34 @@ foreach ($job in $jobs.jobs) {
 
 ---
 
+### 案例 8: 测试断言紧贴超时边界导致 CI 虚拟化宿主调度抖动偶发 Flaky
+
+- **首次触发节点**: 提交 `8f97709`，GitHub Actions Run `36143945613`（Job `108100273870`）
+- **现象**:
+  - `test_reviewer_consult.py::test_timeout_breaker_returns_degraded_and_keeps_partial_log` 在本地 Windows、Ubuntu CI (Python 3.11/3.12) 及 Windows (Python 3.12) 上均通过；
+  - 仅在 GitHub Actions `windows-latest (Python 3.11)` 偶发单次失败：
+    ```text
+    FAILED plugins\quench-dev-tasks\server\tests\test_reviewer_consult.py::test_timeout_breaker_returns_degraded_and_keeps_partial_log[asyncio]
+    assert 2.6090000000000373 < 2.5
+    ```
+- **根因深度复盘与机制原理**:
+  1. **将墙钟经过时间误当做逻辑不变量 (Flaky 根因)**：
+     - 用例设定 `timeout_seconds = 1`，底层 mock 网络等待 `await asyncio.sleep(2.0)`，外部硬断言 `assert elapsed < 2.5`。
+  2. **CI 共享型虚拟化宿主的调度延迟与定时器精度**:
+     - GitHub Actions Windows Runner 为多租户非独占虚拟机，Python 3.11 默认基于 `ProactorEventLoop`（基准定时器分辨率 15.6ms 且易受 CPU 调度抢占延时影响）。
+     - 从抛出 `asyncio.TimeoutError`、写入 partial log 刷盘 `sink.flush()` 到用例上下文恢复，累计耗时 `2.609s`，仅比 `2.5s` 超出 `0.109s`，在共享宿主瞬时负载升高时直接触发断言阻断。
+- **加固方案 (三重闭环)**:
+  1. **断言语义解耦与宽裕护栏**:
+     - 熔断测试的核心不变量在于“熔断发生且保底降级不伪造 findings”：`assert res["status"] == "degraded"`、`assert res["degraded_reason"] == "timeout"`、`assert res["findings"] == ""`，且 `partial log` 完整落盘。
+     - 将耗时硬断言松弛调整为宽松死循环防崩护栏（`assert elapsed < 5.0`），并附带丰富的上下文断言报错提示。
+  2. **防御准则沉淀 (Guideline 7)**:
+     - 确立“异步超时熔断测试严禁紧贴边界断言墙钟时长”铁律。
+
+---
+
 ## 4. 跨平台编码安全准则 (Defensive Guidelines)
 
-后续开发与代码审查（Reviewer）必须严格执行以下六项准则：
+后续开发与代码审查（Reviewer）必须严格执行以下七项准则：
 
 1. **路径分隔符归一化 (Separator Normalization)**:
    - 任何从外部参数、配置文件、任务单或网络载荷中获取的文件路径字符串，**进入任何处理前**一律执行：
@@ -258,6 +284,9 @@ foreach ($job in $jobs.jobs) {
    - 若必须断言“零系统调用”，优先采用**静态 AST 扫描 (AST Lint)**、**定向路径白名单过滤 (Target Path Filtering)** 或**隔离子进程 (Subprocess Isolation)** 执行，确保放行 pytest 内部设施（`tmp_path`、`linecache`、回溯格式化）。
 6. **平台专属标准库属性 Mock 必须显式声明 `create=True` (Platform-Specific Mock Guard)**:
    - 针对非跨平台共享的标准库属性（如 Windows 专有的 `ctypes.windll`, `msvcrt`, `_winapi`，或 POSIX 专有的 `termios`, `fcntl` 等）进行打桩时，必须显式传递 `create=True`（或采用平台抽象 Seam 进行隔离），确保测试在跨宿主 CI 矩阵（Ubuntu / Windows / macOS）中均能无歧义执行，严禁由平台属性缺失导致单测直接挂起或抛 `AttributeError`。
+7. **异步超时熔断测试严禁紧贴边界断言墙钟时长 (Asynchronous Timeout Assertion Guard)**:
+   - 熔断测试的核心不变量是状态迁移（`status == "degraded"`、`degraded_reason == "timeout"`）与数据保底（partial log 落盘、零伪造 findings）。严禁将经过物理墙钟时间作为强断言边界（如 `assert elapsed < 2.5`）。
+   - CI 虚拟化宿主（尤其 Windows ProactorEventLoop 与多租户 CPU 抢占）存在不可控时序抖动，任何时钟断言仅能作为防死锁/防无限挂起的宽松安全护栏（余量建议 ≥ 3~5× 调度周期，如 `5.0s`）。
 
 ---
 

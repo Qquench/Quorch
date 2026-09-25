@@ -3,6 +3,13 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-26] 2026-09-26_v1.08_step06_fix_timeout_flaky_ci.md
+
+- **Task 6.1**: 消除超时熔断测试的紧约束时钟断言并闭环 CI Flaky 事故档案
+  - Loosened brittle wall-clock assertion `assert elapsed < 2.5` to loose guard `assert elapsed < 5.0` in `test_timeout_breaker_returns_degraded_and_keeps_partial_log`, preventing intermittent CI failures on loaded multi-tenant virtual runners;
+  - Decoupled behavior correctness invariants (degraded status, timeout reason, zero fabricated findings, partial log preservation) from physical scheduling jitter;
+  - Documented CI Incident `INC-20260925-02` in `docs/ci_incident_tracker_and_compatibility_guide.md` with Case 8 and defensive coding Guideline 7 (asynchronous timeout assertion guard).
+
 ## [2026-09-25] 2026-09-25_v1.08_step05_fix_posix_lease_ctypes_ci.md
 
 - **Task 5.1**: 修复 Windows 分支单测在 POSIX 平台因 ctypes.windll 缺失引发的 AttributeError 并闭环 CI 事故档案

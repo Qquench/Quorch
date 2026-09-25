@@ -363,6 +363,17 @@
       "git_head_sha": "fb6bc2de36191db9f30e9b25060ed85b32dbdd86",
       "git_index_mtime": 1790326416.5671413,
       "released": true
+    },
+    "2026-09-26_v1.08_step06_fix_timeout_flaky_ci::6.1": {
+      "task_id": "2026-09-26_v1.08_step06_fix_timeout_flaky_ci::6.1",
+      "md_sha256": "223b83ed6d555b27351874ff98738ad4780004eaf771edfe5867ba900b9e1bbf",
+      "generation": 1,
+      "holder_token": "token_1790345135358_25120",
+      "last_heartbeat_monotonic_ns": 568312984000000,
+      "last_heartbeat_wall_utc": "2026-09-25T14:08:57.291826+00:00",
+      "git_head_sha": "e7d0cd0ab3c8db18478c5598b4765f67f427088b",
+      "git_index_mtime": 1790344654.824225,
+      "released": true
     }
   }
 }

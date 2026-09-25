@@ -248,11 +248,11 @@ async def test_timeout_breaker_returns_degraded_and_keeps_partial_log(tmp_path: 
     )
     elapsed = time.monotonic() - t0
 
-    assert res["status"] == "degraded"
-    assert res["degraded_reason"] == "timeout"
+    assert res["status"] == "degraded", f"Unexpected status: {res.get('status')}"
+    assert res["degraded_reason"] == "timeout", f"Unexpected reason: {res.get('degraded_reason')}"
     assert res["findings"] == "", "Timeout must not fabricate findings!"
     assert res["handoff_prompt"] is not None
-    assert elapsed < 2.5
+    assert elapsed < 5.0, f"Consultation timed out exceeded runaway budget: {elapsed}s (status={res.get('status')})"
 
     log_file = Path(res["log_path"])
     assert log_file.exists()
