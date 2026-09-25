@@ -374,6 +374,17 @@
       "git_head_sha": "e7d0cd0ab3c8db18478c5598b4765f67f427088b",
       "git_index_mtime": 1790344654.824225,
       "released": true
+    },
+    "2026-09-24_v1.08_step03_capability_tokens_and_onboarding::3.4": {
+      "task_id": "2026-09-24_v1.08_step03_capability_tokens_and_onboarding::3.4",
+      "md_sha256": "3cd53b0a34ac4ee727c39d4629951a688d122a6b62a1ba2e22ce91080d05de51",
+      "generation": 1,
+      "holder_token": "token_1790348953429_2328",
+      "last_heartbeat_monotonic_ns": 572470250000000,
+      "last_heartbeat_wall_utc": "2026-09-25T15:18:14.548303+00:00",
+      "git_head_sha": "e055eef96e066a8079ceba73179b6650a94e6de6",
+      "git_index_mtime": 1790345452.6702218,
+      "released": true
     }
   }
 }

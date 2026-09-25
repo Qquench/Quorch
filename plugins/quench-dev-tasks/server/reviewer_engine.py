@@ -10,6 +10,7 @@ from __future__ import annotations
 import codecs
 import functools
 import hashlib
+import inspect
 import json
 import os
 import queue
@@ -610,18 +611,22 @@ def format_heartbeat_line(tokens: int, elapsed_s: float) -> str:
 
 
 class AdaptiveHeartbeatSink:
-    """心跳持久化槽：将 Reviewer 思考进展以纯英文统一格式安全落盘到会话日志。
+    """心跳持久化与前台上报槽：将 Reviewer 思考进展安全落盘并可选择性通知前台。
 
-    遵循工业级纯拉模型 (Pull Model)：
-    Worker 将 [progress] [Reviewer thinking: ...] 追加到日志文件，
-    客户端通过 dev_reviewer_poll(raw_text=True) 按需轮询拉取，
-    完全消除无效的上下文推送与终端控制字符。严格遵守零 stdout 污染铁律。
+    1. FILE 通道：常驻兜底落盘纯英文统一格式 [progress] [Reviewer thinking: ...]；
+    2. 前台通道：通过 progress_emit 回调（可选）在请求作用域通知宿主 UI（如 FastMCP ctx.report_progress）；
+    3. 自适应阶梯退避 + 事件门控：首帧 <= 500ms，后续阶梯退避 [0.5, 1, 1, 2, 2, 3, 5]s，
+       且仅在 token 增量跨越阈值 (>=20) 或无进展保活底线 (>=5.0s) 时触发发射；
+    4. 严格遵守零 stdout 污染铁律与异常吞吐保护。
     """
+
+    LADDER_INTERVALS: Final[Tuple[float, ...]] = (0.5, 1.0, 1.0, 2.0, 2.0, 3.0, 5.0)
 
     def __init__(
         self,
         *,
         file_emit: Callable[[str], None],
+        progress_emit: Optional[Callable[[int, float], Any]] = None,
         mcp_context: Any = None,
         stderr: Optional[TextIO] = None,
         interval_ms: int = 1000,
@@ -632,50 +637,100 @@ class AdaptiveHeartbeatSink:
                 "AdaptiveHeartbeatSink requires a callable 'file_emit' channel as a mandatory last-resort fallback."
             )
         self.file_emit = file_emit
+        self.progress_emit = progress_emit
         self.mcp_context = mcp_context
         self.stderr = stderr
         self.interval_s = max(int(interval_ms), 500) / 1000.0
         self._clock = clock if clock is not None else (lambda: time.monotonic())
         self._lock = threading.Lock()
         self._last_pulse_monotonic = 0.0
+        self._last_emitted_tokens = 0
         self._pulse_count = 0
+
+    def _should_emit(self, tokens_so_far: int, now: float) -> bool:
+        """自适应阶梯退避与事件门控核心算法。必须在 self._lock 内部调用。"""
+        if self._pulse_count == 0:
+            return True
+
+        step_idx = min(self._pulse_count, len(self.LADDER_INTERVALS) - 1)
+        ladder_step = self.LADDER_INTERVALS[step_idx]
+        effective_interval = max(ladder_step, self.interval_s if self._pulse_count > 0 else 0.5)
+
+        elapsed_since_last = now - self._last_pulse_monotonic
+        jitter = random.uniform(0.0, 0.015)
+        if elapsed_since_last < (effective_interval + jitter):
+            return False
+
+        # 事件门控：token 增量阈值 (>=20) 或 keepalive 保活底线 (>=5.0s)
+        token_delta = abs(tokens_so_far - self._last_emitted_tokens)
+        if token_delta >= 20 or elapsed_since_last >= 5.0:
+            return True
+        return False
 
     def on_chunk(self, chunk: ThoughtChunk) -> None:
         pass
 
     def on_heartbeat(self, tokens_so_far: int, elapsed_s: float) -> None:
+        should_send = False
         with self._lock:
             now = self._clock()
-            jitter = random.uniform(0.0, 0.015)
-            if (now - self._last_pulse_monotonic) < (self.interval_s + jitter):
-                return
-            self._last_pulse_monotonic = now
-            self._pulse_count += 1
-            msg = format_heartbeat_line(tokens_so_far, elapsed_s)
-            iso_ts = datetime.now(timezone.utc).isoformat()
-            file_msg = f"{iso_ts} [progress] {msg}\n"
+            if self._should_emit(tokens_so_far, now):
+                self._last_pulse_monotonic = now
+                self._last_emitted_tokens = tokens_so_far
+                self._pulse_count += 1
+                msg = format_heartbeat_line(tokens_so_far, elapsed_s)
+                iso_ts = datetime.now(timezone.utc).isoformat()
+                file_msg = f"{iso_ts} [progress] {msg}\n"
+                should_send = True
+
+        if not should_send:
+            return
 
         try:
             self.file_emit(file_msg)
         except Exception:
             pass
+
+        if self.progress_emit is not None:
+            try:
+                res = self.progress_emit(tokens_so_far, elapsed_s)
+                if inspect.isawaitable(res):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(res)
+                    except RuntimeError:
+                        pass
+            except Exception:
+                pass
 
     async def apulse(self, *, tokens_so_far: int, elapsed_s: float, step: str = "thinking") -> None:
+        should_send = False
         with self._lock:
             now = self._clock()
-            jitter = random.uniform(0.0, 0.015)
-            if (now - self._last_pulse_monotonic) < (self.interval_s + jitter):
-                return
-            self._last_pulse_monotonic = now
-            self._pulse_count += 1
-            msg = format_heartbeat_line(tokens_so_far, elapsed_s)
-            iso_ts = datetime.now(timezone.utc).isoformat()
-            file_msg = f"{iso_ts} [progress] {msg}\n"
+            if self._should_emit(tokens_so_far, now):
+                self._last_pulse_monotonic = now
+                self._last_emitted_tokens = tokens_so_far
+                self._pulse_count += 1
+                msg = format_heartbeat_line(tokens_so_far, elapsed_s)
+                iso_ts = datetime.now(timezone.utc).isoformat()
+                file_msg = f"{iso_ts} [progress] {msg}\n"
+                should_send = True
+
+        if not should_send:
+            return
 
         try:
             self.file_emit(file_msg)
         except Exception:
             pass
+
+        if self.progress_emit is not None:
+            try:
+                res = self.progress_emit(tokens_so_far, elapsed_s)
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
 
     def on_finish(self, reason: str, meta: Dict[str, Any]) -> None:
         pass

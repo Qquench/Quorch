@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+import inspect
 import os
 from pathlib import Path
 import re
@@ -37,6 +38,7 @@ from reviewer_engine import (
     RotatingFileSink,
     extract_reasoning_text,
     extract_usage,
+    format_heartbeat_line,
 )
 from log_naming import (
     allocate_log_file,
@@ -553,8 +555,19 @@ async def _execute_consultation(
         sink.write_chunk_text(
             f"{datetime.now(timezone.utc).isoformat()} [warning] {self_verification_warning}\n"
         )
+    async def _mcp_progress_emit(tokens: int, elapsed_s: float) -> None:
+        if ctx is not None and hasattr(ctx, "report_progress") and callable(ctx.report_progress):
+            msg = format_heartbeat_line(tokens, elapsed_s)
+            try:
+                res = ctx.report_progress(progress=float(tokens), total=None, message=msg)
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
+
     heartbeat_sink = AdaptiveHeartbeatSink(
         file_emit=sink.write_chunk_text,
+        progress_emit=_mcp_progress_emit,
         mcp_context=ctx,
         interval_ms=1000,
     )
@@ -580,7 +593,7 @@ async def _execute_consultation(
         async def _heartbeat_worker():
             while not heartbeat_stop.is_set():
                 try:
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(0.5)
                     if heartbeat_stop.is_set():
                         break
                     now = time.monotonic()
