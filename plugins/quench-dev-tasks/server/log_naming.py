@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Final
+from typing import Final, Any, Mapping
 
+# 全仓库唯一 SESSION_ID_PATTERN SSOT (128位，叶子节点防环形导入)
+SESSION_ID_PATTERN: Final[re.Pattern] = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
 MAX_DAILY_SEQUENCE: Final[int] = 999
 SLUG_MAX_LEN: Final[int] = 20
 HEADER_VERSION: Final[str] = "quench-reviewer-log v1"
@@ -32,6 +35,55 @@ _WINDOWS_RESERVED_NAMES: Final[set[str]] = {
     "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
     "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 }
+
+
+def norm_registry_key(path: str | os.PathLike[str]) -> str:
+    """唯一 registry 键规范化 SSOT：折叠 Windows 大小写、解析软链接、并剥离轮转分片后缀 (.1.log -> .log) (N-1)。"""
+    base_path = re.sub(r"\.\d+\.log$", ".log", str(path))
+    return os.path.normcase(os.path.realpath(base_path))
+
+
+class ActiveLogRegistry:
+    """线程安全的在途日志文件注册表，防止 GC 回收活跃日志句柄。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pinned: set[str] = set()
+
+    def pin(self, log_path: str | os.PathLike[str]) -> None:
+        key = norm_registry_key(log_path)
+        with self._lock:
+            self._pinned.add(key)
+
+    def unpin(self, log_path: str | os.PathLike[str]) -> None:
+        key = norm_registry_key(log_path)
+        with self._lock:
+            self._pinned.discard(key)
+
+    def is_pinned(self, log_path: str | os.PathLike[str]) -> bool:
+        key = norm_registry_key(log_path)
+        with self._lock:
+            return key in self._pinned
+
+    def is_reclaimable(self, log_path: str | os.PathLike[str]) -> bool:
+        return not self.is_pinned(log_path)
+
+    def snapshot(self) -> frozenset[str]:
+        with self._lock:
+            return frozenset(self._pinned)
+
+    def reap_dead(self, is_alive: Any) -> int:
+        """清理已死亡进程或不再存活的 pinned 条目。返回清理条目数。"""
+        with self._lock:
+            to_remove = set()
+            for k in self._pinned:
+                try:
+                    if callable(is_alive) and not is_alive(k):
+                        to_remove.add(k)
+                except Exception:
+                    pass
+            self._pinned -= to_remove
+            return len(to_remove)
 
 
 class SequenceExhaustedError(RuntimeError):
@@ -107,6 +159,7 @@ def allocate_log_file(
     *,
     now: datetime | None = None,
     header_metadata: dict[str, str] | None = None,
+    registry: ActiveLogRegistry | None = None,
 ) -> tuple[str, bytes]:
     """Atomically allocate a new log file using O_CREAT|O_EXCL.
 
@@ -182,6 +235,9 @@ def allocate_log_file(
         header_bytes = header_line.encode("utf-8")
 
         try:
+            # 同步在持有文件且未关闭前完成 pin，消除 TOCTOU
+            if registry is not None:
+                registry.pin(norm_registry_key(filepath))
             os.write(fd, header_bytes)
             os.fsync(fd)
         finally:
@@ -219,6 +275,9 @@ def gc_by_filename_order(
     directory: str | os.PathLike[str],
     *,
     keep: int = 20,
+    registry: ActiveLogRegistry | None = None,
+    require_lease: bool = False,
+    lease_guard: Any | None = None,
 ) -> list[str]:
     """Retain newest `keep` log files and prune older ones based purely on filename order.
 
@@ -235,6 +294,11 @@ def gc_by_filename_order(
     if keep <= 0:
         raise ValueError(f"keep must be greater than 0, got {keep}")
 
+    if require_lease:
+        from workspace_lease import WorkspaceLeaseNotHeldError
+        if lease_guard is None or not lease_guard.is_held():
+            raise WorkspaceLeaseNotHeldError("Workspace lease not held during GC")
+
     target_dir = os.path.abspath(directory)
     files = list_log_files(target_dir)
 
@@ -246,13 +310,19 @@ def gc_by_filename_order(
 
     for fname in to_prune:
         fpath = os.path.join(target_dir, fname)
+        if registry is not None and not registry.is_reclaimable(norm_registry_key(fpath)):
+            continue
+
         try:
             os.remove(fpath)
             pruned.append(fname)
         except (FileNotFoundError, OSError):
             pass
+
         # Cascade delete rotation backup if present (atomic unlink without stat/exists)
         rot_path = os.path.splitext(fpath)[0] + ".1.log"
+        if registry is not None and not registry.is_reclaimable(norm_registry_key(rot_path)):
+            continue
         try:
             os.remove(rot_path)
         except (FileNotFoundError, OSError):
@@ -265,6 +335,9 @@ def enforce_unified_log_quota(
     directory: str | os.PathLike[str],
     *,
     keep: int = 20,
+    registry: ActiveLogRegistry | None = None,
+    require_lease: bool = False,
+    lease_guard: Any | None = None,
 ) -> list[str]:
     """Retain at most `keep` total log files across both new (YYYYMMDD_NNN_*.log)
     and legacy (latest-*.log) formats.
@@ -279,6 +352,11 @@ def enforce_unified_log_quota(
     """
     if keep <= 0:
         raise ValueError(f"keep must be greater than 0, got {keep}")
+
+    if require_lease:
+        from workspace_lease import WorkspaceLeaseNotHeldError
+        if lease_guard is None or not lease_guard.is_held():
+            raise WorkspaceLeaseNotHeldError("Workspace lease not held during GC")
 
     target_dir = os.path.abspath(directory)
     if not os.path.isdir(target_dir):
@@ -306,22 +384,35 @@ def enforce_unified_log_quota(
     while legacy_files and excess > 0:
         oldest_legacy = legacy_files.pop(0)
         fpath = os.path.join(target_dir, oldest_legacy)
+        if registry is not None and not registry.is_reclaimable(norm_registry_key(fpath)):
+            excess -= 1
+            continue
+
         try:
             os.remove(fpath)
             pruned.append(oldest_legacy)
         except (FileNotFoundError, OSError):
             pass
         rot_path = os.path.splitext(fpath)[0] + ".1.log"
-        try:
-            os.remove(rot_path)
-        except (FileNotFoundError, OSError):
+        if registry is not None and not registry.is_reclaimable(norm_registry_key(rot_path)):
             pass
+        else:
+            try:
+                os.remove(rot_path)
+            except (FileNotFoundError, OSError):
+                pass
         excess -= 1
 
     # 2. If still exceeding, prune oldest new-format logs via gc_by_filename_order
     remaining_new_allowed = keep - len(legacy_files)
     if len(new_files) > remaining_new_allowed and remaining_new_allowed > 0:
-        new_pruned = gc_by_filename_order(target_dir, keep=remaining_new_allowed)
+        new_pruned = gc_by_filename_order(
+            target_dir,
+            keep=remaining_new_allowed,
+            registry=registry,
+            require_lease=False,
+            lease_guard=lease_guard,
+        )
         pruned.extend(new_pruned)
 
     return pruned

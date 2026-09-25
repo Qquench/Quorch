@@ -38,7 +38,12 @@ from reviewer_engine import (
     extract_reasoning_text,
     extract_usage,
 )
-from log_naming import allocate_log_file, enforce_unified_log_quota, gc_by_filename_order
+from log_naming import (
+    allocate_log_file,
+    enforce_unified_log_quota,
+    gc_by_filename_order,
+    SESSION_ID_PATTERN,
+)
 
 class ReasoningBudgetExceededError(ReviewerEngineError):
     """推理链长度超出安全天花板异常。"""
@@ -48,7 +53,67 @@ class ReasoningBudgetExceededError(ReviewerEngineError):
 ConsultMode = Literal["critique", "evaluate", "brainstorm", "audit"]
 VALID_MODES: tuple[str, ...] = ("critique", "evaluate", "brainstorm", "audit")
 
-SESSION_ID_PATTERN = re.compile(r"^[0-9a-zA-Z_-]{1,64}$")
+JOB_ID_PATTERN: Final[re.Pattern] = re.compile(r"^[0-9a-zA-Z_-]{1,64}$")
+_WINDOWS_RESERVED_NAMES: Final[set[str]] = {
+    "con", "prn", "aux", "nul",
+    "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+    "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+}
+
+
+def validate_job_id(raw: str | None) -> str:
+    """严格校验 job_id，防止路径穿越及 Windows 保留设备名注入。"""
+    if raw is None or not str(raw).strip():
+        raise ValueError("job_id cannot be empty")
+    val = str(raw).strip()
+    if not JOB_ID_PATTERN.match(val):
+        raise ValueError(
+            f"Invalid job_id: '{raw}'. Must match '^[0-9a-zA-Z_-]{{1,64}}$' and cannot contain '/', '\\', or '..'."
+        )
+    lower_val = val.lower()
+    base_name = lower_val.split(".")[0]
+    if base_name in _WINDOWS_RESERVED_NAMES:
+        raise ValueError(f"job_id contains Windows reserved device name: '{raw}'")
+    return val
+
+
+class AbortHandle:
+    """真实物理连接关闭句柄。"""
+
+    def __init__(self) -> None:
+        self._aborted = False
+        self._target: Any = None
+        self._lock = threading.Lock()
+
+    def set_target(self, target: Any) -> None:
+        with self._lock:
+            self._target = target
+            if self._aborted:
+                self._do_abort(target)
+
+    def _do_abort(self, target: Any) -> None:
+        if target is None:
+            return
+        try:
+            if hasattr(target, "close"):
+                target.close()
+            elif hasattr(target, "abort"):
+                target.abort()
+        except Exception:
+            pass
+
+    def abort(self) -> None:
+        with self._lock:
+            self._aborted = True
+            if self._target is not None:
+                self._do_abort(self._target)
+
+    @property
+    def is_aborted(self) -> bool:
+        with self._lock:
+            return self._aborted
+
+
 NEED_FILES_PATTERN = re.compile(r"<<<NEED-FILES>>>\s*(.*?)\s*<<<END>>>", re.DOTALL)
 TASK_DRAFT_PATTERN = re.compile(r"<<<TASK_DRAFT>>>\s*(.*?)\s*<<<END>>>", re.DOTALL)
 
@@ -101,14 +166,14 @@ class ConsultResult:
     self_verification_warning: Optional[str] = None
 
 
-def sanitize_session_id(raw: str | None) -> str:
-    """校验并清洗 session_id。若为空则生成 12 字符十六进制串；若提供则必须匹配 ^[0-9a-zA-Z_-]{1,64}$。"""
+def sanitize_session_id(raw: str | None, max_len: int = 64) -> str:
+    """校验并清洗 session_id。若为空则生成 12 字符十六进制串；若提供则必须匹配 ^[a-zA-Z0-9_-]{1,128}$。"""
     if raw is None or not str(raw).strip():
         return uuid4().hex[:12]
     val = str(raw).strip()
-    if not SESSION_ID_PATTERN.match(val):
+    if len(val) > max_len or not SESSION_ID_PATTERN.match(val):
         raise ValueError(
-            f"Invalid session_id: '{raw}'. Must match '^[0-9a-zA-Z_-]{{1,64}}$' and cannot contain '/', '\\', or '..'."
+            f"Invalid session_id: '{raw}'. Must match '^[a-zA-Z0-9_\\-]{{1,128}}$' and cannot contain '/', '\\', or '..'."
         )
     return val
 
@@ -395,13 +460,17 @@ def _enforce_log_quota(log_dir: Path, max_files: int = MAX_LOG_FILES_QUOTA) -> N
 
 
 
-async def run_consultation(
+async def _execute_consultation(
     req: ConsultRequest,
+    log_path: str,
+    cancel_event: Optional[asyncio.Event] = None,
+    abort_handle: Optional[AbortHandle] = None,
     *,
     config: Any,
     ctx: Any = None,
+    on_progress: Optional[Callable[[int, float, str, float], None]] = None,
 ) -> ConsultResult:
-    """执行免任务单绑定的架构咨询流程，具备降级卡防线、流式日志与防超时机制。"""
+    """执行架构咨询推演底层核心，支持物理连接关闭、真实取消事件与进度回调。"""
     session_id = sanitize_session_id(req.session_id)
     workspace_root = os.path.realpath(req.workspace_root)
     mode: ConsultMode = req.mode if req.mode in VALID_MODES else "critique"
@@ -421,7 +490,7 @@ async def run_consultation(
             session_id=session_id,
             mode=mode,
             findings="",
-            log_path="",
+            log_path=str(log_path or ""),
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "prompt_cache_hit_tokens": 0},
             truncated=False,
             skipped_files=[],
@@ -448,16 +517,9 @@ async def run_consultation(
     thinking = bool(getattr(re_cfg, "thinking", True)) if re_cfg else False
     self_verification_warning = check_self_verification_warning(runner_profile, prov, model)
 
-    # 2. 准备日志环境
-    log_dir = Path(workspace_root) / ".agents" / "logs" / "reviewer"
+    log_file = Path(log_path)
+    log_dir = log_file.parent
     log_dir.mkdir(parents=True, exist_ok=True)
-    _enforce_log_quota(log_dir, max_files=MAX_LOG_FILES_QUOTA)
-    allocated_log_path, _ = allocate_log_file(
-        str(log_dir),
-        slug=session_id,
-        header_metadata={"mode": mode, "session_id": session_id},
-    )
-    log_file = Path(allocated_log_path)
 
     session_lock = _get_session_lock(session_id)
 
@@ -485,7 +547,7 @@ async def run_consultation(
         max_bytes=MAX_LOG_FILE_BYTES,
         carry_over_bytes=64,
         flush_interval_s=0.2,
-        log_file=allocated_log_path,
+        log_file=str(log_file),
     )
     if self_verification_warning:
         sink.write_chunk_text(
@@ -509,7 +571,11 @@ async def run_consultation(
 
         # 心跳后台任务（多通道能力分发 + FILE 常驻兜底）
         heartbeat_stop = asyncio.Event()
-        stream_stats = {"chars": 0, "start_t": time.monotonic()}
+        stream_stats = {
+            "chars": 0,
+            "start_t": time.monotonic(),
+            "last_chunk_t": time.monotonic(),
+        }
 
         async def _heartbeat_worker():
             while not heartbeat_stop.is_set():
@@ -519,8 +585,11 @@ async def run_consultation(
                         break
                     now = time.monotonic()
                     elapsed_s = now - stream_stats["start_t"]
+                    idle_s = now - stream_stats["last_chunk_t"]
                     tokens_est = stream_stats["chars"] // 4
                     await heartbeat_sink.apulse(tokens_so_far=tokens_est, elapsed_s=elapsed_s)
+                    if on_progress:
+                        on_progress(tokens_est, elapsed_s, "streaming", idle_s)
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -533,6 +602,13 @@ async def run_consultation(
             active_skipped = list(skipped_files)
 
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    if abort_handle is not None:
+                        abort_handle.abort()
+                    raise asyncio.CancelledError("Consultation cancelled before turn")
+                if abort_handle is not None and abort_handle.is_aborted:
+                    raise asyncio.CancelledError("Consultation cancelled before turn")
+
                 user_content = render_mode_prompt(mode, req.query, active_slices)
                 messages = [
                     {"role": "system", "content": static_prefix},
@@ -549,6 +625,17 @@ async def run_consultation(
                     try:
                         accumulated_reasoning_chars = 0
                         async for chunk in client.stream_chat(messages):
+                            # 取消与打断检查
+                            if cancel_event is not None and cancel_event.is_set():
+                                if abort_handle is not None:
+                                    abort_handle.abort()
+                                raise asyncio.CancelledError("Consultation stream cancelled")
+                            if abort_handle is not None and abort_handle.is_aborted:
+                                raise asyncio.CancelledError("Consultation stream cancelled")
+
+                            now = time.monotonic()
+                            stream_stats["last_chunk_t"] = now
+
                             reasoning = getattr(chunk, "reasoning", "") or ""
                             chunk_text = getattr(chunk, "text", "") or ""
                             if reasoning:
@@ -557,7 +644,6 @@ async def run_consultation(
                                 if accumulated_reasoning_chars > MAX_REASONING_TOKENS_CEILING * 4:
                                     raise ReasoningBudgetExceededError("Reasoning tokens exceeded ceiling 32000")
                                 coalescer.feed(reasoning)
-                                now = time.monotonic()
                                 if now - last_flush_t >= 0.5:
                                     sink.flush()
                                     last_flush_t = now
@@ -589,6 +675,12 @@ async def run_consultation(
 
                 try:
                     raw_result = await asyncio.wait_for(_call_engine(), timeout=float(timeout_s))
+                except asyncio.CancelledError:
+                    sink.write_chunk_text(
+                        f"\n{datetime.now(timezone.utc).isoformat()} [info] Consultation cancelled\n"
+                    )
+                    sink.flush()
+                    raise
                 except asyncio.TimeoutError:
                     sink.write_chunk_text(
                         f"\n{datetime.now(timezone.utc).isoformat()} [error] Engine timeout after {timeout_s}s\n"
@@ -752,3 +844,29 @@ async def run_consultation(
                 pass
             heartbeat_sink.on_finish("stop", {})
             sink.close()
+
+
+async def run_consultation(
+    req: ConsultRequest,
+    *,
+    config: Any,
+    ctx: Any = None,
+) -> ConsultResult:
+    """执行免任务单绑定的架构咨询流程，具备降级卡防线、流式日志与防超时机制。"""
+    session_id = sanitize_session_id(req.session_id)
+    workspace_root = os.path.realpath(req.workspace_root)
+    log_dir = Path(workspace_root) / ".agents" / "logs" / "reviewer"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _enforce_log_quota(log_dir, max_files=MAX_LOG_FILES_QUOTA)
+    allocated_log_path, _ = allocate_log_file(
+        str(log_dir),
+        slug=session_id,
+        header_metadata={"mode": req.mode, "session_id": session_id},
+    )
+
+    return await _execute_consultation(
+        req,
+        allocated_log_path,
+        config=config,
+        ctx=ctx,
+    )

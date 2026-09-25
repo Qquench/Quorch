@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from datetime import datetime, timezone, timedelta, date
 import glob
@@ -18,7 +19,7 @@ import time
 from typing import Any, Dict, List, Optional, Literal, TypedDict
 from fastmcp import Context, FastMCP
 
-SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+from log_naming import SESSION_ID_PATTERN
 
 
 def _atomic_write_json(filepath: str, data: dict) -> None:
@@ -2313,6 +2314,124 @@ def dev_tasks_set_bypass(
 
 
 @mcp.tool()
+async def dev_reviewer_submit(
+    workspace_root: str,
+    query: str,
+    context_files: list[str] | None = None,
+    mode: str = "critique",
+    max_hops: int = 1,
+    session_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Submit an asynchronous long-running Reviewer consultation task.
+    Returns initial JobRecord metadata without blocking.
+
+    提交 Reviewer 异步长推演任务：返回初始任务句柄与非终态元数据。
+    """
+    if not workspace_root or not os.path.isdir(workspace_root):
+        return {
+            "status": "error",
+            "error": f"Invalid workspace_root: '{workspace_root}' is not an existing directory.",
+        }
+    if not query or not query.strip():
+        return {
+            "status": "error",
+            "error": "Query cannot be empty.",
+        }
+    if len(query) > 8000:
+        return {
+            "status": "error",
+            "error": f"Query exceeds maximum character budget (len={len(query)}, max=8000).",
+        }
+    if mode not in ("critique", "evaluate", "brainstorm", "audit"):
+        return {
+            "status": "error",
+            "error": f"Invalid mode '{mode}'. Supported modes: critique, evaluate, brainstorm, audit.",
+        }
+
+    from consultation import sanitize_session_id
+    try:
+        clean_sid = sanitize_session_id(session_id)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+    from reviewer_jobs import ReviewerJobSupervisor, CapacityExceeded, _record_to_dict
+    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    clamped_hops = min(max(max_hops, 0), 3)
+    req_payload = {
+        "workspace_root": workspace_root,
+        "query": query,
+        "context_files": list(context_files or []),
+        "mode": mode,
+        "max_hops": clamped_hops,
+        "session_id": clean_sid,
+    }
+    try:
+        record = supervisor.submit(req_payload, idempotency_key=idempotency_key)
+        return {"status": "ok", "job": _record_to_dict(record)}
+    except CapacityExceeded as ce:
+        return {
+            "status": "degraded",
+            "degraded_reason": "capacity_full",
+            "error": str(ce),
+            "retry_after": ce.retry_after,
+        }
+
+
+@mcp.tool()
+async def dev_reviewer_poll(
+    workspace_root: str,
+    job_id: str,
+    session_id: str,
+) -> dict[str, Any]:
+    """Poll status or result of a background Reviewer task.
+    Enforces 1KB non-terminal snapshot contract.
+
+    轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。
+    """
+    if not workspace_root or not os.path.isdir(workspace_root):
+        return {
+            "status": "error",
+            "error": f"Invalid workspace_root: '{workspace_root}' is not an existing directory.",
+        }
+
+    from reviewer_jobs import ReviewerJobSupervisor
+    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    try:
+        return supervisor.poll(job_id, session_id=session_id)
+    except (KeyError, ValueError, PermissionError) as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+async def dev_reviewer_cancel(
+    workspace_root: str,
+    job_id: str,
+    session_id: str,
+) -> dict[str, Any]:
+    """Deterministically cancel a running Reviewer task and abort transport.
+
+    确定性取消在途推演任务：物理关闭 Socket 并保全实际计费 token 记录。
+    """
+    if not workspace_root or not os.path.isdir(workspace_root):
+        return {
+            "status": "error",
+            "error": f"Invalid workspace_root: '{workspace_root}' is not an existing directory.",
+        }
+
+    from reviewer_jobs import ReviewerJobSupervisor
+    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    try:
+        return supervisor.cancel(job_id, session_id=session_id)
+    except (KeyError, ValueError, PermissionError) as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
 async def dev_reviewer_consult(
     workspace_root: str,
     query: str,
@@ -2364,25 +2483,14 @@ async def dev_reviewer_consult(
 
     clamped_hops = min(max(max_hops, 0), 3)
 
-    from consultation import ConsultRequest, run_consultation, sanitize_session_id
-    from dataclasses import asdict
-
+    from consultation import sanitize_session_id
     try:
-        clean_sid = sanitize_session_id(session_id)
+        clean_sid = sanitize_session_id(session_id, max_len=128)
     except ValueError as e:
         return {
             "status": "error",
             "error": str(e),
         }
-
-    req = ConsultRequest(
-        workspace_root=workspace_root,
-        query=query,
-        context_files=tuple(context_files or []),
-        mode=mode,
-        max_hops=clamped_hops,
-        session_id=clean_sid,
-    )
 
     try:
         config = load_project_config(workspace_root)
@@ -2392,8 +2500,68 @@ async def dev_reviewer_consult(
             project_name=os.path.basename(workspace_root) or "default",
         )
 
-    res = await run_consultation(req, config=config, ctx=ctx)
-    return asdict(res)
+    from reviewer_jobs import ReviewerJobSupervisor, CapacityExceeded
+    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    req_payload = {
+        "workspace_root": workspace_root,
+        "query": query,
+        "context_files": list(context_files or []),
+        "mode": mode,
+        "max_hops": clamped_hops,
+        "session_id": clean_sid,
+        "ctx": ctx,
+        "config": config,
+    }
+
+    try:
+        record = supervisor.submit(req_payload)
+    except CapacityExceeded as ce:
+        return {
+            "status": "degraded",
+            "session_id": clean_sid,
+            "mode": mode,
+            "findings": "",
+            "log_path": "",
+            "usage": {},
+            "truncated": False,
+            "skipped_files": [],
+            "degraded_reason": "capacity_full",
+            "error": str(ce),
+            "retry_after": ce.retry_after,
+        }
+
+    # Bounded polling loop up to timeout
+    max_wait_s = 175.0
+    start_t = time.monotonic()
+    while time.monotonic() - start_t < max_wait_s:
+        poll_res = supervisor.poll(record.job_id, session_id=clean_sid)
+        state = poll_res.get("state")
+        if state in ("COMPLETED", "FAILED", "CANCELLED", "ORPHANED"):
+            res_dict = poll_res.get("result")
+            if res_dict and isinstance(res_dict, dict):
+                return res_dict
+            return poll_res
+        await asyncio.sleep(0.02)
+
+    # 超时：主动 cancel 止损并返回降级卡
+    supervisor.cancel(record.job_id, session_id=clean_sid)
+    return {
+        "status": "degraded",
+        "session_id": clean_sid,
+        "mode": mode,
+        "findings": "",
+        "log_path": record.log_path,
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "prompt_cache_hit_tokens": 0},
+        "truncated": False,
+        "skipped_files": [],
+        "degraded_reason": "timeout",
+        "job_id": record.job_id,
+        "handoff_prompt": (
+            f"[Reviewer Engine Timeout]\n"
+            f"审查引擎在 {max_wait_s}s 内未完成响应。部分思考流已保存在 {record.log_path}。\n"
+            f"已触发主动取消，任务句柄为: {record.job_id}。"
+        ),
+    }
 
 
 def _degraded_card(reason: str, config: QuenchStackConfig) -> Dict[str, Any]:

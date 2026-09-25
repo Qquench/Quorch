@@ -31,6 +31,7 @@ coverage.xml
 .agents/.quench_bypass.json
 .agents/.quench_hook.log*
 .agents/.quench_path_backup.json
+.agents/.quorch/baselines/
 .agents/logs/
 .agents/.logs/
 

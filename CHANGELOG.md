@@ -3,6 +3,25 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-25] 2026-09-25_v1.08_step04_async_reviewer_jobs.md
+
+- **Task 4.0**: Reviewer Workspace 进程互斥底座与跨进程存活性判定 (Reviewer Workspace Mutex & Cross-Process Liveness)
+  - Implemented `WorkspaceLeaseGuard` in `workspace_lease.py` based on atomic `filelock` and heartbeat lease metadata (`.agents/logs/reviewer/workspace.lease.json`) ensuring single active reviewer service process per workspace;
+  - Decoupled heartbeat renewal into a dedicated `LeaseHeartbeatThread` daemon thread, preventing lease expiration during long synchronous reasoning turns;
+  - Built cross-platform `probe_peer` liveness detection supporting POSIX `EPERM` alive handling, PID reuse nonce mismatch conservative rejection, and Windows `GetExitCodeProcess` with `STILL_ACTIVE` verification;
+  - Covered full lifecycle, mutex preemption, and edge cases in `test_workspace_lease.py`.
+- **Task 4.1**: Reviewer 异步长推演任务制（Submit / Poll / Cancel）与 1KB 极简白名单契约 (Reviewer Async Long-Running Jobs & 1KB Snapshot Contract)
+  - Implemented `ReviewerJobSupervisor` in `reviewer_jobs.py` managing async consultation jobs (`submit`, `poll`, `cancel`) with single-writer CAS state transitions and persistent background worker tasks surviving handler scopes;
+  - Enforced 1KB strict non-terminal Poll whitelist contract (`POLL_NONTERMINAL_FIELDS`: 6 fields, monotonic diff elapsed/idle seconds, bounded log_ref, zero text/reasoning leakage, raising `SnapshotContractViolation` on overflow);
+  - Enforced terminal symmetric snapshot contract (`POLL_TERMINAL_FIELDS`, 40,000-character findings budget cap, and strict invariant assertion against raw CoT / reasoning keys);
+  - Implemented pure function `format_progress` resolving POSIX locale hierarchy (`locale > LC_ALL > LC_MESSAGES > LANG > 'en'`) with 3-phase, 2-language mappings;
+  - Upgraded `ActiveLogRegistry` in `log_naming.py` with `norm_registry_key` stripping `.1.log` rotation suffixes to pin active logs and prevent GC teardown or permission errors during in-flight runs;
+  - Added `WorkspaceLeaseNotHeldError` guard on Reviewer GC entry;
+  - Unified `SESSION_ID_PATTERN` SSOT to 128 characters across modules;
+  - Registered FastMCP tools `dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`, and refactored `dev_reviewer_consult` into a bounded thin-shell preserving 100% backward compatibility;
+  - Verified all 17 mandatory assertion functions in `test_reviewer_jobs.py` and `test_snapshot_contract.py` alongside full 544-test zero-regression suite.
+
+
 ## [2026-09-25] 2026-09-24_v1.08_step02_lease_heartbeat_and_dual_process_cas.md
 
 - **Task 2.1**: 隐式与显式租约心跳刷新及工作区沉浸防杀探针 (External Lease Heartbeat & Active Modifying Immersion Anti-Kill Probe)

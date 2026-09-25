@@ -268,24 +268,24 @@
     "2026-09-25_v1.08_step04_async_reviewer_jobs::4.0": {
       "task_id": "2026-09-25_v1.08_step04_async_reviewer_jobs::4.0",
       "md_sha256": "3af2c51ce4285c456d4142b83ed482badf066a82c1731f29d20bc178a2a619f8",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 491362953000000,
-      "last_heartbeat_wall_utc": "2026-09-24T16:46:25.699107+00:00",
-      "git_head_sha": "f73a8de1ae149b531523d17bc1ab2f5172ea2f2a",
-      "git_index_mtime": 1790259014.3600097,
-      "released": false
+      "generation": 1,
+      "holder_token": "token_1790316086119_21764",
+      "last_heartbeat_monotonic_ns": 539203187000000,
+      "last_heartbeat_wall_utc": "2026-09-25T06:03:47.494953+00:00",
+      "git_head_sha": "de1f092ce10bd8d07b057c15c4ce7a72d7da14bc",
+      "git_index_mtime": 1790270072.2749555,
+      "released": true
     },
     "2026-09-25_v1.08_step04_async_reviewer_jobs::4.1": {
       "task_id": "2026-09-25_v1.08_step04_async_reviewer_jobs::4.1",
       "md_sha256": "3af2c51ce4285c456d4142b83ed482badf066a82c1731f29d20bc178a2a619f8",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 491362953000000,
-      "last_heartbeat_wall_utc": "2026-09-24T16:46:25.710089+00:00",
-      "git_head_sha": "f73a8de1ae149b531523d17bc1ab2f5172ea2f2a",
-      "git_index_mtime": 1790259014.3600097,
-      "released": false
+      "generation": 1,
+      "holder_token": "token_1790316240328_19412",
+      "last_heartbeat_monotonic_ns": 540963421000000,
+      "last_heartbeat_wall_utc": "2026-09-25T06:33:07.714598+00:00",
+      "git_head_sha": "de1f092ce10bd8d07b057c15c4ce7a72d7da14bc",
+      "git_index_mtime": 1790270072.2749555,
+      "released": true
     },
     "2026-09-24_v1.08_step02_lease_heartbeat_and_dual_process_cas::2.3": {
       "task_id": "2026-09-24_v1.08_step02_lease_heartbeat_and_dual_process_cas::2.3",

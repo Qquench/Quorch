@@ -188,4 +188,32 @@ governance:
   # Lease TTL in seconds / 租约超时时间（秒，默认 300 秒）
   lease_ttl_seconds: 300
 
+# ==============================================================================
+# Reviewer Long-Running Asynchronous Jobs (审查长推演异步任务制配置)
+# Governs polling intervals, TTL, snapshot byte limits, and capacity admission.
+# 管控轮询间隔退避、任务留存 TTL、1KB 极简快照上限与并发准入控制。
+# ==============================================================================
+reviewer_jobs:
+  # Default polling interval in seconds / 默认推荐轮询间隔（秒，默认 8）
+  poll_interval_default: 8
+
+  # Minimum polling interval in seconds / 最小轮询保护下限（秒，默认 2）
+  poll_min_interval: 2
+
+  # Maximum polling interval in seconds / 最大轮询退避上限（秒，默认 30）
+  poll_max_interval: 30
+
+  # Job record & result TTL in seconds / 终态任务留存超时（秒，默认 1800）
+  job_ttl_seconds: 1800
+
+  # Maximum concurrent active review jobs / 最大在途并发推演任务数（默认 4）
+  max_concurrent_jobs: 4
+
+  # Strict byte ceiling for non-terminal poll snapshots / 非终态轮询快照严格物理字节上限（默认 1024）
+  max_snapshot_bytes: 1024
+
+  # Whether to reconcile and clean orphaned jobs on supervisor load / 是否在服务载入时对账清理孤儿任务（默认 true）
+  reconcile_on_load: true
+
+
 
