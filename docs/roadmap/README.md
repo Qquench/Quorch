@@ -14,6 +14,7 @@
 | Milestone | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
 | **v1.08** | 📋 **[v1.08_reverse_topology_and_external_runner.md](./v1.08_reverse_topology_and_external_runner.md)** | **Reverse-Topology & External-Runner Governance: Asymmetric Dual-Host Architecture** | Hook-free whitelist sinking (B1), lease heartbeat (B3), dual-process CAS lock (B4), capability tokens & verdict provenance (B7) | 🔨 **Active Planning & Tasking** |
+| **v1.09** | 📋 **[v1.09_plan_frontiers_dag_and_dynamic_governance.md](./v1.09_plan_frontiers_dag_and_dynamic_governance.md)** | **Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback** | Tokenizer-aware budget & truncation telemetry (P1), monotonic Epoch fencing & revert primitive (P2), depends_on task DAG (P3), step-level rejection (P4), Repo-Map & Subagent review isolation (P5) | 📋 **Architecture Blueprint** |
 
 ---
 
