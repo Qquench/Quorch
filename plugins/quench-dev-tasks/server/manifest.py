@@ -919,7 +919,7 @@ def reconcile_workspace_against_whitelist(
     snapshot: BaselineSnapshot,
     whitelist_paths: Sequence[str],
     unmanaged_patterns: Sequence[str],
-    budget_ms: float = 50.0,
+    budget_ms: float = 500.0,
 ) -> ReconciliationReport:
     """Pure-function workspace reconciliation against baseline and whitelist. Zero write syscalls."""
     start_time = time.perf_counter()

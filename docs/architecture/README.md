@@ -48,7 +48,7 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 │  • Independent daemon process (server.py)                        │
 │  • Cross-platform path safety (path_guard.py)                    │
 │  • Handle isolation & stdout purity contract                     │
-│  • 12 registered MCP tool endpoints                              │
+│  • 17 registered MCP tool endpoints                              │
 └─────────────────────────┬────────────────────────────────────────┘
                           │ in-process calls
 ┌─────────────────────────▼────────────────────────────────────────┐
@@ -144,23 +144,45 @@ Latency target: **< 50ms** per hook invocation.
 - At `dev_tasks_complete` / `dev_tasks_escalate`, the state machine runs `reconcile_workspace_against_whitelist` (pure function with dual fast-path / slow-path comparison and 50ms timeout circuit breaker);
 - Any modified or created files outside the declared `【涉及文件】` whitelist are rejected with `ScopeViolationError`, preventing external runners from bypassing file boundaries.
 
-### 3.3 Async Reviewer Thinking-Stream Pipeline
+### 3.3 Synchronous Consultation & Asynchronous Reviewer Job Pipelines
+
+Quench supports two complementary Reviewer execution paths:
+
+1. **Synchronous Direct Consultation (`dev_reviewer_consult`)**:
+   Thin-shell synchronous RPC wrapping quick architectural critiques, trade-off evaluations, or brainstorm sessions within active turns.
+
+2. **Asynchronous Long-Running Jobs (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**:
+   Decouples deep architectural reasoning into background worker jobs:
 
 ```
-dev_reviewer_consult / dev_tasks_refine_spec
-        │
-        ▼ ReviewerClient.run_async()
-  ┌─────────────────────────────────────────┐
-  │  Provider adapter (DeepSeek/OpenAI/…)   │
-  │  Streaming chunks → thinking.log        │
-  │  1024KB hard-cap rotation (log_naming)  │
-  │  ~1.0s heartbeat notifications          │
-  └────────────────────┬────────────────────┘
-                       │ final structured verdict
-                       ▼
-              verdicts.jsonl (append)
-              MCP response → Runner
+[Runner / Caller]
+       │ dev_reviewer_submit
+       ▼
+ ┌────────────────────────────────────────────────────────┐
+ │ ReviewerJobSupervisor                                  │
+ │ • CapacityLimiter admission check                      │
+ │ • Background worker coroutine spawned                  │
+ │ • Durable JobRecord written to disk                    │
+ └─────────────────────────┬──────────────────────────────┘
+                           │
+                           ▼ ReviewerClient.run_async()
+ ┌────────────────────────────────────────────────────────┐
+ │ Execution & Observability                              │
+ │ • Streaming chunks → latest-<session_id>.log           │
+ │ • 1024KB hard-cap rotation (log_naming)                │
+ │ • File-based heartbeat logging (Pull Model)            │
+ └─────────────────────────┬──────────────────────────────┘
+                           │
+       ┌───────────────────┴───────────────────┐
+       ▼ (in-flight)                           ▼ (terminal)
+dev_reviewer_poll(raw_text=True)        dev_reviewer_poll()
+[Reviewer thinking: 1,234 tokens|12.3s]  Full structured verdict
+(Zero JSON popup, 1KB bounded snapshot) (40k char budget cap)
 ```
+
+- **Clean Raw-Text Projection**: Non-terminal poll calls with `raw_text=True` return a canonical single-line string (`[Reviewer thinking: ... tokens | ...s]`), eliminating JSON code-card clutter in IDE chat windows.
+- **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
+- **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops.
 
 ### 3.4 Task Contract & Bilingual Headings SSOT
 
@@ -170,7 +192,7 @@ DevTask specifications are strictly validated against the Six-Core-Field structu
 
 ---
 
-## 4. Architectural Invariants (8 Core — All Test-Anchored)
+## 4. Architectural Invariants (9 Core — All Test-Anchored)
 
 > These invariants are non-negotiable. Each has at least one automated test asserting its physical enforcement.
 
@@ -184,6 +206,7 @@ DevTask specifications are strictly validated against the Six-Core-Field structu
 | **INV-6** | Review is read-only (no production file writes during review) | Consultation sandbox guard; read-only path assertions | `test_consultation_context_guard.py` |
 | **INV-7** | Physical feasibility gate (path + pytest dry-run before promotion) | `dev_tasks_promote_draft` enforces checks; lint gate blocks invalid paths | `test_draft_lint.py` |
 | **INV-8** | Context budget cap (`max_total_injection_chars`) | `project_config.py` enforces cap before injection; truncation tested | `test_consultation_context_guard.py` |
+| **INV-9** | Single Provider Egress (no raw API bypass) | CI & test static AST scanner (`check_no_api_bypass.py`) asserts all Reviewer model calls transit through `ReviewerClient` | `test_no_api_bypass.py` |
 
 ---
 
@@ -197,7 +220,9 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `state_machine.py` | T3 | CAS atomic state transitions backed by `filelock` | Single writer at a time; idempotent on repeated calls |
 | `schema_validator.py` | T3 | Six-field contract validation; physical feasibility lint gate (`draft_lint`) | No file writes; pure validation |
 | `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement; CAS TTL lease management (`manifest_lease`) | Single lock holder per task; lease expiration safety |
-| `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; heartbeat | Vendor-neutral; zero hard-coded provider literals |
+| `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, async job state machine, 1KB non-terminal snapshot, raw_text projection, cancellation | Durable atomic writes; memory-leak-free |
+| `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease daemon, cross-process peer liveness detection (`probe_peer`) | FileLock-backed; POSIX & Windows liveness |
+| `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
 | `consultation.py` | T4 | `dev_reviewer_consult` logic; context assembly; sandbox | Read-only guard enforced before any context injection |
 | `reaper.py` | T4 | Session log GC (`gc_by_filename_order`) | **Zero-stat contract**: only `os.listdir` + `os.remove`; no `os.stat`/`os.path.exists` |
 | `log_naming.py` | T4 | Log file naming, rotation, zero-stat GC primitives | `_guarded_stat` path-whitelist; see `ci_incident_tracker_and_compatibility_guide.md` Case 6 |
@@ -206,10 +231,11 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `observability_policy.py` | T4 | Verdict sink policy; log rotation policy | Append-only verdicts; policy-driven, not hard-coded |
 | `code_explorer.py` | T3 | AST symbol extraction for `dev_tasks_refine_spec` | Read-only; no side effects |
 | `handoff_card.py` | T2 | Single source of truth for handoff card rendering (GFM alerts, collapsible task context) | Pure function; zero side-effects; no network I/O |
-| `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`) | Interactive ANSI formatting; non-AI operator gateway |
+| `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`, `reviewer debug`) | Interactive ANSI formatting; non-AI operator gateway |
 | `changelog_writer.py` | T3 | Atomic append of completed task deliveries to `CHANGELOG.md` | Non-destructive header-preserving updates |
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement | Must respond in < 50ms; no network calls |
 | `hooks/context_injector.py` | T1 | PostToolUse context enrichment | Read-only; non-blocking |
+| `scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |
 | `scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
 | `scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
 | `scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |

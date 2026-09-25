@@ -29,12 +29,30 @@ SLUG_MAX_LEN: Final[int] = 20
 HEADER_VERSION: Final[str] = "quench-reviewer-log v1"
 
 _LOG_FILENAME_REGEX = re.compile(r"^(\d{8})_(\d{3})_([a-z0-9_]+)\.log$")
+LOG_FILENAME_REGEX: Final[re.Pattern] = _LOG_FILENAME_REGEX
+MAX_LOG_REF_CHARS: Final[int] = 40
 
 _WINDOWS_RESERVED_NAMES: Final[set[str]] = {
     "con", "prn", "aux", "nul",
     "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
     "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 }
+
+
+def validate_log_ref(log_ref: str) -> str:
+    """Validate log_ref: must match legal log basename regex and never exceed MAX_LOG_REF_CHARS.
+    Silent lossy truncation is strictly forbidden (H-A).
+    """
+    if not isinstance(log_ref, str) or not log_ref.strip():
+        raise ValueError("log_ref must be a non-empty string")
+    clean = log_ref.strip()
+    if len(clean) > MAX_LOG_REF_CHARS:
+        raise ValueError(
+            f"log_ref length ({len(clean)}) exceeds limit ({MAX_LOG_REF_CHARS}): '{clean}'"
+        )
+    if "/" in clean or "\\" in clean or not LOG_FILENAME_REGEX.match(clean):
+        raise ValueError(f"Invalid log_ref format: '{clean}'. Must match {LOG_FILENAME_REGEX.pattern}")
+    return clean
 
 
 def norm_registry_key(path: str | os.PathLike[str]) -> str:

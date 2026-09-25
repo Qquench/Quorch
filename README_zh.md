@@ -64,13 +64,16 @@ AI 编程助手显著提升了编码效率，但在复杂的真实工程实践�
 
 - **双模型逻辑角色解耦**：90% 的日常编码由轻量高敏捷模型（`Runner`）执行；高阶推理模型（`Reviewer`）仅在任务规划、架构复核与遇到重大冲突时委派介入，大幅节省旗舰算力配额。
 - **厂商中立 Reviewer 审查引擎 (`ReviewerClient`)**：基于声明式 `PROVIDER_PRESETS` 注册表的通用中立架构，支持 OpenAI、DeepSeek（流式思维链与 Prompt Cache 计费感知）、Ollama 本地全离线模型、vLLM 高性能端点、通用代理网关、IDE 内置子代理及 Manual 优雅回退链，并受源码级静态中立性扫描闸门守护。
+- **Reviewer 异步推演任务制 (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**：将长耗时复杂架构推演任务解耦为常驻后台 Worker，具备持久化状态安全落盘、确定性主动取消终止、1KB 严格非终态白名单契约与 `wait_max_s` 服务端长轮询挂起等待。
+- **清爽单行纯文本心跳投射**：非终态轮询支持 `raw_text=True` 直接透传单行纯文本进度字串（`[Reviewer thinking: 1,234 tokens | 12.3s]`），彻底消灭多层嵌套大 JSON 弹窗刷屏与上下文膨胀。
 - **免任务单即时架构咨询 (`dev_reviewer_consult`)**：新增专用咨询工具，打破“无任务单即无审查”的束缚，支持随性红队挑刺 (`critique`)、方案选型矩阵 (`evaluate`)、架构头脑风暴 (`brainstorm`) 与合规审计 (`audit`)，自带只读沙箱守卫与字节级稳定前缀缓存。
+- **严格出口单一化与 AST 防旁路静态门禁**：通过 `scripts/check_no_api_bypass.py` 静态代码 AST 扫描，硬性断绝任何跳过 `ReviewerClient` 编写临时脚本偷调模型 API 的旁路通道。
 - **严格防角色扮演治理红线**：从纪律规则与工具协议上杜绝主模型在审查要求下自作主张或伪装 Reviewer；在引擎未配置或异常断线时统一输出 `findings == ""` 的结构化降级卡片。
 - **AST 代码探查与规约强化 (`dev_tasks_refine_spec`)**：精准提取 AST 符号与依赖切片，无需全量 Dump 代码库，自动将粗粒度草案升级为严密的六大字段任务契约。
-- **极简实时思考流落盘与低频心跳**：思维链实时分块写入 `.agents/logs/reviewer/` (`thinking.log` 与 `latest-<session_id>.log`)，具备 1024KB 硬封顶安全轮转与跨块正则流式脱敏；1.0s 低频进度心跳，100% 保持 MCP stdio JSON-RPC 纯净度。
+- **实时思考流落盘与日志安全轮转**：思维链实时分块写入 `.agents/logs/reviewer/` (`thinking.log` 与 `latest-<session_id>.log`)，具备 1024KB 硬封顶安全轮转与跨块正则流式脱敏，100% 保持 MCP stdio JSON-RPC 纯净度。
 - **Draft 任务草案态与物理可行性 Lint 门禁 (`📝 草案`)**：安全隔离未经充分推演的架构想法；晋升前硬性核验路径防穿越、物理文件存在性、覆盖冲突防范与 pytest dry-run 静态语法校验。
-- **PreToolUse 物理拦截层**：真正基于 Hook 拦截当前任务【涉及文件】白名单之外的修改行为，在未授权修改前弹出交互确认框，把终审权交还给开发者。
-- **跨进程排他锁状态机**：基于 `filelock` 实现单核互斥状态机，严格保障同一时刻仅单任务执行，彻底杜绝多 Subagent 协作冲突与竞态。
+- **PreToolUse 物理拦截层与工作区基线对账**：在 IDE 宿主侧由 PreToolUse 钩子拦截越界写，在服务端状态机由检出基线快照（Baseline Snapshot）与 Git diff 工作树后置对账进行双重硬管控。
+- **跨进程排他锁与租约状态机**：基于 `filelock` 与心跳租约机制实现单核互斥状态机，严格保障同一时刻仅单任务执行，彻底杜绝多 Subagent 协作冲突与竞态。
 - **六大核心字段契约**：每项任务必须明确【涉及文件】、【缺陷根因与修改目标】、【目标签名与类型契约】、【分步改造指引】、【防御与边缘校验】和【DoD 验证命令】。
 - **业务领域零侵入**：纯通用治理引擎，通过每个项目根目录下的 `.agents/quench_stack.yaml` 声明自身边界与约束，适用于任何编程语言与技术栈。
 
@@ -111,21 +114,27 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 
 ## 🛠️ MCP 工具字典与功能速查
 
-`quench-dev-tasks` MCP Server 提供以下 11 个专用工具：
+`quench-dev-tasks` MCP Server 提供以下 17 个专用工具：
 
-| 工具名称 | 核心作用 | 典型使用时机 |
-| :--- | :--- | :--- |
-| `dev_tasks_status` | 查询任务总览、批次排队（支持 `include_drafts`）与 Hook 审计日志 | 会话启动自检、完成里程碑后 |
-| `dev_tasks_propose` | 提交符合六大字段契约的标准开发任务提案 (`⬜ 待确认` 或 `📝 草案`) | 架构设计或需求梳理时 |
-| `dev_tasks_refine_spec` | 基于 AST 代码探查与高阶推理大脑强化任务规约 | 将粗粒度草案升级为可执行契约 |
-| `dev_tasks_promote_draft`| 实施物理可行性 Lint 门禁（防路径穿越、语法 dry-run）并晋升为待执行 | 将推演完毕的草案纳入待领队列 |
-| `dev_tasks_confirm` | 调整任务状态 (`confirm`, `rework`, `skip`, `revoke`) | 架构审查完成、准许开工前 |
-| `dev_tasks_checkout` | 领单检出已确认任务，置为 `🔨 执行中` 并下发指引 | 执行模型按序或定向领取任务 |
-| `dev_tasks_complete` | 提交任务完成报告并审计单测断言 (`✔️ 已完成`) | 物理执行全部 DoD 命令通过后 |
-| `dev_tasks_escalate` | 升级遇到冲突的任务并生成多层能力审查交接卡 | 遇到方案冲突、死锁或回归缺陷时 |
-| `dev_reviewer_consult` | 免任务单直接向 Reviewer 咨询挑刺/方案权衡/架构审计 | 产生随性架构灵感、技术方案比选时 |
-| `dev_tasks_set_bypass`| 开启附带物理会话锁与过期倒计时的快速通道旁路 | 进行极轻量修补（如单点样式、错别字） |
-| `dev_tasks_archive` | 归档已闭环的任务单并自动追加记录至 `CHANGELOG.md` | 当前任务单全量完成闭环后 |
+| 分类 | 工具名称 | 核心作用 | 典型使用时机 |
+| :--- | :--- | :--- | :--- |
+| **任务流转与执行** | `dev_tasks_status` | 查询任务总览、批次排队（支持 `include_drafts`）与 Hook 审计日志 | 会话启动自检、完成里程碑后 |
+| | `dev_tasks_propose` | 提交符合六大字段契约的标准开发任务提案 (`⬜ 待确认` 或 `📝 草案`) | 架构设计或需求梳理时 |
+| | `dev_tasks_confirm` | 调整任务状态 (`confirm`, `rework`, `skip`, `revoke`) | 架构审查完成、准许开工前 |
+| | `dev_tasks_checkout` | 领单检出已确认任务，置为 `🔨 执行中` 并下发指引 | 执行模型按序或定向领取任务 |
+| | `dev_tasks_complete` | 提交任务完成报告并审计单测断言与工作区范围对账 (`✔️ 已完成`) | 物理执行全部 DoD 命令通过后 |
+| | `dev_tasks_escalate` | 升级遇到冲突的任务并生成多层能力审查交接卡 | 遇到方案冲突、死锁或回归缺陷时 |
+| | `dev_tasks_export_handoff_card`| 纯导出标准 Reviewer 交接卡片，不触发任何状态突变 | 需跨会话或离线人工交接审查时 |
+| **租约与并发治理** | `dev_tasks_heartbeat` | 刷新当前执行中任务的活跃租约心跳，防止被回收 | 长期沉浸编码或大批量单测执行时 |
+| | `dev_tasks_reclaim` | 基于 CAS 原子夺权回收异常僵死或超时失联的任务 | 多进程下抢占恢复无主任务 |
+| **草案与规约强化** | `dev_tasks_refine_spec` | 基于 AST 代码探查与高阶推理大脑强化任务规约 | 将粗粒度草案升级为可执行契约 |
+| | `dev_tasks_promote_draft`| 实施物理可行性 Lint 门禁（防路径穿越、语法 dry-run）并晋升为待执行 | 将推演完毕的草案纳入待领队列 |
+| **架构审查与咨询** | `dev_reviewer_consult` | 免任务单同步向 Reviewer 咨询挑刺/方案权衡/架构审计 | 产生随性架构灵感、技术方案比选时 |
+| | `dev_reviewer_submit` | 提交异步 Reviewer 推演任务，常驻后台 Worker 独立运行 | 发起耗时较长的深度长推演架构审查 |
+| | `dev_reviewer_poll` | 轮询异步任务进度或结果，支持单行纯文本投射与长轮询挂起 | 定期探查推演进展、拉取最终审查裁定 |
+| | `dev_reviewer_cancel` | 确定性主动取消执行中的异步推演任务，中止模型网络传输 | 发现方案不符或需紧急刹车止损时 |
+| **治理维护与旁路** | `dev_tasks_set_bypass` | 开启附带物理会话锁与过期倒计时的快速通道旁路 | 进行极轻量修补（如单点样式、错别字） |
+| | `dev_tasks_archive` | 归档已闭环的任务单并自动追加记录至 `CHANGELOG.md` | 当前任务单全量完成闭环后 |
 
 ## 🧑‍💻 3 分钟首个任务实战演练
 
@@ -162,7 +171,7 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 > **作者说明与诚挚提示**  
 > 本项目源于我个人在 **Windows 环境下使用 Google Antigravity IDE** 进行日常开发时的实际工程痛点与治理需求。其底层核心状态机、治理引擎与 Antigravity 拦截链路已在本地经过充分实战跑通与验证。
 > 
-> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然已编写了全量自动化单元测试（308+ 项单测覆盖），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
+> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然已编写了全量自动化单元测试（572+ 项单测覆盖），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
 > 
 > 诚挚欢迎广大社区开发者提出 Issue、反馈实际使用体验或提交 PR，共同完善和加固各客户端适配层！
 

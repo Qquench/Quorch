@@ -3,6 +3,28 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-25] 2026-09-25_v1.08_step04_corrections.md
+
+- **Task 4.2**: 租约可判定性与并发安全硬化（心跳 fail-stop、TTL+Fencing 夺权、touch 枚举语义与破坏性门禁）
+  - Strengthened `WorkspaceLeaseGuard` heartbeat fail-stop semantics, rejecting stale generations on renewals;
+  - Hardened TTL expiry check and fencing generation takeover with atomic filelock;
+  - Replaced ambiguous boolean truthiness on touch with explicit `TouchOutcome` enum;
+  - Added destructive pre-flight gate on lease takeovers.
+- **Task 4.3**: 双源状态一致性收口：JobRecord 单一 SSOT、durable write 与终态 allowlist
+  - Unified `JobRecord` as sole authoritative state representation on disk (`.agents/logs/reviewer/jobs/`);
+  - Added `_durable_write_json` with fsync and cross-platform atomic rename for all job transitions;
+  - Implemented automatic idempotent self-healing reconciliation from `JobRecord` to `verdicts.jsonl`;
+  - Enforced `TERMINAL_RESULT_ALLOWED_FIELDS` filtering raw reasoning and CoT leaks while preserving required consultation outputs.
+- **Task 4.4**: Reviewer 出口单一化与旁路调用静态强制
+  - Enforced single provider network egress invariant (INV-9) with `check_no_api_bypass.py` static AST scan gate;
+  - Added CLI pre-flight diagnostic entry `quorch reviewer debug` (and `quorch check --engine`);
+  - Replaced ad-hoc raw API scripts with standard MCP and CLI interfaces.
+- **Task 4.5**: 异步心跳格式 SSOT 贯通、Poll 紧凑信封/纯文本投射、统一纯英文展示与无效推送彻底清除
+  - Implemented pure function `format_heartbeat_line` SSOT returning `[Reviewer thinking: {tokens} tokens | {elapsed_s:.1f}s]`;
+  - Added `raw_text=True` non-terminal poll projection directly returning clean single-line strings in FastMCP text blocks;
+  - Added `wait_max_s` long polling (0–25s) suspending execution until status transitions;
+  - Cleaned up obsolete push channels in `AdaptiveHeartbeatSink` and aligned with Pull Model.
+
 ## [2026-09-25] 2026-09-25_v1.08_step04_async_reviewer_jobs.md
 
 - **Task 4.0**: Reviewer Workspace 进程互斥底座与跨进程存活性判定 (Reviewer Workspace Mutex & Cross-Process Liveness)

@@ -11,6 +11,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if SERVER_DIR not in sys.path:
+    sys.path.insert(0, SERVER_DIR)
+
 from reviewer_engine import (
     AdaptiveHeartbeatSink,
     DeepSeekClient,
@@ -105,36 +109,29 @@ def test_adaptive_heartbeat_throttling():
 
     # First pulse at t=0
     heartbeat.on_heartbeat(tokens_so_far=100, elapsed_s=1.0)
-    out1 = fake_stderr.getvalue()
-    assert "[Reviewer 思考中: 100 tokens | 1.0s]" in out1
     assert len(emitted_files) == 1
-    assert "[progress] [Reviewer 思考中: 100 tokens | 1.0s]" in emitted_files[0]
+    assert "[progress] [Reviewer thinking: 100 tokens | 1.0s]" in emitted_files[0]
 
     # Second pulse immediately after (no time elapsed) -> throttled
     heartbeat.on_heartbeat(tokens_so_far=200, elapsed_s=1.1)
-    out2 = fake_stderr.getvalue()
-    assert out2 == out1, "Rapid pulses within interval must be throttled"
     assert len(emitted_files) == 1
 
     # Fast forward clock > 1.05s
     with patch("time.monotonic", return_value=time.monotonic() + 2.0):
         heartbeat.on_heartbeat(tokens_so_far=300, elapsed_s=3.0)
-        out3 = fake_stderr.getvalue()
-        assert "[Reviewer 思考中: 300 tokens | 3.0s]" in out3
         assert len(emitted_files) == 2
+        assert "[progress] [Reviewer thinking: 300 tokens | 3.0s]" in emitted_files[1]
 
 
 def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
-    """验证 AdaptiveHeartbeatSink 能力分发与 FILE 常驻兜底三态覆盖 ({mcp_present, no_ctx_tty, no_ctx_no_tty})。"""
+    """验证 AdaptiveHeartbeatSink 纯拉模型落盘与 FILE 常驻兜底，严格遵守零 stdout/stderr 污染。"""
     # 0. D6 强制校验：未传 file_emit 必须抛 ValueError
     with pytest.raises(ValueError, match="file_emit"):
         AdaptiveHeartbeatSink(file_emit=None)
 
-    # 1. State: mcp_present
+    # 1. State: mcp_present -> file_emit 正常落盘，不再执行无效 mcp push
     mcp_ctx = MagicMock()
-    mcp_ctx.info = MagicMock()
     fake_stderr1 = io.StringIO()
-    fake_stderr1.isatty = lambda: False
     file_emitted1: list[str] = []
 
     hb_mcp = AdaptiveHeartbeatSink(
@@ -144,14 +141,12 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
         interval_ms=500,
     )
     hb_mcp.on_heartbeat(tokens_so_far=50, elapsed_s=0.5)
-    mcp_ctx.info.assert_called_once()
     assert len(file_emitted1) == 1
-    assert "[progress] [Reviewer 思考中: 50 tokens | 0.5s]" in file_emitted1[0]
+    assert "[progress] [Reviewer thinking: 50 tokens | 0.5s]" in file_emitted1[0]
     assert fake_stderr1.getvalue() == ""
 
-    # 2. State: no_ctx_tty (交互终端)
+    # 2. State: interactive terminal -> 遵循纯拉模型，stderr 零字符污染
     fake_stderr2 = io.StringIO()
-    fake_stderr2.isatty = lambda: True
     file_emitted2: list[str] = []
 
     hb_tty = AdaptiveHeartbeatSink(
@@ -161,13 +156,12 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
         interval_ms=500,
     )
     hb_tty.on_heartbeat(tokens_so_far=60, elapsed_s=0.6)
-    assert "\r[Reviewer 思考中: 60 tokens | 0.6s]..." in fake_stderr2.getvalue()
+    assert fake_stderr2.getvalue() == ""
     assert len(file_emitted2) == 1
-    assert "[progress] [Reviewer 思考中: 60 tokens | 0.6s]" in file_emitted2[0]
+    assert "[progress] [Reviewer thinking: 60 tokens | 0.6s]" in file_emitted2[0]
 
     # 3. State: no_ctx_no_tty (后台非 TTY 管道，无 MCP 上下文) -> FILE 常驻兜底，永不静默
     fake_stderr3 = io.StringIO()
-    fake_stderr3.isatty = lambda: False
     file_emitted3: list[str] = []
 
     hb_silent_stderr = AdaptiveHeartbeatSink(
@@ -177,10 +171,9 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
         interval_ms=500,
     )
     hb_silent_stderr.on_heartbeat(tokens_so_far=70, elapsed_s=0.7)
-    # stderr 遵守非 TTY 规范保持纯净，但 FILE 通道已记录
     assert fake_stderr3.getvalue() == ""
     assert len(file_emitted3) == 1
-    assert "[progress] [Reviewer 思考中: 70 tokens | 0.7s]" in file_emitted3[0]
+    assert "[progress] [Reviewer thinking: 70 tokens | 0.7s]" in file_emitted3[0]
 
     # 4. 全局零 stdout 污染核验
     captured = capfd.readouterr()

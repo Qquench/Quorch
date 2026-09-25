@@ -490,12 +490,10 @@ async def test_dev_reviewer_consult_heartbeat_dispatch_and_context_propagation(t
     assert log_path.exists()
     log_content = log_path.read_text(encoding="utf-8")
 
-    # 断言 FILE 通道兜底存在 [progress] 心跳标记
+    # 断言 FILE 通道存在 [progress] 心跳标记与纯英文心跳格式 (Pull Model SSOT)
     assert "[progress]" in log_content
     assert "Checking boundaries..." in log_content
-
-    # 断言 mock_ctx 收到了至少一次通知
-    assert mock_ctx.info.called or mock_ctx.report_progress.called
+    assert "[Reviewer thinking:" in log_content
 
     # 零 stdout 污染断言
     captured = capfd.readouterr()

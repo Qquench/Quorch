@@ -16,7 +16,7 @@ import sys
 import filelock
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Literal, TypedDict
+from typing import Any, Dict, List, Optional, Literal, TypedDict, Union
 from fastmcp import Context, FastMCP
 
 from log_naming import SESSION_ID_PATTERN
@@ -2383,11 +2383,14 @@ async def dev_reviewer_poll(
     workspace_root: str,
     job_id: str,
     session_id: str,
-) -> dict[str, Any]:
+    wait_max_s: int = 0,
+    raw_text: bool = False,
+) -> Union[str, dict[str, Any]]:
     """Poll status or result of a background Reviewer task.
     Enforces 1KB non-terminal snapshot contract.
 
     轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。
+    支持 raw_text=True 纯文本单行无卡片极简输出与 wait_max_s 服务端长轮询。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2395,14 +2398,31 @@ async def dev_reviewer_poll(
             "error": f"Invalid workspace_root: '{workspace_root}' is not an existing directory.",
         }
 
-    from reviewer_jobs import ReviewerJobSupervisor
+    from reviewer_jobs import ReviewerJobSupervisor, TERMINAL_STATES
     supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
-    try:
-        return supervisor.poll(job_id, session_id=session_id)
-    except (KeyError, ValueError, PermissionError) as e:
-        return {"status": "error", "error": str(e)}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+
+    timeout_s = max(0, min(25, int(wait_max_s)))
+    start_t = time.monotonic()
+
+    while True:
+        try:
+            res = supervisor.poll(job_id, session_id=session_id, raw_text=raw_text)
+        except (KeyError, ValueError, PermissionError) as e:
+            return {"status": "error", "error": str(e)}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+        is_terminal = isinstance(res, dict) and res.get("state") in {
+            s.value if hasattr(s, "value") else str(s) for s in TERMINAL_STATES
+        }
+        if is_terminal or timeout_s == 0:
+            return res
+
+        elapsed = time.monotonic() - start_t
+        if elapsed >= timeout_s:
+            return res
+
+        await asyncio.sleep(min(0.25, timeout_s - elapsed))
 
 
 @mcp.tool()
@@ -2539,6 +2559,8 @@ async def dev_reviewer_consult(
         if state in ("COMPLETED", "FAILED", "CANCELLED", "ORPHANED"):
             res_dict = poll_res.get("result")
             if res_dict and isinstance(res_dict, dict):
+                if "log_path" not in res_dict and poll_res.get("log_path"):
+                    res_dict["log_path"] = poll_res["log_path"]
                 return res_dict
             return poll_res
         await asyncio.sleep(0.02)

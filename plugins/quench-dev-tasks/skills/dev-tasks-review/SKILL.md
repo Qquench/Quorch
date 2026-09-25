@@ -111,11 +111,12 @@ When the agile runner model calls `dev_tasks_escalate` to awaken the Reviewer:
 
 ## 5. Review Channel Triage & Degraded Fallback (审查分流与降级卡片)
 
-### 分流决策树 (Consult vs Refine vs Escalate)
-1. 只想知道"这样设计行不行" / 想被挑刺 / 比选方案 → `dev_reviewer_consult`（无需任何 DevTask）；
-2. 已有草案但六字段不达标 / 需拆分 / 需重估可行性 → `dev_tasks_refine_spec`；
-3. 执行中反复失败 / 需要架构层面重新裁决 → `dev_tasks_escalate`；
-4. 引擎不可用 → 输出 degraded 卡片并停机，**不得**在本会话内自行给出审查结论。
+### 分流决策树 (Consult vs Refine vs Escalate vs Async Jobs)
+1. 只想知道"这样设计行不行" / 想被挑刺 / 比选方案 → `dev_reviewer_consult`（同步快捷咨询，无需任何 DevTask）；
+2. 长耗时深度推理 / 避免阻塞当前会话 → `dev_reviewer_submit` 提交后台作业，通过 `dev_reviewer_poll(raw_text=True)` 轮询单行心跳进度，需止损时调用 `dev_reviewer_cancel`；
+3. 已有草案但六字段不达标 / 需拆分 / 需重估可行性 → `dev_tasks_refine_spec`；
+4. 执行中反复失败 / 需要架构层面重新裁决 → `dev_tasks_escalate`；
+5. 引擎不可用 → 输出 degraded 卡片并停机，**不得**在本会话内自行给出审查结论。
 
 ### 显式降级卡片样例 (Degraded Card Example)
 当 `dev_reviewer_consult` 返回降级响应时，必须如实转呈给开发者，严禁由当前执行模型就地伪装 Reviewer 输出假评审：

@@ -21,6 +21,7 @@ from workspace_lease import (
     WorkspaceLeaseNotHeldError,
     PeerLiveness,
     LeaseHeartbeatThread,
+    LeaseTouchOutcome,
 )
 
 
@@ -37,17 +38,17 @@ def test_initialization_invariants(temp_workspace):
     assert not guard.is_held()
 
     # 异常场景 1: heartbeat_interval_s <= 0
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=300.0, heartbeat_interval_s=0)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=300.0, heartbeat_interval_s=-10)
 
     # 异常场景 2: heartbeat_interval_s >= lease_ttl_s
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=100.0, heartbeat_interval_s=100.0)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=50.0, heartbeat_interval_s=80.0)
 
 
@@ -262,13 +263,42 @@ def test_release_idempotency(temp_workspace):
 def test_touch_failures(temp_workspace):
     """touch 在租约被外部盗取或删除时的自愈防守。"""
     guard = WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=10.0, heartbeat_interval_s=1.0)
-    # 未持锁调用 touch 返回 False
-    assert guard.touch() is False
+    # 未持锁调用 touch 返回 LOST
+    assert guard.touch() == LeaseTouchOutcome.LOST
 
     guard.acquire_or_probe("nonce_touch")
-    assert guard.touch() is True
+    assert guard.touch() == LeaseTouchOutcome.RENEWED
 
     # 模拟外部强行删除租约文件
     guard.lease_file.unlink()
-    assert guard.touch() is False
+    assert guard.touch() == LeaseTouchOutcome.LOST
     assert not guard.is_held()
+
+
+def test_destructive_context_guard(temp_workspace):
+    """验证破坏性操作上下文门禁：未持锁时 raise WorkspaceLeaseNotHeldError。"""
+    guard = WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=10.0, heartbeat_interval_s=1.0)
+    with pytest.raises(WorkspaceLeaseNotHeldError):
+        with guard.destructive_context():
+            pass
+
+    guard.acquire_or_probe("nonce_destruct")
+    assert guard.is_held()
+    executed = False
+    with guard.destructive_context():
+        executed = True
+    assert executed is True
+
+
+def test_renew_or_die(temp_workspace):
+    """验证 renew_or_die 在失去租约时立即 raise WorkspaceLeaseNotHeldError。"""
+    guard = WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=10.0, heartbeat_interval_s=1.0)
+    with pytest.raises(WorkspaceLeaseNotHeldError):
+        guard.renew_or_die()
+
+    guard.acquire_or_probe("nonce_renew")
+    guard.renew_or_die()  # 持有时成功
+
+    guard.lease_file.unlink()
+    with pytest.raises(WorkspaceLeaseNotHeldError):
+        guard.renew_or_die()

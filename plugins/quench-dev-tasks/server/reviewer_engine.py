@@ -67,6 +67,10 @@ if sys.version_info >= (3, 7):
 _REVIEWER_LIMITER = anyio.CapacityLimiter(4)
 MAX_RESPONSE_BYTES = 1024 * 1024  # 1 MiB 响应体积硬上限
 
+# ARCHITECTURAL INVARIANT (BYPASS-GOV):
+# reviewer_engine.py is the ONLY authorized external network egress for Reviewer model providers.
+IS_SOLE_PROVIDER_EGRESS: Final[bool] = True
+
 
 # ---- 异常体系（厂商中立，禁止硬编码厂商字面量）----
 class ReviewerError(RuntimeError):
@@ -598,14 +602,20 @@ class CoalescingTextSink:
                 pass
 
 
-class AdaptiveHeartbeatSink:
-    """能力分发式心跳：向所有可用通道 fan-out，FILE 常驻兜底，严格遵守零 stdout 污染。
+def format_heartbeat_line(tokens: int, elapsed_s: float) -> str:
+    r"""Canonical heartbeat display line (SSOT).
+    Contract: MUST match r'^\[Reviewer thinking: \d+ tokens \| \d+\.\d+s\]$'
+    """
+    return f"[Reviewer thinking: {tokens} tokens | {elapsed_s:.1f}s]"
 
-    通道分发：
-    1. file_emit (强制必填): 无论任何环境均常驻追加 [progress] 记录至会话日志，永不失联；
-    2. mcp_context: 若注入 FastMCP 上下文，调用 report_progress / info；
-    3. stderr: 仅在 isatty 为真时进行动态 \r 覆盖输出；
-    4. 零 stdout 污染 (P0#1 铁律)：严禁向 sys.stdout 输出任何字符。
+
+class AdaptiveHeartbeatSink:
+    """心跳持久化槽：将 Reviewer 思考进展以纯英文统一格式安全落盘到会话日志。
+
+    遵循工业级纯拉模型 (Pull Model)：
+    Worker 将 [progress] [Reviewer thinking: ...] 追加到日志文件，
+    客户端通过 dev_reviewer_poll(raw_text=True) 按需轮询拉取，
+    完全消除无效的上下文推送与终端控制字符。严格遵守零 stdout 污染铁律。
     """
 
     def __init__(
@@ -623,14 +633,12 @@ class AdaptiveHeartbeatSink:
             )
         self.file_emit = file_emit
         self.mcp_context = mcp_context
-        self.stderr = stderr if stderr is not None else sys.stderr
+        self.stderr = stderr
         self.interval_s = max(int(interval_ms), 500) / 1000.0
         self._clock = clock if clock is not None else (lambda: time.monotonic())
         self._lock = threading.Lock()
         self._last_pulse_monotonic = 0.0
         self._pulse_count = 0
-        self._is_tty = bool(self.stderr and hasattr(self.stderr, "isatty") and self.stderr.isatty())
-        self._disabled_channels: set[str] = set()
 
     def on_chunk(self, chunk: ThoughtChunk) -> None:
         pass
@@ -643,46 +651,14 @@ class AdaptiveHeartbeatSink:
                 return
             self._last_pulse_monotonic = now
             self._pulse_count += 1
-            msg = f"[Reviewer 思考中: {tokens_so_far} tokens | {elapsed_s:.1f}s]"
+            msg = format_heartbeat_line(tokens_so_far, elapsed_s)
             iso_ts = datetime.now(timezone.utc).isoformat()
             file_msg = f"{iso_ts} [progress] {msg}\n"
 
-        # 1. FILE 常驻兜底通道
-        if "file" not in self._disabled_channels:
-            try:
-                self.file_emit(file_msg)
-            except Exception:
-                self._disabled_channels.add("file")
-
-        # 2. MCP 上下文通道
-        if self.mcp_context is not None and "mcp" not in self._disabled_channels:
-            try:
-                if hasattr(self.mcp_context, "info"):
-                    res = self.mcp_context.info(msg)
-                    if asyncio.iscoroutine(res):
-                        try:
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(res)
-                        except RuntimeError:
-                            pass
-                elif hasattr(self.mcp_context, "report_progress"):
-                    res = self.mcp_context.report_progress(tokens_so_far, 64000)
-                    if asyncio.iscoroutine(res):
-                        try:
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(res)
-                        except RuntimeError:
-                            pass
-            except Exception:
-                self._disabled_channels.add("mcp")
-
-        # 3. stderr (TTY)
-        if self._is_tty and "stderr" not in self._disabled_channels:
-            try:
-                self.stderr.write(f"\r{msg}...")
-                self.stderr.flush()
-            except Exception:
-                self._disabled_channels.add("stderr")
+        try:
+            self.file_emit(file_msg)
+        except Exception:
+            pass
 
     async def apulse(self, *, tokens_so_far: int, elapsed_s: float, step: str = "thinking") -> None:
         with self._lock:
@@ -692,46 +668,17 @@ class AdaptiveHeartbeatSink:
                 return
             self._last_pulse_monotonic = now
             self._pulse_count += 1
-            msg = f"[Reviewer 思考中: {tokens_so_far} tokens | {elapsed_s:.1f}s]"
+            msg = format_heartbeat_line(tokens_so_far, elapsed_s)
             iso_ts = datetime.now(timezone.utc).isoformat()
             file_msg = f"{iso_ts} [progress] {msg}\n"
 
-        # 1. FILE 常驻兜底通道
-        if "file" not in self._disabled_channels:
-            try:
-                self.file_emit(file_msg)
-            except Exception:
-                self._disabled_channels.add("file")
-
-        # 2. MCP 上下文通道
-        if self.mcp_context is not None and "mcp" not in self._disabled_channels:
-            try:
-                if hasattr(self.mcp_context, "info"):
-                    res = self.mcp_context.info(msg)
-                    if asyncio.iscoroutine(res):
-                        await res
-                elif hasattr(self.mcp_context, "report_progress"):
-                    res = self.mcp_context.report_progress(tokens_so_far, 64000)
-                    if asyncio.iscoroutine(res):
-                        await res
-            except Exception:
-                self._disabled_channels.add("mcp")
-
-        # 3. stderr (TTY)
-        if self._is_tty and "stderr" not in self._disabled_channels:
-            try:
-                self.stderr.write(f"\r{msg}...")
-                self.stderr.flush()
-            except Exception:
-                self._disabled_channels.add("stderr")
+        try:
+            self.file_emit(file_msg)
+        except Exception:
+            pass
 
     def on_finish(self, reason: str, meta: Dict[str, Any]) -> None:
-        if self._is_tty and self._pulse_count > 0:
-            try:
-                self.stderr.write("\n")
-                self.stderr.flush()
-            except Exception:
-                pass
+        pass
 
 
 class TelemetryRecord(TypedDict):
@@ -1643,6 +1590,7 @@ __all__ = [
     "ThoughtChunk",
     "ProgressSink",
     "RotatingFileSink",
+    "format_heartbeat_line",
     "AdaptiveHeartbeatSink",
     "CoalescingStats",
     "CoalescingTextSink",

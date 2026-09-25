@@ -355,6 +355,93 @@ def cmd_archive(workspace_root: str, yes: bool = False) -> int:
         return 1
 
 
+def cmd_reviewer_debug(
+    workspace_root: str,
+    dry_run: bool = True,
+    query: str = "Debug connectivity check",
+    plain: bool = False,
+    as_json: bool = False,
+) -> int:
+    """受治理的 Reviewer 调试逃生舱：
+    经由 project_config SSOT 解析配置，默认 --dry-run，支持安全体检。
+    """
+    import json
+    c = Colors(should_enable_color(plain))
+    ws = os.path.abspath(workspace_root)
+
+    try:
+        from project_config import load_project_config
+
+        cfg = load_project_config(ws)
+    except Exception as e:
+        if as_json:
+            print(json.dumps({"status": "error", "error": f"加载配置失败: {e}"}, ensure_ascii=False))
+        else:
+            print(c.red(f"❌ 加载项目配置失败: {e}"), file=sys.stderr)
+        return 1
+
+    re_cfg = getattr(cfg, "reviewer_engine", None)
+    if re_cfg is None:
+        if as_json:
+            print(json.dumps({"status": "error", "error": "Reviewer 引擎未在 quench_stack.yaml 中配置"}, ensure_ascii=False))
+        else:
+            print(c.red("❌ Reviewer 引擎未在 quench_stack.yaml 中配置 (reviewer_engine is null)"), file=sys.stderr)
+        return 1
+
+    from reviewer_engine import ReviewerClient
+    client = ReviewerClient(re_cfg)
+    raw_key = client.resolve_api_key() or ""
+    masked_key = _mask_secret(raw_key)
+
+    if dry_run:
+        result_data = {
+            "status": "dry_run_success",
+            "provider": re_cfg.provider,
+            "model": re_cfg.model,
+            "base_url": re_cfg.base_url,
+            "api_key": masked_key,
+            "thinking": re_cfg.thinking,
+            "timeout_seconds": re_cfg.timeout_seconds,
+            "message": "Governed debug: Configuration parsed and validated successfully via project_config SSOT (dry-run).",
+        }
+        if as_json:
+            print(json.dumps(result_data, ensure_ascii=False))
+        else:
+            print(c.bold("🛡️ [Quorch Reviewer Governed Debug - Dry Run]"))
+            print(f"  • Provider:        {c.cyan(re_cfg.provider)}")
+            print(f"  • Model:           {c.cyan(re_cfg.model)}")
+            print(f"  • Base URL:        {re_cfg.base_url or 'default'}")
+            print(f"  • API Key:         {masked_key}")
+            print(f"  • Thinking Stream: {re_cfg.thinking}")
+            print(f"  • Timeout (s):     {re_cfg.timeout_seconds}")
+            print(c.green("✅ 配置解析与凭据门禁体检通过（未实际出网）。如需发起受控真实网络连通探测，请指定 --execute。"))
+        return 0
+
+    # --execute: 真实网络探测
+    try:
+        from project_config import create_reviewer_client
+
+        client = create_reviewer_client(re_cfg)
+        if client is None or not client.is_available():
+            if as_json:
+                print(json.dumps({"status": "unavailable", "provider": re_cfg.provider, "error": "凭据缺失或客户端不可用"}, ensure_ascii=False))
+            else:
+                print(c.red(f"❌ Reviewer 客户端不可用：凭据缺失或配置不完整 (provider='{re_cfg.provider}')"), file=sys.stderr)
+            return 1
+
+        if as_json:
+            print(json.dumps({"status": "available", "provider": re_cfg.provider, "model": re_cfg.model, "api_key": masked_key}, ensure_ascii=False))
+        else:
+            print(c.green(f"✅ Reviewer 客户端凭据有效且就绪 (provider='{re_cfg.provider}', model='{re_cfg.model}')"))
+        return 0
+    except Exception as e:
+        if as_json:
+            print(json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False))
+        else:
+            print(c.red(f"❌ Reviewer 出网探测失败: {e}"), file=sys.stderr)
+        return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """CLI 统一主入口。返回进程退出码。"""
     parser = argparse.ArgumentParser(
@@ -438,6 +525,36 @@ def main(argv: Optional[List[str]] = None) -> int:
         "-y", "--yes", action="store_true", help="非交互确认归档"
     )
 
+    # 6. reviewer
+    p_reviewer = subparsers.add_parser("reviewer", help="Reviewer 引擎管理与受治理调试")
+    sub_reviewer = p_reviewer.add_subparsers(dest="reviewer_command", help="Reviewer 子命令")
+    p_rev_debug = sub_reviewer.add_parser("debug", help="以受治理方式调试 Reviewer 配置与网络出网连通性")
+    p_rev_debug.add_argument(
+        "-w", "--workspace", default=argparse.SUPPRESS, help="工作区根目录（默认当前目录）"
+    )
+    p_rev_debug.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        default=True,
+        help="仅校验配置与解析凭据，不实际出网（默认开启）",
+    )
+    p_rev_debug.add_argument(
+        "--execute",
+        dest="dry_run",
+        action="store_false",
+        help="实际发起连通性出网探测（需受控运行）",
+    )
+    p_rev_debug.add_argument(
+        "--query", default="Debug connectivity check", help="测试咨询语句"
+    )
+    p_rev_debug.add_argument(
+        "--plain", action="store_true", default=argparse.SUPPRESS, help="禁用彩色输出"
+    )
+    p_rev_debug.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS, help="以单行 JSON 输出"
+    )
+
     try:
         args = parser.parse_args(argv)
     except SystemExit as se:
@@ -466,6 +583,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         elif args.command == "archive":
             return cmd_archive(ws, yes=args.yes)
+        elif args.command == "reviewer":
+            if getattr(args, "reviewer_command", None) == "debug":
+                return cmd_reviewer_debug(
+                    ws,
+                    dry_run=getattr(args, "dry_run", True),
+                    query=getattr(args, "query", "Debug connectivity check"),
+                    plain=plain,
+                    as_json=as_json,
+                )
+            p_reviewer.print_help()
+            return 0
         else:
             parser.print_help()
             return 0

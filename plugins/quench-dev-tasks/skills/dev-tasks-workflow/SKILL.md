@@ -83,6 +83,8 @@ Every DevTask must contain the standard six core fields (bilingual headings supp
 
 ## 4. MCP Tools Cheatsheet (MCP 工具调用速查)
 
+The Quench DevTasks MCP Server exposes 17 specialized tools (full specification in [`dev_tasks_mcp_specification.md`](../../../dev_tasks_mcp_specification.md)):
+
 | Tool Name | Purpose | Usage Timing |
 | :--- | :--- | :--- |
 | `dev_tasks_status` | Query queue status, active task, and metrics | Session start, before/after checkouts |
@@ -91,6 +93,16 @@ Every DevTask must contain the standard six core fields (bilingual headings supp
 | `dev_tasks_propose` | Propose new task as `[Pending]` | Planning new tasks or architectural reviews |
 | `dev_tasks_confirm` | Transition task state (`confirm`/`rework`/`skip`) | Confirming batches or requesting rework |
 | `dev_tasks_escalate` | Trigger Reviewer handoff card | Complex impasses or structural refactoring |
+| `dev_tasks_export_handoff_card` | Export Reviewer handoff card without state mutation | Manual cross-session consultation |
+| `dev_tasks_heartbeat` | Refresh active lease heartbeat | Long-running non-MCP execution turns |
+| `dev_tasks_reclaim` | CAS-safe zombie task recovery | Recovering orphaned tasks across processes |
+| `dev_tasks_refine_spec` | Refine draft spec with AST analysis & reasoning | Upgrading drafts into executable contracts |
+| `dev_tasks_promote_draft`| Lint physical feasibility and promote draft | Promoting verified drafts to pending queue |
+| `dev_reviewer_consult` | Synchronous direct architecture consultation | Quick spontaneous critique/evaluation/audit |
+| `dev_reviewer_submit` | Submit async Reviewer background job | Long-running deep architectural reasoning |
+| `dev_reviewer_poll` | Poll async job status (supports `raw_text=True`) | Polling reasoning progress & verdict |
+| `dev_reviewer_cancel` | Deterministically cancel in-flight async job | Aborting in-progress background jobs |
+| `dev_tasks_set_bypass` | Activate time-bounded bypass token | Urgent hotfixes, documentation, typos |
 | `dev_tasks_archive` | Archive closed tasks and update changelog | All tasks in file closed |
 
 ---

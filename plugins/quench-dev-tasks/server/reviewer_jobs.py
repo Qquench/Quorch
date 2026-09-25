@@ -23,17 +23,20 @@ import anyio
 from filelock import FileLock
 
 from log_naming import (
+    MAX_LOG_REF_CHARS,
     SESSION_ID_PATTERN,
     SLUG_MAX_LEN,
     ActiveLogRegistry,
     allocate_log_file,
     norm_registry_key,
+    validate_log_ref,
 )
 from workspace_lease import WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
+from reviewer_engine import format_heartbeat_line
 
 JOB_ID_PATTERN: Final[re.Pattern] = re.compile(r"^[0-9a-zA-Z_-]{1,64}$")
-MAX_LOG_REF_CHARS: Final[int] = 40
-assert MAX_LOG_REF_CHARS >= 13 + SLUG_MAX_LEN + 4  # "YYYYMMDD_NNN_" + slug(20) + ".log" = 37 <= 40 (N4)
+if MAX_LOG_REF_CHARS < 13 + SLUG_MAX_LEN + 4:
+    raise ValueError(f"MAX_LOG_REF_CHARS ({MAX_LOG_REF_CHARS}) must be >= 13 + SLUG_MAX_LEN + 4")
 
 DegradedReason = Literal[
     "reviewer_not_configured",
@@ -55,11 +58,34 @@ POLL_TERMINAL_FIELDS: Final[frozenset[str]] = frozenset(
     {"job_id", "session_id", "state", "log_path", "usage", "result", "degraded_reason"}
 )
 
+# 终态结果允许字段白名单（反思维链与未纳管键泄露）
+TERMINAL_RESULT_ALLOWED_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "status",
+        "findings",
+        "mode",
+        "session_id",
+        "usage",
+        "truncated",
+        "skipped_files",
+        "degraded_reason",
+        "handoff_prompt",
+        "verdict",
+        "reviewer_identity",
+        "self_verification_warning",
+        "log_path",
+        "suggested_task_draft",
+    }
+)
+
 MAX_NONTERMINAL_SNAPSHOT_BYTES: Final[int] = 1024
 AUDIT_LINE_MAX_BYTES: Final[int] = 16384
-assert MAX_NONTERMINAL_SNAPSHOT_BYTES == 1024
-assert AUDIT_LINE_MAX_BYTES >= 4096
-assert MAX_NONTERMINAL_SNAPSHOT_BYTES != AUDIT_LINE_MAX_BYTES
+if MAX_NONTERMINAL_SNAPSHOT_BYTES != 1024:
+    raise ValueError("MAX_NONTERMINAL_SNAPSHOT_BYTES must be 1024")
+if AUDIT_LINE_MAX_BYTES < 4096:
+    raise ValueError("AUDIT_LINE_MAX_BYTES must be >= 4096")
+if MAX_NONTERMINAL_SNAPSHOT_BYTES == AUDIT_LINE_MAX_BYTES:
+    raise ValueError("MAX_NONTERMINAL_SNAPSHOT_BYTES must not equal AUDIT_LINE_MAX_BYTES")
 
 _WINDOWS_RESERVED_NAMES: Final[set[str]] = {
     "con", "prn", "aux", "nul",
@@ -74,11 +100,18 @@ class JobState(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+    CANCELLED_PENDING_REAP = "CANCELLED_PENDING_REAP"
     ORPHANED = "ORPHANED"
 
 
 TERMINAL_STATES: Final[frozenset[JobState]] = frozenset(
-    {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED, JobState.ORPHANED}
+    {
+        JobState.COMPLETED,
+        JobState.FAILED,
+        JobState.CANCELLED,
+        JobState.CANCELLED_PENDING_REAP,
+        JobState.ORPHANED,
+    }
 )
 
 
@@ -129,7 +162,10 @@ class PollSnapshot:
     degraded_reason: Optional[DegradedReason] = None
 
 
-class SnapshotContractViolation(RuntimeError):
+class SnapshotContractViolation(RuntimeError, AssertionError):
+    """Raised when snapshot contract or invariant is violated.
+    Inherits from RuntimeError and AssertionError for complete python -O resilience and test compatibility.
+    """
     pass
 
 
@@ -161,6 +197,16 @@ def canonical_snapshot_bytes(payload: Mapping[str, Any]) -> int:
     return len(raw)
 
 
+def compute_elapsed_s(record: JobRecord) -> float:
+    """Compute elapsed seconds from UTC wall clock timestamp for cross-process/reboot resilience (H-2)."""
+    try:
+        created_dt = datetime.fromisoformat(record.created_wall_utc)
+        now_dt = datetime.now(timezone.utc)
+        return max(0.0, (now_dt - created_dt).total_seconds())
+    except Exception:
+        return max(0.0, time.monotonic() - record.created_monotonic)
+
+
 def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:
     """强投影函数：键集合恒等于 POLL_NONTERMINAL_FIELDS"""
     prog = None
@@ -176,6 +222,11 @@ def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:
             "idle_s": round(float(snapshot.progress.idle_s), 2),
         }
 
+    try:
+        validated_log_ref = validate_log_ref(str(snapshot.log_ref))
+    except ValueError as e:
+        raise SnapshotContractViolation(f"Invalid log_ref: {e}") from e
+
     res = {
         "job_id": snapshot.job_id,
         "session_id": snapshot.session_id,
@@ -183,11 +234,14 @@ def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:
             snapshot.state.value if isinstance(snapshot.state, JobState) else str(snapshot.state)
         ),
         "retry_after_seconds": int(snapshot.retry_after_seconds),
-        "log_ref": str(snapshot.log_ref)[:MAX_LOG_REF_CHARS],
+        "log_ref": validated_log_ref,
         "progress": prog,
     }
 
-    assert set(res.keys()) == POLL_NONTERMINAL_FIELDS
+    if set(res.keys()) != POLL_NONTERMINAL_FIELDS:
+        raise SnapshotContractViolation(
+            f"Projected keys {set(res.keys())} do not match {POLL_NONTERMINAL_FIELDS}"
+        )
 
     # 1KB 约束检查，超限抛 SnapshotContractViolation，严禁截断
     size_bytes = canonical_snapshot_bytes(res)
@@ -199,10 +253,11 @@ def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:
 
 
 def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any]:
-    """终态双源对称投影函数 (N-3)：
+    """终态双源对称投影函数 (N-3, C-5)：
     - 输出键集合恒等于 POLL_TERMINAL_FIELDS；
     - 从 JobRecord 提取 log_path；从 result 提取 usage；
-    - 严格断言 set((result or {}).keys()) ∩ {"reasoning", "raw_reasoning", "chain_of_thought"} == ∅。
+    - 严格校验禁止 raw reasoning 键，并使用固定白名单 TERMINAL_RESULT_ALLOWED_FIELDS 过滤，杜绝思维链泄露；
+    - 所有断言抛出 SnapshotContractViolation，确保 python -O 下校验不脱保。
     """
     clean_result = None
     usage: dict[str, int] = {}
@@ -210,9 +265,12 @@ def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any
     if result is not None:
         forbidden = {"reasoning", "raw_reasoning", "chain_of_thought"}
         intersect = set(result.keys()) & forbidden
-        assert not intersect, f"Terminal result contains forbidden raw reasoning keys: {intersect}"
+        if intersect:
+            raise SnapshotContractViolation(
+                f"Terminal result contains forbidden raw reasoning keys: {intersect}"
+            )
 
-        clean_result = dict(result)
+        clean_result = {k: v for k, v in result.items() if k in TERMINAL_RESULT_ALLOWED_FIELDS}
         # findings 严格受 MAX_TOTAL_INJECTION_CHARS (40000 字符) 预算保护
         if "findings" in clean_result and isinstance(clean_result["findings"], str):
             if len(clean_result["findings"]) > 40000:
@@ -231,8 +289,26 @@ def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any
         "result": clean_result,
         "degraded_reason": record.degraded_reason,
     }
-    assert set(res.keys()) == POLL_TERMINAL_FIELDS
+    if set(res.keys()) != POLL_TERMINAL_FIELDS:
+        raise SnapshotContractViolation(
+            f"Projected keys {set(res.keys())} do not match {POLL_TERMINAL_FIELDS}"
+        )
     return res
+
+
+def project_poll_result(
+    snapshot: PollSnapshot,
+    *,
+    raw_text: bool = False,
+) -> Union[str, dict[str, Any]]:
+    """If raw_text is True and state is non-terminal, returns single-line canonical str.
+    Otherwise returns compact non-terminal dict or full terminal projection dict.
+    """
+    if raw_text:
+        tokens = snapshot.progress.approx_reasoning_tokens if snapshot.progress else 0
+        elapsed = snapshot.progress.elapsed_s if snapshot.progress else 0.0
+        return format_heartbeat_line(tokens, elapsed)
+    return project_nonterminal(snapshot)
 
 
 def format_progress(
@@ -294,19 +370,27 @@ def assert_poll_authorized(job: JobRecord, caller_session_id: str) -> None:
         )
 
 
-def _atomic_replace_json(filepath: Path, data: dict) -> None:
-    """原子写入 JSON，带 Windows 锁重试。"""
+def _durable_write_json(filepath: Path, data: dict) -> None:
+    """Durable write for JobRecord and results:
+    temp -> flush -> fsync(file) -> os.replace -> fsync(dir).
+    Guarantees zero-length files are never created upon power loss or crash (C-3, H-C).
+    """
     filepath.parent.mkdir(parents=True, exist_ok=True)
     temp_file = filepath.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
     payload = json.dumps(data, indent=2, ensure_ascii=False)
     with open(temp_file, "w", encoding="utf-8") as f:
         f.write(payload)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except (OSError, AttributeError):
+            pass
 
     max_retries = 5
     for attempt in range(max_retries):
         try:
             os.replace(temp_file, filepath)
-            return
+            break
         except (PermissionError, OSError):
             if attempt == max_retries - 1:
                 try:
@@ -316,6 +400,19 @@ def _atomic_replace_json(filepath: Path, data: dict) -> None:
                     pass
                 raise
             time.sleep(0.02 * (2 ** attempt))
+
+    if hasattr(os, "O_DIRECTORY") and sys.platform != "win32":
+        try:
+            dir_fd = os.open(str(filepath.parent), os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except (OSError, AttributeError):
+            pass
+
+
+_atomic_replace_json = _durable_write_json
 
 
 def _record_to_dict(record: JobRecord) -> dict[str, Any]:
@@ -376,8 +473,69 @@ class ReviewerJobSupervisor:
         self._registry = ActiveLogRegistry()
         self._limiter = anyio.CapacityLimiter(4)
         self._tasks: dict[str, asyncio.Task] = {}
+        self._worker_threads: dict[str, threading.Thread] = {}
         self._abort_handles: dict[str, Any] = {}
         self._running_jobs_lock = threading.Lock()
+
+    def _get_verdicts_path(self) -> Path:
+        return Path(self.workspace_root) / ".agents" / "logs" / "reviewer" / "verdicts.jsonl"
+
+    def _read_existing_verdict_job_ids(self) -> set[str]:
+        v_path = self._get_verdicts_path()
+        if not v_path.is_file():
+            return set()
+        seen: set[str] = set()
+        try:
+            with open(v_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if "job_id" in entry:
+                            seen.add(entry["job_id"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return seen
+
+    def _append_verdict_audit(self, record: JobRecord, result_dict: Optional[dict] = None) -> None:
+        """Append-only audit projection to verdicts.jsonl with fsync.
+        Failure logs warning only and never blocks or fails terminal state (C-3).
+        """
+        try:
+            v_path = self._get_verdicts_path()
+            v_path.parent.mkdir(parents=True, exist_ok=True)
+            v_lock_path = v_path.with_suffix(".jsonl.lock")
+            payload: dict[str, Any] = {
+                "job_id": record.job_id,
+                "session_id": record.session_id,
+                "state": record.state.value if isinstance(record.state, JobState) else str(record.state),
+                "mode": record.mode,
+                "generation": record.generation,
+                "created_wall_utc": record.created_wall_utc,
+                "updated_wall_utc": record.updated_wall_utc,
+                "log_path": record.log_path,
+                "degraded_reason": record.degraded_reason,
+            }
+            if result_dict:
+                payload["usage"] = result_dict.get("usage", {})
+                if "status" in result_dict:
+                    payload["status"] = result_dict["status"]
+
+            line = json.dumps(payload, ensure_ascii=False)
+            with FileLock(str(v_lock_path), timeout=5.0):
+                with open(v_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except (OSError, AttributeError):
+                        pass
+        except Exception as e:
+            sys.stderr.write(f"[ReviewerJobSupervisor] Warning: failed to append to verdicts.jsonl for {record.job_id}: {e}\n")
 
     @classmethod
     def for_workspace(cls, root: Union[Path, str]) -> "ReviewerJobSupervisor":
@@ -622,11 +780,11 @@ class ReviewerJobSupervisor:
                         on_progress=on_prog,
                     )
 
-                    # I7: 隔离目录与结果优先落盘
+                    # I7: 隔离目录与结果优先落盘 (C-3, H-C: durable write)
                     res_path = self._get_result_path(record.session_id, record.job_id)
                     from dataclasses import asdict
 
-                    _atomic_replace_json(res_path, asdict(res))
+                    _durable_write_json(res_path, asdict(res))
 
                     if res.status == "degraded":
                         self._cas_transition(
@@ -648,6 +806,11 @@ class ReviewerJobSupervisor:
                             updates={"result_ref": str(res_path)},
                         )
 
+                    # 固化写入序：payload -> JobRecord(durable) -> jsonl(append+fsync)
+                    final_rec = self._load_job_record(record.session_id, record.job_id)
+                    if final_rec:
+                        self._append_verdict_audit(final_rec, asdict(res))
+
             except asyncio.CancelledError:
                 # 确定性取消：Worker 负责在 CAS 临界区记录 tokens_billed_after_cancel (I4)
                 actual_tokens = tokens_accum.get("tokens", 0)
@@ -661,6 +824,9 @@ class ReviewerJobSupervisor:
                         "tokens_billed_after_cancel": actual_tokens,
                     },
                 )
+                final_rec = self._load_job_record(record.session_id, record.job_id)
+                if final_rec:
+                    self._append_verdict_audit(final_rec)
             except Exception:
                 self._cas_transition(
                     record.session_id,
@@ -669,10 +835,14 @@ class ReviewerJobSupervisor:
                     JobState.FAILED,
                     updates={"degraded_reason": "network"},
                 )
+                final_rec = self._load_job_record(record.session_id, record.job_id)
+                if final_rec:
+                    self._append_verdict_audit(final_rec)
             finally:
                 with self._running_jobs_lock:
                     self._abort_handles.pop(record.job_id, None)
                     self._tasks.pop(record.job_id, None)
+                    self._worker_threads.pop(record.job_id, None)
                 # 终态安全 unpin
                 self._registry.unpin(record.log_path)
 
@@ -684,7 +854,24 @@ class ReviewerJobSupervisor:
         except RuntimeError:
             pass
 
-    def poll(self, job_id: str, *, session_id: str) -> dict[str, Any]:
+    def project_poll_result(
+        self,
+        snapshot: PollSnapshot,
+        *,
+        raw_text: bool = False,
+    ) -> Union[str, dict[str, Any]]:
+        """If raw_text is True and state is non-terminal, returns single-line canonical str.
+        Otherwise returns compact non-terminal dict or full terminal projection dict.
+        """
+        return project_poll_result(snapshot, raw_text=raw_text)
+
+    def poll(
+        self,
+        job_id: str,
+        *,
+        session_id: str,
+        raw_text: bool = False,
+    ) -> Union[str, dict[str, Any]]:
         """Poll 只读零锁与极简白名单契约 (I5, I5-B, I5-C, AUTH)。"""
         val_id = validate_job_id(job_id)
         from consultation import sanitize_session_id
@@ -711,23 +898,28 @@ class ReviewerJobSupervisor:
             return project_terminal(record, res_dict)
 
         # 非终态白名单投影
-        now_mono = time.monotonic()
-        elapsed = now_mono - record.created_monotonic
+        elapsed = compute_elapsed_s(record)
         retry_after = self._compute_retry_after(elapsed)
-        log_basename = os.path.basename(record.log_path)[:MAX_LOG_REF_CHARS]
+        log_basename = os.path.basename(record.log_path)
+        try:
+            log_ref = validate_log_ref(log_basename)
+        except ValueError as e:
+            raise SnapshotContractViolation(f"Invalid log_ref: {e}") from e
 
         snapshot = PollSnapshot(
             job_id=record.job_id,
             session_id=record.session_id,
             state=record.state,
             retry_after_seconds=retry_after,
-            log_ref=log_basename,
+            log_ref=log_ref,
             progress=record.progress,
         )
-        return project_nonterminal(snapshot)
+        return self.project_poll_result(snapshot, raw_text=raw_text)
 
     def cancel(self, job_id: str, *, session_id: str) -> dict[str, Any]:
-        """确定性真实取消 (I4, AUTH)。"""
+        """确定性真实取消 (I4, H-7, AUTH)。
+        取消必须在 worker 结束（或 join）成功后再 unpin；超时进入 CANCELLED_PENDING_REAP 保留 pin。
+        """
         val_id = validate_job_id(job_id)
         from consultation import sanitize_session_id
 
@@ -747,34 +939,56 @@ class ReviewerJobSupervisor:
         with self._running_jobs_lock:
             handles = self._abort_handles.get(val_id)
             task = self._tasks.get(val_id)
+            thread = self._worker_threads.get(val_id)
 
         if handles is not None:
             c_event, a_handle = handles
             c_event.set()
             a_handle.abort()
 
+        worker_joined = True
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                worker_joined = False
+
         if task is not None and not task.done():
             task.cancel()
 
-        # CAS 推进 CANCELLED
+        target_state = JobState.CANCELLED if worker_joined else JobState.CANCELLED_PENDING_REAP
+
+        # CAS 推进 CANCELLED 或 CANCELLED_PENDING_REAP
         self._cas_transition(
             record.session_id,
             record.job_id,
             (JobState.QUEUED, JobState.RUNNING),
-            JobState.CANCELLED,
+            target_state,
             updates={
                 "degraded_reason": "cancelled",
                 "tokens_billed_after_cancel": record.tokens_billed_after_cancel or 0,
             },
         )
 
+        final_rec = self._load_job_record(record.session_id, record.job_id)
+        if final_rec:
+            self._append_verdict_audit(final_rec)
+
+        if worker_joined:
+            self._registry.unpin(record.log_path)
+
         return self.poll(job_id, session_id=session_id)
 
     def reconcile_on_load(self) -> list[str]:
-        """启动载入对账：通过 Task 4.0 probe_peer 验证异代进程真实存活；仅当异代且确认 PID 死亡才迁 ORPHANED 并 unpin (I3)。"""
+        """启动载入对账：
+        1. 幂等自愈：对账盘上已落盘的终态 JobRecord，若 verdicts.jsonl 缺失对应记录则执行自动补写 (C-3)；
+        2. 异代接管：通过 Task 4.0 probe_peer 验证异代进程真实存活；仅当异代且确认 PID 死亡才迁 ORPHANED 并 unpin (I3)；
+        3. 单一 SSOT：verdicts.jsonl 缺行绝不构成孤儿判据。
+        """
         orphaned: list[str] = []
         if not self._jobs_base.is_dir():
             return orphaned
+
+        existing_verdict_ids = self._read_existing_verdict_job_ids()
 
         for s_dir in self._jobs_base.iterdir():
             if not s_dir.is_dir():
@@ -787,6 +1001,21 @@ class ReviewerJobSupervisor:
                 except Exception:
                     continue
 
+                # 1. 终态自愈补写 (C-3 幂等补写)
+                if rec.state in TERMINAL_STATES:
+                    if rec.job_id not in existing_verdict_ids:
+                        res_dict = None
+                        if rec.result_ref and Path(rec.result_ref).is_file():
+                            try:
+                                with open(rec.result_ref, "r", encoding="utf-8") as rf:
+                                    res_dict = json.load(rf)
+                            except Exception:
+                                pass
+                        self._append_verdict_audit(rec, res_dict)
+                        existing_verdict_ids.add(rec.job_id)
+                    continue
+
+                # 2. 非终态在途任务：缺行绝不判定孤儿；严格基于进程探针
                 if rec.state in (JobState.QUEUED, JobState.RUNNING):
                     # 同进程自身启动时不抢自己
                     if rec.owner_pid == os.getpid() and rec.owner_boot_nonce == self._boot_nonce:
@@ -806,6 +1035,10 @@ class ReviewerJobSupervisor:
                         ):
                             self._registry.unpin(rec.log_path)
                             orphaned.append(rec.job_id)
+                            updated_rec = self._load_job_record(rec.session_id, rec.job_id)
+                            if updated_rec:
+                                self._append_verdict_audit(updated_rec)
+                                existing_verdict_ids.add(rec.job_id)
         return orphaned
 
     def gc_terminal_jobs(self, *, max_records: int = 100, max_age_s: float = 1800.0) -> int:

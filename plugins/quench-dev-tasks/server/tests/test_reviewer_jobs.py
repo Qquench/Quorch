@@ -30,9 +30,13 @@ from reviewer_jobs import (
     JobProgress,
     JobRecord,
     JobState,
+    PollSnapshot,
     ReviewerJobSupervisor,
     ReviewerPhase,
     _atomic_replace_json,
+    project_poll_result,
+    POLL_TERMINAL_FIELDS,
+    POLL_NONTERMINAL_FIELDS,
 )
 from workspace_lease import PeerLiveness, WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
 
@@ -304,3 +308,102 @@ async def test_consult_thin_shell_backward_compatible(tmp_path):
     assert "findings" in res
     assert "session_id" in res
     assert "mode" in res
+
+
+def test_poll_raw_text_nonterminal_projection(tmp_path):
+    """RAW-TEXT: 非终态 raw_text=True 必须返回简洁单行字符串，彻底消除 JSON 展开卡片。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    rec = supervisor.submit({"query": "q", "session_id": "raw_text_sess"})
+
+    # 1. raw_text=False -> 返回非终态 6 字段字典
+    res_dict = supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=False)
+    assert isinstance(res_dict, dict)
+    assert set(res_dict.keys()) == POLL_NONTERMINAL_FIELDS
+
+    # 2. raw_text=True -> 返回纯文本单行 str
+    res_str = supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)
+    assert isinstance(res_str, str)
+    assert res_str.startswith("[Reviewer thinking:")
+    assert "tokens" in res_str
+    assert "\n" not in res_str
+
+
+def test_poll_raw_text_terminal_projection_always_dict(tmp_path):
+    """RAW-TEXT: 终态不论 raw_text 取值，恒定返回完整结构化字典，保障机器审计与结果提取。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    rec = supervisor.submit({"query": "q", "session_id": "term_raw_sess"})
+
+    # 写入结果文件并原子跃迁至 COMPLETED 终态
+    from reviewer_jobs import _durable_write_json
+    res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
+    _durable_write_json(res_path, {"verdict": "PASS", "findings": "All clear", "usage": {"total_tokens": 100}})
+
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.QUEUED,
+        JobState.COMPLETED,
+        updates={"result_ref": str(res_path)},
+    )
+
+    # 终态即使指定 raw_text=True 亦必须返回字典
+    res_terminal = supervisor.poll(rec.job_id, session_id="term_raw_sess", raw_text=True)
+    assert isinstance(res_terminal, dict)
+    assert set(res_terminal.keys()) == POLL_TERMINAL_FIELDS
+    assert res_terminal["state"] == "COMPLETED"
+    assert res_terminal["result"]["verdict"] == "PASS"
+
+
+def test_dead_code_purged_no_mcp_push_no_tty():
+    """DEAD-CODE: 校验已彻底移除无效的 mcp_context 上下文推送与 stderr.isatty() 终端控制字符。"""
+    import io
+    from unittest.mock import MagicMock
+    from reviewer_engine import AdaptiveHeartbeatSink
+
+    mcp_ctx = MagicMock()
+    mcp_ctx.info = MagicMock()
+    fake_stderr = io.StringIO()
+    fake_stderr.isatty = lambda: True
+    emitted: list[str] = []
+
+    sink = AdaptiveHeartbeatSink(
+        file_emit=emitted.append,
+        mcp_context=mcp_ctx,
+        stderr=fake_stderr,
+        interval_ms=500,
+    )
+    sink.on_heartbeat(tokens_so_far=10, elapsed_s=0.2)
+
+    # 1. 绝不调用 mcp_ctx.info
+    mcp_ctx.info.assert_not_called()
+
+    # 2. 绝不向 stderr 输出动态 \r 覆盖字符
+    assert fake_stderr.getvalue() == ""
+
+    # 3. 仅向 file_emit 通道写入持久化行
+    assert len(emitted) == 1
+    assert "[progress] [Reviewer thinking: 10 tokens | 0.2s]" in emitted[0]
+
+
+def test_heartbeat_single_line_projection_format():
+    """HEARTBEAT: project_poll_result 纯函数直接测试。"""
+    snapshot = PollSnapshot(
+        job_id="job_abc",
+        session_id="sess_abc",
+        state=JobState.RUNNING,
+        retry_after_seconds=2,
+        log_ref="20260925_001_sess_abc.log",
+        progress=JobProgress(
+            phase=ReviewerPhase.STREAMING,
+            elapsed_s=12.4,
+            idle_s=1.0,
+            approx_reasoning_tokens=120,
+        ),
+    )
+    raw = project_poll_result(snapshot, raw_text=True)
+    assert raw == "[Reviewer thinking: 120 tokens | 12.4s]"
+
+    structured = project_poll_result(snapshot, raw_text=False)
+    assert isinstance(structured, dict)
+    assert structured["state"] == "RUNNING"
+

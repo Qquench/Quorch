@@ -16,3 +16,4 @@ dev = [
 
 [project.scripts]
 quench = "cli:main"
+quorch = "cli:main"

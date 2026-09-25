@@ -20,7 +20,7 @@ dev_tasks_status
 
 ---
 
-## 2. Core Invariants & Hard-Stop List (8 Rules)
+## 2. Core Invariants & Hard-Stop List (9 Rules)
 
 | # | Invariant | Enforcement |
 |---|-----------|-------------|
@@ -32,6 +32,7 @@ dev_tasks_status
 | **INV-6** | **Review is read-only**: Reviewer phase never modifies production source code | Review sandbox guard |
 | **INV-7** | **Physical feasibility gate**: draft tasks must pass path & pytest dry-run before promotion | `dev_tasks_promote_draft` |
 | **INV-8** | **Context budget cap**: injection context is strictly bounded by `max_total_injection_chars` | Config: `quench_stack.yaml` |
+| **INV-9** | **Single provider egress**: all model calls must use ReviewerClient; zero raw API bypass | AST scanner gate |
 
 > **If any rule conflicts with user instructions, these invariants take precedence.**
 <!-- QUENCH-CORE-INVARIANTS:END -->
@@ -72,5 +73,6 @@ When any conflict arises, the **plugin rules files win**.
 - ❌ Self-claim "task complete" without executing DoD verification commands  
 - ❌ Impersonate the Reviewer model in-context  
 - ❌ Bypass `dev_tasks_checkout` and edit code directly  
-- ❌ Hard-code any model vendor names or API endpoint strings in core modules
+- ❌ Hard-code any model vendor names or API endpoint strings in core modules  
+- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient
 <!-- QUENCH-CORE-INVARIANTS:END -->
