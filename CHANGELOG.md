@@ -3,6 +3,13 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-25] 2026-09-25_v1.08_step05_fix_posix_lease_ctypes_ci.md
+
+- **Task 5.1**: 修复 Windows 分支单测在 POSIX 平台因 ctypes.windll 缺失引发的 AttributeError 并闭环 CI 事故档案
+  - Added `create=True` to `unittest.mock.patch("ctypes.windll", ...)` in `test_windows_api_exit_code_scenarios` preventing unhandled `AttributeError` on POSIX hosts;
+  - Added cross-platform anti-residue assertion `test_windll_patch_leaves_no_residue` ensuring clean tear-down of mock attributes;
+  - Documented CI Incident `INC-20260925-01` in `docs/ci_incident_tracker_and_compatibility_guide.md` with Case 7 and defensive coding Guideline 6 (platform-specific attribute mocking).
+
 ## [2026-09-25] 2026-09-25_v1.08_step04_corrections.md
 
 - **Task 4.2**: 租约可判定性与并发安全硬化（心跳 fail-stop、TTL+Fencing 夺权、touch 枚举语义与破坏性门禁）
