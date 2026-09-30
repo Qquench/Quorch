@@ -320,10 +320,9 @@ foreach ($job in $jobs.jobs) {
 7. **异步超时熔断测试严禁紧贴边界断言墙钟时长 (Asynchronous Timeout Assertion Guard)**:
    - 熔断测试的核心不变量是状态迁移（`status == "degraded"`、`degraded_reason == "timeout"`）与数据保底（partial log 落盘、零伪造 findings）。严禁将经过物理墙钟时间作为强断言边界（如 `assert elapsed < 2.5`）。
    - CI 虚拟化宿主（尤其 Windows ProactorEventLoop 与多租户 CPU 抢占）存在不可控时序抖动，任何时钟断言仅能作为防死锁/防无限挂起的宽松安全护栏（余量建议 ≥ 3~5× 调度周期，如 `5.0s`）。
-8. **最低支持 Python 版本语法兼容与 f-string 禁反斜杠规范 (Minimum Python Version Syntax Guard)**:
-   - 代码库必须保持对 CI 声明的最低 Python 版本（当前为 Python 3.11）的 100% 语法兼容。
-   - 严禁在 f-string 表达式 `{...}` 内部使用反斜杠 `\`（包括 `replace('\\', '/')`、`'\n'.join(...)`、`'\\' in x` 等），此类语法在 Python 3.12+ (PEP 701) 合法但在 Python 3.11 下会触发编译期 `SyntaxError`。
-   - 必须通过局部变量外提、常量外提或显式字符串拼接代替，且变更必须经由 `test_python_version_compat.py` 守护验证。
+8. **最低支持 Python 版本基线与版本下限纪律 (Minimum Python Version Floor Discipline)**:
+   - 代码库最低支持基线正式提升至 **Python >= 3.12**，彻底解锁 PEP 701 现代 f-string 语法（表达式内部允许反斜杠与嵌套引号）。
+   - 旧版 3.11 语法守卫已退役，由 `test_python_floor_discipline.py` 纪律性断言守护最低版本下限，阻止 CI 与配置回退。
 
 ---
 
@@ -333,9 +332,9 @@ foreach ($job in $jobs.jobs) {
 
 | 平台 / 环境 | 关键检查点 | 本地复现 / 验证命令 |
 | :--- | :--- | :--- |
-| **Linux (Ubuntu 22.04 / 24.04)** | 路径无反斜杠混淆逃逸、shlex 严格模式、无硬编码盘符、零 stat 契约 | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; uv run --python 3.11 pytest plugins/quench-dev-tasks/server/tests -v` |
+| **Linux (Ubuntu 22.04 / 24.04)** | 路径无反斜杠混淆逃逸、shlex 严格模式、无硬编码盘符、零 stat 契约 | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; uv run --python 3.12 pytest plugins/quench-dev-tasks/server/tests -v` |
 | **Windows (10 / 11 / Server)** | 句柄锁无 PermissionError、CP936 控制台编码安全、FileLock 正确释放 | `$env:PYTHONPATH="plugins/quench-dev-tasks/server"; uv run --python 3.12 pytest plugins/quench-dev-tasks/server/tests -v` |
-| **Python 3.11 & 3.12** | 类型注解兼容、`ntpath` / `posixpath` 底层实现差异对齐 | GitHub Actions CI Matrix (4 jobs 全绿) |
+| **Python >= 3.12** | PEP 701 语法支持、版本下限纪律保持、跨平台双 OS 跑通 | GitHub Actions CI Matrix (Ubuntu & Windows, Py 3.12 全绿) |
 
 ---
 

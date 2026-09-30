@@ -11,7 +11,7 @@ Thank you for your interest in contributing to **Quench Dev-Orchestrator**! We w
 ## 🏗️ Development Environment Setup
 
 ### Prerequisites
-- **Python**: Version 3.11 or higher.
+- **Python**: Version 3.12 or higher.
 - **Git**: Installed and available in your system path.
 - **FastMCP**: `>=2.0` (installed automatically via `install.py` or `requirements.txt`).
 

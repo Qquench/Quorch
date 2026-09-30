@@ -495,6 +495,28 @@
       "git_head_sha": "ec1fd2496e35f9586fc81958f889170a9f466b1b",
       "git_index_mtime": 1790775030.0765843,
       "released": true
+    },
+    "2026-10-01_retire_python311_compatibility::1": {
+      "task_id": "2026-10-01_retire_python311_compatibility::1",
+      "md_sha256": "108cd143203474737185929f9a5c1a5549b2777be4f34eae5f34764de225cdcd",
+      "generation": 1,
+      "holder_token": "token_1790779524813_16868",
+      "last_heartbeat_monotonic_ns": 1002782062000000,
+      "last_heartbeat_wall_utc": "2026-09-30T14:50:06.356084+00:00",
+      "git_head_sha": "1c3a0332e99dc0978aef99e6f94fd79eb4a5f0a3",
+      "git_index_mtime": 1790777183.134442,
+      "released": true
+    },
+    "2026-10-01_fix_reviewer_observability_mock_url::1": {
+      "task_id": "2026-10-01_fix_reviewer_observability_mock_url::1",
+      "md_sha256": "335c887181f23aa7f7a008ecbec138dc4bd9399ec46b79fb2072294e315f0d7f",
+      "generation": 1,
+      "holder_token": "token_1790780145682_16868",
+      "last_heartbeat_monotonic_ns": 1003161000000000,
+      "last_heartbeat_wall_utc": "2026-09-30T14:56:25.298487+00:00",
+      "git_head_sha": "1c3a0332e99dc0978aef99e6f94fd79eb4a5f0a3",
+      "git_index_mtime": 1790777183.134442,
+      "released": true
     }
   }
 }

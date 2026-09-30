@@ -3,6 +3,18 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-01] 2026-10-01_fix_reviewer_observability_mock_url.md
+
+- **Task 1**: 修复 test_reviewer_observability 模拟测试中的 base_url 与 dummy 模型名称
+
+## [2026-10-01] 2026-10-01_retire_python311_compatibility.md
+
+- **Task 1**: 提升 Python 最低支持基线至 3.12 并退役 3.11 语法守卫
+
+## [2026-10-01] 2026-10-01_retire_python311_compatibility.md
+
+- **Task 1**: 提升 Python 最低支持基线至 3.12+ 并物理退役 3.11 语法守卫与 CI 轴，彻底解放 PEP 701 语法约束
+
 ## [2026-10-01] 2026-09-30_bilingual_error_messages.md
 
 - **Task 1.1**: 升级 project_config.py 中的错误与告警信息为双语/英文版

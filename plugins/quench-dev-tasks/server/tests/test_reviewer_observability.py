@@ -235,7 +235,8 @@ def test_deepseek_client_streaming_and_soft_ceiling(tmp_path):
 
     config = ReviewerEngineConfig(
         provider="deepseek",
-        model="deepseek-flash",
+        base_url="https://api.example.com/v1",
+        model="dummy-reasoning-model",
         api_key_env="DUMMY_KEY",
         timeout_seconds=10,
     )
@@ -292,7 +293,8 @@ def test_deepseek_client_soft_ceiling_trigger(tmp_path):
 
     config = ReviewerEngineConfig(
         provider="deepseek",
-        model="deepseek-flash",
+        base_url="https://api.example.com/v1",
+        model="dummy-reasoning-model",
         api_key_env="DUMMY_KEY",
         timeout_seconds=10,
     )

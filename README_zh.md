@@ -5,7 +5,7 @@
 > 💡 **文档语言政策**：本项目技术规范、配置手册与变更日志以英文为唯一权威版本 (English as SSOT)。中文 Issue 与 PR 讨论完全欢迎；如需中文查阅，可使用 LLM 辅助按需翻译。
 
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Python: >=3.11](https://img.shields.io/badge/python-3.11+-brightgreen.svg)](https://www.python.org/)
+[![Python: >=3.12](https://img.shields.io/badge/python-3.12+-brightgreen.svg)](https://www.python.org/)
 [![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
 [![CI](https://github.com/Qquench/Quorch/actions/workflows/ci.yml/badge.svg)](https://github.com/Qquench/Quorch/actions/workflows/ci.yml)
 
