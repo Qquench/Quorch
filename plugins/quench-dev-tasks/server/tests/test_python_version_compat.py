@@ -47,7 +47,12 @@ def test_guard_detects_fstring_backslash_regression() -> None:
     """Negative self-test: verify that the guard reliably flags f-string expressions containing backslashes."""
     bs = chr(92)
     bad_snippet = f's = "test"\nx = f"hello {{s.replace({chr(39)}{bs}{bs}{chr(39)}, {chr(39)}/{chr(39)})}}"\n'
-    violations = find_fstring_backslash_violations(bad_snippet, filename="<bad_sample>")
-    assert len(violations) == 1
-    assert violations[0][0] == 2
-    assert "\\" in violations[0][1]
+    try:
+        violations = find_fstring_backslash_violations(bad_snippet, filename="<bad_sample>")
+        assert len(violations) == 1
+        assert violations[0][0] == 2
+        assert "\\" in violations[0][1]
+    except SyntaxError as e:
+        # In Python <= 3.11, the native C parser rejects this at ast.parse time
+        err_msg = str(e).lower()
+        assert "f-string" in err_msg or "backslash" in err_msg

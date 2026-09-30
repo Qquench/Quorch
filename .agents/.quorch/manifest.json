@@ -462,6 +462,17 @@
       "git_head_sha": "b19e981dc4d4462bbe63b797ba30ceb5549eb3d1",
       "git_index_mtime": 1790772973.3728702,
       "released": true
+    },
+    "2026-09-30_fix_negative_self_test_on_py311::1.1": {
+      "task_id": "2026-09-30_fix_negative_self_test_on_py311::1.1",
+      "md_sha256": "8cb2f1708d18f1f07bef945663cc4419081df4b95712403b43707dec15f99f1d",
+      "generation": 1,
+      "holder_token": "token_1790774958448_16868",
+      "last_heartbeat_monotonic_ns": 997965375000000,
+      "last_heartbeat_wall_utc": "2026-09-30T13:29:49.679790+00:00",
+      "git_head_sha": "c7469cb91905c87c93cd7712d4679b02623c6c33",
+      "git_index_mtime": 1790774782.651808,
+      "released": true
     }
   }
 }
