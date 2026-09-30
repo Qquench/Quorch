@@ -3,6 +3,18 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-30] 2026-09-24_v1.08_step03_capability_tokens_and_onboarding.md
+
+- **Task 3.3**: 外部执行器接入规范与 SKILL.md 全面更新（主交付）
+  - Authored comprehensive onboarding guide `docs/guides/external-executor-onboarding.md` covering runtime preparation, dual MCP entries configuration contract (`quench-runner` / `quench-reviewer`), stdio channel purity (INV-4), governance lifecycle (Steps 01~05), and anti-forgery defenses;
+  - Added Section 6 to `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` specifying capability isolation, dual MCP entries, and non-security boundary declaration adhering to language mirroring contract;
+  - Added machine-checkable documentation contract test `test_onboarding_doc_contract.py` validating zero tool reference drift across all 17 registered MCP tools, code block syntax validity, and zero credential/private path leakage;
+  - Added anti-forgery regression test `test_forgery_prevention_contract.py` asserting degraded status, `self_verification_warning`, and empty findings (`findings == ""`, INV-3) when Reviewer engine is unconfigured or homogeneous.
+- **Task 3.4**: Reviewer 心跳自适应降频与前台上报通道修复
+  - Replaced dead fields `mcp_context` and `stderr` in `AdaptiveHeartbeatSink` with explicit `progress_emit` callback for FastMCP progress reporting;
+  - Implemented adaptive stepped backoff `_should_emit` with 5s keepalive floor and token delta gating;
+  - Covered in `test_reviewer_heartbeat.py` and `test_reviewer_heartbeat_format.py`.
+
 ## [2026-09-26] 2026-09-26_v1.08_step06_fix_timeout_flaky_ci.md
 
 - **Task 6.1**: 消除超时熔断测试的紧约束时钟断言并闭环 CI Flaky 事故档案

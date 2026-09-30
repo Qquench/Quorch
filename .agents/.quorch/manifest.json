@@ -256,14 +256,14 @@
     },
     "2026-09-24_v1.08_step03_capability_tokens_and_onboarding::3.3": {
       "task_id": "2026-09-24_v1.08_step03_capability_tokens_and_onboarding::3.3",
-      "md_sha256": "e80637a4a9c9053b7bd8db3bff053ea7499a6c18f71221146a5ac1c97e2b0a01",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 476490203000000,
-      "last_heartbeat_wall_utc": "2026-09-24T12:38:32.952297+00:00",
-      "git_head_sha": "e3d36b263f4d5fe0a1011936865fde773ecdcff9",
-      "git_index_mtime": 1790251947.9964705,
-      "released": false
+      "md_sha256": "3cd53b0a34ac4ee727c39d4629951a688d122a6b62a1ba2e22ce91080d05de51",
+      "generation": 1,
+      "holder_token": "token_1790751482751_14988",
+      "last_heartbeat_monotonic_ns": 975019781000000,
+      "last_heartbeat_wall_utc": "2026-09-30T07:07:24.082332+00:00",
+      "git_head_sha": "da3373b4450961002c467d4cb519f691d8aeb2ca",
+      "git_index_mtime": 1790349604.0068324,
+      "released": true
     },
     "2026-09-25_v1.08_step04_async_reviewer_jobs::4.0": {
       "task_id": "2026-09-25_v1.08_step04_async_reviewer_jobs::4.0",

@@ -113,3 +113,16 @@ When all tasks in a DevTask file are `[Completed] / ✔️ 已完成`:
 
 1. **Subjective / Visual / Hardware Tasks**: Provide an interactive inspection checklist for the developer.
 2. **Automated Logic / Test-Covered Tasks**: Report full passing test results and propose archiving via `dev_tasks_archive`.
+
+---
+
+## 6. Capability Isolation & Dual MCP Configuration (能力隔离与双 MCP 条目契约)
+
+To clearly delineate task execution capabilities from high-order architectural review without introducing leaky in-context roleplay or complicated runtime token filters, capability isolation is realized at the **client configuration layer** by declaring two distinct MCP server entries:
+
+- **`quench-runner`**: Execution agent entry (`QUENCH_ROLE: runner`), focused on code modification, file editing, test execution, and task checkout/completion (`dev_tasks_status`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_heartbeat`, `dev_tasks_set_bypass`).
+- **`quench-reviewer`**: Strategic review entry (`QUENCH_ROLE: reviewer`), focused on spec refinement, task proposal, quality auditing, and architecture critique (`dev_reviewer_consult`, `dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`, `dev_tasks_refine_spec`, `dev_tasks_promote_draft`, `dev_tasks_confirm`, `dev_tasks_status`).
+
+> 🛡️ **Explicit Non-Security Boundary Declaration (非安全边界声明)**:  
+> Role declarations (`QUENCH_ROLE`) and verdict logs are **collaborative convenience and operational hygiene contracts**, NOT an adversarial security boundary or process-level sandbox. Capability isolation is established through client configuration running single-role execution sessions. Detailed onboarding standards and configuration templates are documented in [`docs/guides/external-executor-onboarding.md`](../../../docs/guides/external-executor-onboarding.md).
+
