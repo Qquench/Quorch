@@ -1,4 +1,4 @@
-# Milestone v1.09: 前沿 Plan 模式吸收、任务依赖拓扑与动态治理演进 (Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback)
+# 前沿 Plan 模式吸收、任务依赖拓扑与动态治理演进 (Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback)
 ## Plan-Frontiers & Dynamic-Governance Roadmap
 
 > **路线图状态**: 📋 方案推演与架构蓝图编制 (Architecture Blueprint)  
@@ -6,7 +6,7 @@
 > **前置里程碑**: 🔨 v1.08 逆向拓扑与外部执行器接入 (`docs/roadmap/v1.08_reverse_topology_and_external_runner.md`)  
 > **权威审查来源**: Reviewer 架构红队审计报告 [20260925_007_b40b4df886a8.log](../../.agents/logs/reviewer/20260925_007_b40b4df886a8.log)  
 > **关联 SSOT**: [`docs/architecture/`](../architecture/README.md), [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)  
-> **权威性声明**: 本文档汇集 Quench 与 Antigravity、Cursor、Windsurf、Claude Code、Copilot Workspace/Devin 等各大 IDE/Agent 计划模式（Plan Mode）的深度对比洞察，作为 v1.09 阶段规范升级与核心模块改造的权威蓝图。
+> **权威性声明**: 本文档汇集 Quench 与 Antigravity、Cursor、Windsurf、Claude Code、Copilot Workspace/Devin 等各大 IDE/Agent 计划模式（Plan Mode）的深度对比洞察，作为后续规范升级与核心模块改造的权威蓝图。
 
 ---
 
@@ -39,7 +39,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Milestone v1.09: 前沿 Plan 模式吸收与动态任务治理体系演进                    │
+│ 前沿 Plan 模式吸收与动态任务治理体系演进                                    │
 ├───────────────────────────────┬─────────────────────────────────────────────┤
 │  Phase 1: Token-Aware 预算    │  • 抛弃字符/行数估算，接入真实 Tokenizer 计量 │
 │  (消除 C-1 级静默截断与伪裁决)│  • 强制截断遥测声明 (truncated: true) 与切片队列  │
@@ -200,4 +200,4 @@ def enforce_budget(
 
 ---
 
-> 📖 **后向归档提示**：当上述 Epic 全部经由开发、测试与验证闭环后，本文档将归档至 `docs/roadmap/archive/v1.09_plan_frontiers_dag_and_dynamic_governance.md`。
+> 📖 **后向归档提示**：当上述 Epic 全部经由开发、测试与验证闭环后，本文档将归档至对应里程碑的 `docs/roadmap/archive/` 目录。

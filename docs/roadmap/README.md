@@ -13,7 +13,7 @@
 
 | Milestone | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
-| **v1.09** | 📋 **[v1.09_plan_frontiers_dag_and_dynamic_governance.md](./v1.09_plan_frontiers_dag_and_dynamic_governance.md)** | **Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback** | Tokenizer-aware budget & truncation telemetry (P1), monotonic Epoch fencing & revert primitive (P2), depends_on task DAG (P3), step-level rejection (P4), Repo-Map & Subagent review isolation (P5) | 📋 **Architecture Blueprint** |
+| **Proposal (TBD)** | 📋 **[plan_frontiers_dag_and_dynamic_governance.md](./plan_frontiers_dag_and_dynamic_governance.md)** | **Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback** | Tokenizer-aware budget & truncation telemetry (P1), monotonic Epoch fencing & revert primitive (P2), depends_on task DAG (P3), step-level rejection (P4), Repo-Map & Subagent review isolation (P5) | 📋 **Architecture Blueprint** |
 
 ---
 
