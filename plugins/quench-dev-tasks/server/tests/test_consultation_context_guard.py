@@ -17,11 +17,17 @@ import pytest
 from consultation import (
     CodeSlice,
     ConsultRequest,
+    HopBudget,
+    MIN_TELEMETRY_SAMPLES,
+    MULTI_HOP_DEMAND_PERCENT,
+    MULTI_HOP_DEMAND_THRESHOLD,
     build_static_prefix,
     render_mode_prompt,
     resolve_context_files,
     run_consultation,
     sanitize_session_id,
+    should_enable_multi_hop,
+    strip_reasoning_from_history,
 )
 from project_config import QuenchStackConfig, ReviewerEngineConfig
 import server
@@ -392,5 +398,71 @@ def test_reviewer_engine_config_malformed_scalars_coerced_and_clamped():
     )
     assert cfg_bool.max_total_injection_chars == 40000
     assert cfg_bool.default_window_lines == 200
+
+
+def test_multihop_guardrails_contract_and_budget():
+    """断言 HopBudget 累积预算管理及多跳门控/推理剥离契约。"""
+    # 1. 常量校验
+    assert MULTI_HOP_DEMAND_THRESHOLD == 0.30
+    assert MULTI_HOP_DEMAND_PERCENT == 30
+    assert MIN_TELEMETRY_SAMPLES == 20
+
+    # 2. HopBudget 初始化与原子消耗
+    budget = HopBudget(total=1000)
+    assert budget.total == 1000
+    assert budget.consumed == 0
+    assert budget.remaining == 1000
+
+    # 正常消耗
+    assert budget.consume(400) is True
+    assert budget.consumed == 400
+    assert budget.remaining == 600
+
+    # 负数归零处理
+    assert budget.consume(-50) is True
+    assert budget.consumed == 400
+
+    # 超额消耗：返回 False 且原子性保持不变（严禁扣减已有计数器）
+    assert budget.consume(700) is False
+    assert budget.consumed == 400
+    assert budget.remaining == 600
+
+    # 刚好耗尽
+    assert budget.consume(600) is True
+    assert budget.consumed == 1000
+    assert budget.remaining == 0
+
+    # 耗尽后再消耗
+    assert budget.consume(1) is False
+    assert budget.consumed == 1000
+
+    # 3. should_enable_multi_hop 契约
+    assert should_enable_multi_hop(demand_count=5, sample_count=19) is False
+    assert should_enable_multi_hop(demand_count=6, sample_count=20) is False  # 30% boundary
+    assert should_enable_multi_hop(demand_count=7, sample_count=20) is True   # 35% > 30%
+
+    # 4. strip_reasoning_from_history 契约
+    msgs = [
+        {"role": "system", "content": "sys", "thought": "sys_t"},
+        {"role": "user", "content": "usr"},
+        {
+            "role": "assistant",
+            "content": "ast",
+            "reasoning_content": "deep_thought",
+            "reasoning": "r",
+            "thought": "t",
+            "thoughts": ["t1"],
+            "extra": 123,
+        },
+    ]
+    cleaned = strip_reasoning_from_history(msgs)
+    # 纯函数保证：入参未被破坏
+    assert "thought" in msgs[0]
+    assert "reasoning_content" in msgs[2]
+    # 清洗结果：仅 assistant 消息被剔除 reasoning 字段，system 保持原样
+    assert cleaned[0] == {"role": "system", "content": "sys", "thought": "sys_t"}
+    assert cleaned[1] == {"role": "user", "content": "usr"}
+    assert cleaned[2] == {"role": "assistant", "content": "ast", "extra": 123}
+
 
 

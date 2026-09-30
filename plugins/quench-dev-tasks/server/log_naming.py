@@ -55,9 +55,12 @@ def validate_log_ref(log_ref: str) -> str:
     return clean
 
 
+_ROTATION_SUFFIX_REGEX: Final[re.Pattern] = re.compile(r"(?:\.\d+)?(\.(?:log|jsonl))(?:\.\d+)?$")
+
+
 def norm_registry_key(path: str | os.PathLike[str]) -> str:
-    """唯一 registry 键规范化 SSOT：折叠 Windows 大小写、解析软链接、并剥离轮转分片后缀 (.1.log -> .log) (N-1)。"""
-    base_path = re.sub(r"\.\d+\.log$", ".log", str(path))
+    """唯一 registry 键规范化 SSOT：折叠 Windows 大小写、解析软链接、并剥离轮转分片后缀 (.1.log/.log.1 -> .log；.1.jsonl/.jsonl.1 -> .jsonl) (N-1)。"""
+    base_path = _ROTATION_SUFFIX_REGEX.sub(r"\1", str(path))
     return os.path.normcase(os.path.realpath(base_path))
 
 

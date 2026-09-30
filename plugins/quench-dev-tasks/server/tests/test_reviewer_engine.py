@@ -180,27 +180,31 @@ def test_reviewer_client_401_no_retry_even_with_retries_configured(mock_ws):
             assert "deepseek" not in err_text.casefold()
 
 
-def test_reviewer_client_400_bad_request_fast_fail(mock_ws):
-    """400 Bad Request 参数错误：单次快速失败，严禁盲目重试。"""
+def test_reviewer_client_400_and_422_bad_request_fast_fail(mock_ws):
+    """400 / 422 Bad Request 参数错误：单次快速失败，严禁盲目重试，保持继承链。"""
+    assert issubclass(ReviewerBadRequestError, ReviewerEngineError)
+    assert issubclass(ReviewerBadRequestError, reviewer_engine.ReviewerError)
     _, cfg = mock_ws
     cfg.reviewer_engine.max_retries = 3
     client = ReviewerClient(cfg.reviewer_engine)
 
-    err_fp = io.BytesIO(b'{"error": {"message": "Invalid model parameter"}}')
-    http_err_400 = urllib.error.HTTPError(
-        url="https://reviewer.internal.net/v1/chat/completions",
-        code=400,
-        msg="Bad Request",
-        hdrs={},
-        fp=err_fp,
-    )
+    for code in (400, 422):
+        err_fp = io.BytesIO(b'{"error": {"message": "Invalid parameter"}}')
+        http_err = urllib.error.HTTPError(
+            url="https://reviewer.internal.net/v1/chat/completions",
+            code=code,
+            msg="Bad Request",
+            hdrs={},
+            fp=err_fp,
+        )
 
-    with patch.object(client, "resolve_api_key", return_value="valid-sk"):
-        with patch("urllib.request.urlopen", side_effect=http_err_400) as mock_urlopen:
-            with pytest.raises(ReviewerBadRequestError):
-                client.complete([{"role": "user", "content": "review draft"}])
+        with patch.object(client, "resolve_api_key", return_value="valid-sk"):
+            with patch("urllib.request.urlopen", side_effect=http_err) as mock_urlopen:
+                with pytest.raises(ReviewerBadRequestError) as exc_info:
+                    client.complete([{"role": "user", "content": "review draft"}])
 
-            assert mock_urlopen.call_count == 1
+                assert mock_urlopen.call_count == 1
+                assert isinstance(exc_info.value, reviewer_engine.ReviewerError)
 
 
 def test_reviewer_client_proxy_html_malformed_response_resilience(mock_ws):

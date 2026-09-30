@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import codecs
 import functools
 import hashlib
@@ -31,12 +32,15 @@ from typing import (
     AsyncIterator,
     Callable,
     Dict,
+    Final,
+    Iterator,
     List,
     Literal,
     Mapping,
     NamedTuple,
     Optional,
     Protocol,
+    Sequence,
     TextIO,
     Tuple,
     TypedDict,
@@ -44,8 +48,10 @@ from typing import (
 )
 
 import anyio
+from filelock import FileLock
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
+from log_naming import ActiveLogRegistry, norm_registry_key
 from observability_policy import (
     MAX_RECORD_BYTES,
     ObservabilityDecision,
@@ -138,6 +144,152 @@ class StreamChunk:
     done: bool = False
 
 
+TELEMETRY_RECORD_BYTES: Final[int] = 4 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class CacheTelemetryRecord:
+    ts: str
+    prompt_hash: str
+    prompt_tokens: int
+    cached_tokens: int
+    miss_tokens: int
+    hit_ratio: float
+    mode: str
+    session_id: str
+    usage_available: bool
+
+
+def compute_prompt_hash(prompt_text_or_messages: Any, workspace_root: Optional[str] = None) -> str:
+    """基于 workspace_root 确定性盐计算 Prompt 截断哈希，作为跨会话 best-effort 聚合键，绝不输出明文。"""
+    ws = os.path.realpath(workspace_root or os.getcwd())
+    salt = hashlib.sha256(ws.encode("utf-8")).hexdigest()[:16]
+    if isinstance(prompt_text_or_messages, list):
+        combined = []
+        for m in prompt_text_or_messages:
+            if isinstance(m, Mapping):
+                combined.append(f"{m.get('role', '')}:{m.get('content', '')}")
+            else:
+                combined.append(str(m))
+        raw = "\n".join(combined)
+    else:
+        raw = str(prompt_text_or_messages or "")
+    return hashlib.sha256(f"{salt}:{raw}".encode("utf-8")).hexdigest()[:16]
+
+
+class RollingJsonlTelemetrySink:
+    def __init__(
+        self,
+        path: str,
+        *,
+        max_bytes: int = 512 * 1024,
+        max_rotations: int = 2,
+        registry: Optional[Any] = None,
+    ) -> None:
+        self.path = os.path.abspath(os.path.normpath(path))
+        self.max_bytes = max(int(max_bytes), 1024)
+        self.max_rotations = max(int(max_rotations), 1)
+        self.registry = registry
+        self.lock_path = f"{self.path}.lock"
+        self._lock = FileLock(self.lock_path, timeout=5.0)
+        if self.registry is not None and hasattr(self.registry, "pin"):
+            try:
+                self.registry.pin(self.path)
+            except Exception:
+                pass
+
+    def _get_rotated_path(self, index: int) -> str:
+        base, ext = os.path.splitext(self.path)
+        return f"{base}.{index}{ext}"
+
+    def emit(self, record: CacheTelemetryRecord) -> None:
+        sid = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", str(record.session_id))
+        mode = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", str(record.mode))
+        d: Dict[str, Any] = {
+            "ts": record.ts,
+            "prompt_hash": record.prompt_hash,
+            "prompt_tokens": int(record.prompt_tokens),
+            "cached_tokens": int(record.cached_tokens),
+            "miss_tokens": int(record.miss_tokens),
+            "hit_ratio": float(record.hit_ratio),
+            "mode": mode,
+            "session_id": sid,
+            "usage_available": bool(record.usage_available),
+        }
+        raw_json = json.dumps(d, ensure_ascii=False)
+        raw_bytes = raw_json.encode("utf-8")
+        if len(raw_bytes) > TELEMETRY_RECORD_BYTES:
+            if len(sid) > 100:
+                d["session_id"] = sid[:100] + "...[truncated]"
+            if len(mode) > 50:
+                d["mode"] = mode[:50] + "...[truncated]"
+            raw_json = json.dumps(d, ensure_ascii=False)
+            raw_bytes = raw_json.encode("utf-8")
+            if len(raw_bytes) > TELEMETRY_RECORD_BYTES:
+                d["session_id"] = d["session_id"][:20]
+                d["mode"] = d["mode"][:20]
+                raw_json = json.dumps(d, ensure_ascii=False)
+                raw_bytes = raw_json.encode("utf-8")
+                if len(raw_bytes) > TELEMETRY_RECORD_BYTES:
+                    return
+
+        dir_path = os.path.dirname(self.path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        line_to_write = raw_json + "\n"
+        encoded_line = line_to_write.encode("utf-8")
+
+        try:
+            with self._lock:
+                curr_size = os.path.getsize(self.path) if os.path.exists(self.path) else 0
+                if curr_size + len(encoded_line) > self.max_bytes and curr_size > 0:
+                    for i in range(self.max_rotations - 1, 0, -1):
+                        src = self._get_rotated_path(i)
+                        dst = self._get_rotated_path(i + 1)
+                        if os.path.exists(dst):
+                            try:
+                                os.remove(dst)
+                            except Exception:
+                                pass
+                        if os.path.exists(src):
+                            if i + 1 <= self.max_rotations:
+                                try:
+                                    os.replace(src, dst)
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    os.remove(src)
+                                except Exception:
+                                    pass
+                    rot_1 = self._get_rotated_path(1)
+                    if os.path.exists(rot_1):
+                        try:
+                            os.remove(rot_1)
+                        except Exception:
+                            pass
+                    try:
+                        os.replace(self.path, rot_1)
+                    except Exception:
+                        pass
+
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(line_to_write)
+                    f.flush()
+        except Exception as e:
+            try:
+                if sys.stderr and hasattr(sys.stderr, "write"):
+                    sys.stderr.write(f"[RollingJsonlTelemetrySink Warning] Failed to emit record: {e}\n")
+                    sys.stderr.flush()
+            except Exception:
+                pass
+
+    async def aemit(self, record: CacheTelemetryRecord) -> None:
+        """异步友好落盘，通过 asyncio.to_thread 隔离阻塞式文件锁与磁盘写。"""
+        await asyncio.to_thread(self.emit, record)
+
+
 class ThoughtChunk(NamedTuple):
     content: str
     is_thought: bool
@@ -151,6 +303,84 @@ class ProgressSink(Protocol):
 
 
 _SECRET_REDACTION_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{20,}")
+
+SSE_IDLE_TIMEOUT_S: Final[float] = float(os.getenv("QUENCH_REVIEWER_SSE_IDLE_TIMEOUT", "30.0"))
+
+
+def _open_sse_response(
+    url: str,
+    data: bytes,
+    headers: Mapping[str, str],
+    timeout: float,
+) -> Any:
+    """可注入 SSE 读取接缝（默认为 urllib.request.urlopen），仅供单测 monkeypatch。"""
+    req = urllib.request.Request(
+        url=url,
+        data=data,
+        headers=dict(headers),
+        method="POST",
+    )
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _iter_sse_payloads(response: Any) -> Iterator[Mapping[str, Any]]:
+    """从 HTTP 响应流中逐行解析 SSE data: 载荷字典，纯函数解耦。"""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    line_buffer = bytearray()
+    max_line_bytes = 1024 * 1024  # 1 MiB 单行上限
+
+    while True:
+        try:
+            if hasattr(response, "read"):
+                raw_chunk = response.read(8192)
+            else:
+                raw_chunk = next(response)
+        except (StopIteration, ValueError, OSError):
+            break
+        except Exception:
+            break
+
+        if not raw_chunk:
+            break
+        if isinstance(raw_chunk, str):
+            raw_chunk = raw_chunk.encode("utf-8")
+        line_buffer.extend(raw_chunk)
+        while b"\n" in line_buffer:
+            line_end = line_buffer.index(b"\n")
+            raw_line = bytes(line_buffer[:line_end])
+            del line_buffer[: line_end + 1]
+
+            if len(raw_line) > max_line_bytes:
+                raw_line = raw_line[:max_line_bytes]
+
+            line = decoder.decode(raw_line).strip()
+            if not line or line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    return
+                try:
+                    chunk_json = json.loads(data_str)
+                except Exception:
+                    continue
+                if isinstance(chunk_json, Mapping):
+                    yield chunk_json
+
+    if line_buffer:
+        raw_line = bytes(line_buffer)
+        if len(raw_line) > max_line_bytes:
+            raw_line = raw_line[:max_line_bytes]
+        line = decoder.decode(raw_line).strip()
+        if line and not line.startswith(":") and line.startswith("data:"):
+            data_str = line[5:].strip()
+            if data_str != "[DONE]":
+                try:
+                    chunk_json = json.loads(data_str)
+                    if isinstance(chunk_json, Mapping):
+                        yield chunk_json
+                except Exception:
+                    pass
 
 
 # ---- 通用探针（纯函数，无副作用，绝不抛异常）----
@@ -204,10 +434,15 @@ def extract_reasoning_text(payload: Any) -> str:
 
 def extract_cached_tokens(payload: Any) -> int:
     """提取 Prompt Cache 命中 token 数，依次探测 4 种跨厂商形态。纯函数，无副作用，绝不抛异常。"""
+    if isinstance(payload, UsageSnapshot):
+        return payload.cached_tokens
     if not isinstance(payload, Mapping):
         return 0
 
     usage_dict = payload.get("usage")
+    if isinstance(usage_dict, UsageSnapshot):
+        return usage_dict.cached_tokens
+
     target = usage_dict if isinstance(usage_dict, Mapping) else payload
 
     candidates: List[Tuple[str, ...]] = [
@@ -229,12 +464,18 @@ def extract_cached_tokens(payload: Any) -> int:
     return 0
 
 
-def extract_usage(payload: Any, provider_label: str = "generic") -> UsageSnapshot:
+def extract_usage(payload: Any, provider_label: str = "generic", **kwargs: Any) -> UsageSnapshot:
     """提取归一化用量快照 UsageSnapshot。纯函数，无副作用，绝不抛异常。"""
+    if isinstance(payload, UsageSnapshot):
+        return payload
+
     if not isinstance(payload, Mapping):
         return UsageSnapshot(provider_label=provider_label)
 
     usage_dict = payload.get("usage")
+    if isinstance(usage_dict, UsageSnapshot):
+        return usage_dict
+
     u = usage_dict if isinstance(usage_dict, Mapping) else payload
 
     prompt_tokens = 0
@@ -819,6 +1060,76 @@ def _read_windows_env_var(var_name: str) -> Optional[str]:
     return None
 
 
+@dataclass(frozen=True)
+class CodeSlice:
+    rel_path: str
+    start_line: int
+    end_line: int
+    text: str                       # 头部含 "# file: <rel_path>:<start>-<end>" 锚点
+
+
+@dataclass(frozen=True, slots=True)
+class AssembledPrompt:
+    stable_prefix: str    # 段① (系统基准) + 段② (模式协议)
+    context_block: str    # 段③ (代码切片，纯相对路径无mtime)
+    dynamic_tail: str     # 段④ (提问与动态参数)
+    prefix_hash: str      # sha256(stable_prefix + "\x00" + context_block)[:16] (索引/断言用途)
+
+
+CONSULT_MODE_INSTRUCTIONS: dict[str, str] = {
+    "critique": (
+        "### Mode: Architectural Critique (Red-Team Threat Modeling)\n"
+        "Your duty is to relentlessly challenge assumptions, uncover race conditions, identify single points of failure, "
+        "and scrutinize concurrency, persistence, and state invariants.\n"
+        "- Explicitly categorize each risk by severity (Critical / High / Medium / Low) with concrete trigger scenarios;\n"
+        "- FORBIDDEN: Stylistic or aesthetic preferences. Focus strictly on system correctness, reliability, and invariants."
+    ),
+    "evaluate": (
+        "### Mode: Technical Trade-off Evaluation (A/B Comparative Matrix)\n"
+        "Your duty is to provide an objective, multi-dimensional trade-off matrix for the architectural alternatives.\n"
+        "- Structure your assessment across: Theoretical Benefits / Operational & Engineering Costs / Latent Failure Modes / Rollback & Migration Path;\n"
+        "- Explicitly declare which design is favored under which operational conditions."
+    ),
+    "brainstorm": (
+        "### Mode: Architectural Exploration & Brainstorming\n"
+        "Your duty is to explore divergent architectural approaches and innovative patterns to address the problem statement.\n"
+        "- For each proposed direction, annotate technical feasibility, key trade-offs, and a minimal proof-of-concept verification experiment;\n"
+        "- Keep solutions grounded in realistic constraints."
+    ),
+    "audit": (
+        "### Mode: Contract & Implementation Conformance Audit\n"
+        "Your duty is to conduct a strict, read-only audit between architectural specifications/contracts and current implementations.\n"
+        "- Enumerate explicit drift points, undocumented side effects, unhandled error conditions, and lifecycle violations;\n"
+        "- Provide line-anchored citations where deviations occur."
+    ),
+}
+
+OUTPUT_PROTOCOLS: str = (
+    "### Protocols for Reviewer Output\n"
+    "1. If you need additional code files to deepen your analysis, specify them inside:\n"
+    "<<<NEED-FILES>>>\n"
+    "relative/path/to/file1.py\n"
+    "relative/path/to/file2.py\n"
+    "<<<END>>>\n\n"
+    "2. If you propose an actionable DevTask, append the task draft inside:\n"
+    "<<<TASK_DRAFT>>>\n"
+    "### 任务 X.Y ⬜ 待确认 — <Task Title>\n"
+    "#### 【涉及文件】\n"
+    "- `[MODIFY]` `path/to/file.py`\n"
+    "#### 【缺陷根因与修改目标】\n"
+    "...\n"
+    "#### 【目标签名与类型契约】\n"
+    "...\n"
+    "#### 【分步改造指引】\n"
+    "...\n"
+    "#### 【防御与边缘校验】\n"
+    "...\n"
+    "#### 【DoD 验证命令】\n"
+    "...\n"
+    "<<<END>>>"
+)
+
+
 class PromptAssembler:
     """静态系统提示词组装器。
     
@@ -893,6 +1204,51 @@ class PromptAssembler:
     def assemble_messages(static_prefix: str, dynamic_turns: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """从结构上强制保证静态前缀作为第 1 个 system message，确保最长缓存前缀不被破坏。"""
         return [{"role": "system", "content": static_prefix}, *dynamic_turns]
+
+    @staticmethod
+    def assemble_consultation_prompt(
+        *,
+        mode: str,
+        slices: Sequence[CodeSlice],
+        query: str,
+    ) -> AssembledPrompt:
+        """组装四段式稳定性梯度咨询提示词。
+        
+        拓扑顺序：
+        ①/②: 模式指引与格式协议 (会话稳定前缀)
+        ③: 按相对路径字典序排序的代码切片 (纯相对路径无 mtime)
+        ④: 【绝对尾置】用户问题与动态参数
+        """
+        # 段②: 模式指引与格式协议
+        instruction = CONSULT_MODE_INSTRUCTIONS.get(mode, CONSULT_MODE_INSTRUCTIONS["critique"])
+        stable_prefix = f"{instruction}\n\n{OUTPUT_PROTOCOLS}".strip()
+
+        # 段③: 代码切片按相对路径字典序与行号稳定排序，去绝对路径与 mtime，确保 Posix 相对路径
+        if slices:
+            sorted_slices = sorted(
+                slices,
+                key=lambda s: (s.rel_path.replace("\\", "/"), s.start_line, s.end_line),
+            )
+            slice_blocks = []
+            for s in sorted_slices:
+                norm_text = s.text.strip().replace("\\", "/")
+                slice_blocks.append(f"```\n{norm_text}\n```")
+            context_block = "### Injected Code Context Slices\n" + "\n\n".join(slice_blocks)
+        else:
+            context_block = ""
+
+        # 段④: 绝对尾置动态 Query
+        dynamic_tail = f"### Consultation Query\n{query.strip()}"
+
+        # 前缀哈希：索引与断言用途
+        prefix_hash = hashlib.sha256((stable_prefix + "\x00" + context_block).encode("utf-8")).hexdigest()[:16]
+
+        return AssembledPrompt(
+            stable_prefix=stable_prefix,
+            context_block=context_block,
+            dynamic_tail=dynamic_tail,
+            prefix_hash=prefix_hash,
+        )
 
 
 class ReviewerClient:
@@ -1348,10 +1704,10 @@ class ReviewerClient:
                         raise ReviewerAuthenticationError(
                             f"[HTTP 401 Unauthorized] Reviewer API ({self.provider_label}) 鉴权失败：请检查环境变量 {key_display} 是否已导出: {err_body}"
                         )
-                    # 400 参数非法：单次快速失败，严禁重试
-                    elif e.code == 400:
+                    # 400 / 422 参数非法：单次快速失败，严禁重试
+                    elif e.code in (400, 422):
                         raise ReviewerBadRequestError(
-                            f"[HTTP 400 Bad Request] Reviewer API ({self.provider_label}) 请求参数非法: {err_body}"
+                            f"[HTTP {e.code} Bad Request] Reviewer API ({self.provider_label}) 请求参数非法: {err_body}"
                         )
                     # 403 / 404：无权限或路由不存在，直接失败
                     elif e.code == 403:
@@ -1431,6 +1787,7 @@ class ReviewerClient:
             "model": self.model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if self.thinking:
             payload["thinking"] = {"type": "enabled"}
@@ -1448,69 +1805,45 @@ class ReviewerClient:
         max_attempts = 1 + max(0, self.max_retries)
         chunk_queue: queue.Queue = queue.Queue(maxsize=100)
         stop_event = threading.Event()
-        MAX_LINE_BYTES = 1024 * 1024  # 1 MiB 单行上限
+        resp_holder: Dict[str, Any] = {"resp": None}
 
         def _stream_worker() -> None:
-            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
             for attempt in range(max_attempts):
                 if stop_event.is_set():
                     break
-                req = urllib.request.Request(
-                    url=endpoint,
-                    data=data_bytes,
-                    headers=headers,
-                    method="POST",
-                )
                 resp = None
                 try:
-                    resp = urllib.request.urlopen(req, timeout=float(self.timeout_seconds))
-                    line_buffer = bytearray()
-                    while not stop_event.is_set():
-                        raw_byte = resp.read(8192)
-                        if not raw_byte:
+                    resp = _open_sse_response(endpoint, data_bytes, headers, float(self.timeout_seconds))
+                    resp_holder["resp"] = resp
+                    if stop_event.is_set():
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        return
+
+                    for chunk_json in _iter_sse_payloads(resp):
+                        if stop_event.is_set():
                             break
-                        line_buffer.extend(raw_byte)
-                        while b"\n" in line_buffer:
-                            line_end = line_buffer.index(b"\n")
-                            raw_line = bytes(line_buffer[:line_end])
-                            del line_buffer[: line_end + 1]
+                        choices = chunk_json.get("choices") or []
+                        r_chunk = extract_reasoning_text(chunk_json)
+                        c_chunk = ""
+                        if choices and isinstance(choices[0], Mapping):
+                            c_chunk = choices[0].get("delta", {}).get("content") or ""
 
-                            if len(raw_line) > MAX_LINE_BYTES:
-                                raw_line = raw_line[:MAX_LINE_BYTES]
+                        usage_snapshot = None
+                        if "usage" in chunk_json and chunk_json["usage"]:
+                            usage_snapshot = extract_usage(chunk_json, provider_label=self.provider_label)
 
-                            line = decoder.decode(raw_line).strip()
-                            if not line or line.startswith(":"):
-                                continue
-                            if line.startswith("data:"):
-                                data_str = line[5:].strip()
-                                if data_str == "[DONE]":
-                                    chunk_queue.put(StreamChunk(done=True))
-                                    return
-
-                                try:
-                                    chunk_json = json.loads(data_str)
-                                except Exception:
-                                    continue
-
-                                choices = chunk_json.get("choices") or []
-                                r_chunk = extract_reasoning_text(chunk_json)
-                                c_chunk = ""
-                                if choices and isinstance(choices[0], Mapping):
-                                    c_chunk = choices[0].get("delta", {}).get("content") or ""
-
-                                usage_snapshot = None
-                                if "usage" in chunk_json and chunk_json["usage"]:
-                                    usage_snapshot = extract_usage(chunk_json, provider_label=self.provider_label)
-
-                                if r_chunk or c_chunk or usage_snapshot:
-                                    chunk_queue.put(
-                                        StreamChunk(
-                                            text=c_chunk,
-                                            reasoning=r_chunk,
-                                            usage=usage_snapshot,
-                                            done=False,
-                                        )
-                                    )
+                        if r_chunk or c_chunk or usage_snapshot:
+                            chunk_queue.put(
+                                StreamChunk(
+                                    text=c_chunk,
+                                    reasoning=r_chunk,
+                                    usage=usage_snapshot,
+                                    done=False,
+                                )
+                            )
                     chunk_queue.put(StreamChunk(done=True))
                     return
 
@@ -1535,10 +1868,10 @@ class ReviewerClient:
                             )
                         )
                         return
-                    if e.code == 400:
+                    if e.code in (400, 422):
                         chunk_queue.put(
-                            ReviewerError(
-                                f"[HTTP 400 Bad Request] Reviewer API ({self.provider_label}) 请求被拒：{err_body}"
+                            ReviewerBadRequestError(
+                                f"[HTTP {e.code} Bad Request] Reviewer API ({self.provider_label}) 请求被拒: {err_body}"
                             )
                         )
                         return
@@ -1572,9 +1905,22 @@ class ReviewerClient:
         worker_thread = threading.Thread(target=_stream_worker, daemon=True)
         worker_thread.start()
 
+        idle_timeout = float(os.getenv("QUENCH_REVIEWER_SSE_IDLE_TIMEOUT", str(SSE_IDLE_TIMEOUT_S)))
         try:
             while True:
-                item = await anyio.to_thread.run_sync(chunk_queue.get)
+                try:
+                    item = await asyncio.to_thread(chunk_queue.get, timeout=idle_timeout)
+                except queue.Empty:
+                    stop_event.set()
+                    resp = resp_holder.get("resp")
+                    if resp is not None:
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                    yield StreamChunk(done=True)
+                    break
+
                 if isinstance(item, Exception):
                     raise item
                 if isinstance(item, StreamChunk):
@@ -1583,6 +1929,12 @@ class ReviewerClient:
                         break
         finally:
             stop_event.set()
+            resp = resp_holder.get("resp")
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
     async def acomplete(
         self,
@@ -1613,7 +1965,32 @@ class ReviewerClient:
             soft_time_ceiling_s=soft_time_ceiling_s,
         )
         async with _REVIEWER_LIMITER:
-            return await anyio.to_thread.run_sync(fn, abandon_on_cancel=True)
+            res = await anyio.to_thread.run_sync(fn, abandon_on_cancel=True)
+            if log_dir and isinstance(res, Mapping):
+                try:
+                    usage = res.get("usage")
+                    snap = extract_usage(usage, provider_label=self.provider_label)
+                    p_toks = snap.prompt_tokens
+                    c_toks = snap.cached_tokens
+                    m_toks = max(0, p_toks - c_toks)
+                    h_ratio = round(c_toks / p_toks, 4) if p_toks > 0 else 0.0
+                    prompt_hash = compute_prompt_hash(messages)
+                    rec = CacheTelemetryRecord(
+                        ts=datetime.now(timezone.utc).isoformat(),
+                        prompt_hash=prompt_hash,
+                        prompt_tokens=p_toks,
+                        cached_tokens=c_toks,
+                        miss_tokens=m_toks,
+                        hit_ratio=h_ratio,
+                        mode="acomplete",
+                        session_id=session_id,
+                        usage_available=bool(p_toks > 0 or c_toks > 0),
+                    )
+                    sink = RollingJsonlTelemetrySink(os.path.join(log_dir, "cache_telemetry.jsonl"))
+                    await sink.aemit(rec)
+                except Exception:
+                    pass
+            return res
 
 
 # ---- PEP 562 兼容层（模块级）----
@@ -1630,6 +2007,10 @@ __all__ = [
     "DeepSeekClient",  # vendor-literal: allow
     "UsageSnapshot",
     "StreamChunk",
+    "TELEMETRY_RECORD_BYTES",
+    "CacheTelemetryRecord",
+    "compute_prompt_hash",
+    "RollingJsonlTelemetrySink",
     "extract_reasoning_text",
     "extract_cached_tokens",
     "extract_usage",
@@ -1655,6 +2036,10 @@ __all__ = [
     "MAX_RECORD_BYTES",
     "resolve_observability_policy",
     "make_verdict_sink",
+    "CodeSlice",
+    "AssembledPrompt",
+    "CONSULT_MODE_INSTRUCTIONS",
+    "OUTPUT_PROTOCOLS",
     "PromptAssembler",
     "compute_repetition_score",
     "log_telemetry_event",

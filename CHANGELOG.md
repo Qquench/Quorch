@@ -3,6 +3,20 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-30] 2026-09-30_v1.09_step03_multihop_need_files_guardrails.md
+
+- **Task 3.1**: NEED-FILES 多跳护栏（数据门控 + reasoning 剥离 + 累积预算 + 400 幂等回退）
+
+## [2026-09-30] 2026-09-30_v1.09_step02_prompt_cache_stability_gradient.md
+
+- **Task 2.1**: PromptAssembler 四段式稳定梯度布局与架构文档路径修正
+
+## [2026-09-30] 2026-09-30_v1.09_step01_cache_telemetry_and_rolling_retention.md
+
+- **Task 1.1**: SSE 空闲看门狗消费者侧实施契约、可注入 Reader 接缝显式化与长流零回归护栏
+- **Task 1.2**: cache_telemetry.jsonl 滚动保留生命周期与哈希非泄露
+- **Task 1.3**: ReviewerBadRequestError 跨路径统一契约（stream + acomplete）与既有断言迁移
+
 ## [2026-09-30] 2026-09-24_v1.08_step03_capability_tokens_and_onboarding.md
 
 - **Task 3.3**: 外部执行器接入规范与 SKILL.md 全面更新（主交付）

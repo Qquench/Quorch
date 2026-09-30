@@ -29,6 +29,8 @@ from log_naming import (
     gc_by_filename_order,
     enforce_unified_log_quota,
     _LOG_FILENAME_REGEX,
+    norm_registry_key,
+    _ROTATION_SUFFIX_REGEX,
 )
 
 
@@ -424,5 +426,33 @@ def test_enforce_unified_log_quota_purges_new_format_when_legacy_exhausted(tmp_p
     assert (tmp_path / "20260924_002_task.log").exists()
     assert (tmp_path / "20260924_003_task.log").exists()
     assert (tmp_path / "20260924_004_task.log").exists()
+
+
+def test_norm_registry_key_rotation_folding(tmp_path: Path):
+    """断言 norm_registry_key 对 .1.log/.log.1 -> .log、.1.jsonl/.jsonl.1 -> .jsonl，以及无后缀输入恒等幂等。"""
+    base_log = tmp_path / "audit.log"
+    rot_log_1 = tmp_path / "audit.1.log"
+    rot_log_2 = tmp_path / "audit.log.1"
+
+    base_jsonl = tmp_path / "cache_telemetry.jsonl"
+    rot_jsonl_1 = tmp_path / "cache_telemetry.1.jsonl"
+    rot_jsonl_2 = tmp_path / "cache_telemetry.jsonl.1"
+
+    expected_log_key = os.path.normcase(os.path.realpath(str(base_log)))
+    expected_jsonl_key = os.path.normcase(os.path.realpath(str(base_jsonl)))
+
+    # .log forms
+    assert norm_registry_key(base_log) == expected_log_key
+    assert norm_registry_key(rot_log_1) == expected_log_key
+    assert norm_registry_key(rot_log_2) == expected_log_key
+
+    # .jsonl forms
+    assert norm_registry_key(base_jsonl) == expected_jsonl_key
+    assert norm_registry_key(rot_jsonl_1) == expected_jsonl_key
+    assert norm_registry_key(rot_jsonl_2) == expected_jsonl_key
+
+    # Idempotence on unadorned or other extensions
+    txt_path = tmp_path / "readme.txt"
+    assert norm_registry_key(txt_path) == os.path.normcase(os.path.realpath(str(txt_path)))
 
 

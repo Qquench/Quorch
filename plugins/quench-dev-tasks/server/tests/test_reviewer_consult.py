@@ -18,6 +18,7 @@ Covers:
 from dataclasses import dataclass
 from pathlib import Path
 import asyncio
+import json
 import os
 import re
 import time
@@ -405,6 +406,15 @@ async def test_context_extension_round_respects_max_hops(tmp_path: Path, monkeyp
 
     client1 = MultiHopClient()
     monkeypatch.setattr("consultation.create_reviewer_client", lambda cfg, sink=None: client1)
+
+    # 模拟 Telemetry 门控历史需求数据（>30% 且 >=20 条）
+    log_dir = tmp_path / ".agents" / "logs" / "reviewer"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    t_file = log_dir / "cache_telemetry.jsonl"
+    t_file.write_text(
+        "\n".join(json.dumps({"demand": True}) for _ in range(25)) + "\n",
+        encoding="utf-8",
+    )
 
     # 1. max_hops=1 时触发扩展
     res_ext = await server.dev_reviewer_consult(

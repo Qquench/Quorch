@@ -104,6 +104,7 @@ from manifest import (
     ReconcileReport,
     ReconcileClass,
     capture_baseline,
+    get_baseline_path,
 )
 
 try:
@@ -1345,6 +1346,14 @@ def dev_tasks_complete(
             gen = generation if generation is not None else active_lease.generation
             release_lease(workspace_root, task_id=namespaced_id, holder_token=tok, generation=gen)
 
+        # 清理已完成任务的物理基线快照，避免残存快照污染工作区及后续同名任务
+        try:
+            b_path = get_baseline_path(workspace_root, cur_task.id)
+            if os.path.isfile(b_path):
+                os.remove(b_path)
+        except OSError:
+            pass
+
         return {
             "status": "completed",
             "task_id": updated.id,
@@ -1812,13 +1821,15 @@ async def dev_tasks_refine_spec(
             "degraded_card": degraded_info,
         }
 
-    # 2. 组装 System Prompt 与代码上下文
+    # 2. 组装 System Prompt 与代码上下文 (四段式稳定性梯度拓扑)
     static_prefix = PromptAssembler.build_static_system_prefix(workspace_root, config)
+    sorted_files = sorted(explore_res.files, key=lambda f: f.rel_path.replace("\\", "/"))
     ctx_parts = []
-    for f in explore_res.files:
+    for f in sorted_files:
         symbols_str = ", ".join(f"{s.kind} {s.name}" for s in f.symbols[:10])
+        norm_path = f.rel_path.replace("\\", "/")
         ctx_parts.append(
-            f"File: `{f.rel_path}` (Language: {f.language})\n"
+            f"File: `{norm_path}` (Language: {f.language})\n"
             f"Symbols: {symbols_str}\n"
             f"```\n{f.slice_text}\n```"
         )
@@ -1826,10 +1837,6 @@ async def dev_tasks_refine_spec(
 
     user_prompt = (
         f"You are the Senior Architecture Reviewer. Please conduct a red-team critique and refine this draft task into an ironclad Quench DevTask adhering strictly to the Six Core Fields.\n\n"
-        f"Draft Task ID: {task_id}\n"
-        f"Draft Title: {title}\n"
-        f"Draft Description / Requirements:\n{raw_spec}\n\n"
-        f"Explored Code Context:\n{code_context_str}\n\n"
         f"Output Contract:\n"
         f"Output ONLY a valid JSON object containing the six canonical fields:\n"
         f"- 'affected_files': list of file strings with [MODIFY]/[NEW]/[DELETE] prefixes\n"
@@ -1837,7 +1844,11 @@ async def dev_tasks_refine_spec(
         f"- 'type_contracts': string or list with type signatures\n"
         f"- 'steps': list of numbered sequential steps\n"
         f"- 'defensive_checks': list of edge-case and boundary assertions\n"
-        f"- 'dod_commands': string or list with DoD commands\n"
+        f"- 'dod_commands': string or list with DoD commands\n\n"
+        f"Explored Code Context:\n{code_context_str}\n\n"
+        f"Draft Task ID: {task_id}\n"
+        f"Draft Title: {title}\n"
+        f"Draft Description / Requirements:\n{raw_spec}\n"
     )
 
     messages = PromptAssembler.assemble_messages(

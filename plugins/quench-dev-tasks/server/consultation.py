@@ -11,15 +11,17 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import inspect
+import json
 import os
 from pathlib import Path
 import re
 import threading
 import time
-from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Dict, Final, List, Literal, Mapping, Optional, Sequence, Tuple
 from uuid import uuid4
 import weakref
 
+from filelock import FileLock
 from path_guard import sanitize_workspace_path, PathTraversalError
 from project_config import (
     QuenchStackConfig,
@@ -30,12 +32,20 @@ from project_config import (
 )
 from reviewer_engine import (
     AdaptiveHeartbeatSink,
+    AssembledPrompt,
+    CacheTelemetryRecord,
+    CodeSlice,
     CoalescingTextSink,
+    CONSULT_MODE_INSTRUCTIONS,
+    OUTPUT_PROTOCOLS,
     PromptAssembler,
+    ReviewerBadRequestError,
     ReviewerClient,
     ReviewerEngineError,
     ReviewerEngineUnavailableError,
+    RollingJsonlTelemetrySink,
     RotatingFileSink,
+    compute_prompt_hash,
     extract_reasoning_text,
     extract_usage,
     format_heartbeat_line,
@@ -133,12 +143,203 @@ MAX_REASONING_TOKENS_CEILING = 32000
 CONTEXT_SPEC_PATTERN = re.compile(r"^(?P<path>.+):(?P<start>\d+)-(?P<end>\d+)$")
 
 
-@dataclass(frozen=True)
-class CodeSlice:
-    rel_path: str
-    start_line: int
-    end_line: int
-    text: str                       # 头部含 "# file: <rel_path>:<start>-<end>" 锚点
+MULTI_HOP_DEMAND_THRESHOLD: Final[float] = 0.30  # 文档与契约说明
+MULTI_HOP_DEMAND_PERCENT: Final[int] = 30        # 运行期与单测唯一 SSOT 常量（百分比 30%）
+MIN_TELEMETRY_SAMPLES: Final[int] = 20
+
+
+def should_enable_multi_hop(demand_count: int, sample_count: int) -> bool:
+    """门控断言：采用整数交叉相乘判定 sample_count >= MIN_TELEMETRY_SAMPLES 且 demand_count * 100 > MULTI_HOP_DEMAND_PERCENT * sample_count。"""
+    return (sample_count >= MIN_TELEMETRY_SAMPLES) and (
+        demand_count * 100 > MULTI_HOP_DEMAND_PERCENT * sample_count
+    )
+
+
+def strip_reasoning_from_history(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """纯函数：返回剥离了思维链属性的新消息列表，绝不原地改动入参。
+    
+    仅严格作用于历史 assistant 消息，移除 reasoning_content、reasoning、thought、thoughts 等属性，
+    保留正文 content，绝不改动 system 与 user 消息。
+    """
+    cleaned: list[dict[str, Any]] = []
+    reasoning_keys = ("reasoning_content", "reasoning", "thought", "thoughts")
+    for m in messages:
+        msg_dict = dict(m)
+        if msg_dict.get("role") == "assistant":
+            for k in reasoning_keys:
+                msg_dict.pop(k, None)
+        cleaned.append(msg_dict)
+    return cleaned
+
+
+class HopBudget:
+    """跨跳全局累积字符预算池。
+    
+    单次咨询总切片注入量由运行期解析的 total 字符数（默认 MAX_TOTAL_INJECTION_CHARS）严格受控。
+    每 hop 以聚合字符数一次性调用 consume(chars)。
+    超限时返回 False 且严禁扣减已有计数器（保持原子性），整 hop 整体放弃。
+    """
+
+    def __init__(self, total: int = MAX_TOTAL_INJECTION_CHARS) -> None:
+        self._total: int = max(0, total)
+        self._consumed: int = 0
+
+    def consume(self, chars: int) -> bool:
+        """消耗预算。每 hop 以聚合字符数调用一次。若超限则返回 False 且严禁扣减已有计数器（保持原子性）。"""
+        if chars < 0:
+            chars = 0
+        if self._consumed + chars <= self._total:
+            self._consumed += chars
+            return True
+        return False
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self._total - self._consumed)
+
+    @property
+    def total(self) -> int:
+        return self._total
+
+    @property
+    def consumed(self) -> int:
+        return self._consumed
+
+
+def _read_telemetry_demand_sync(telemetry_file: Path, max_samples: int = 50) -> tuple[int, int]:
+    """同步有界读取 cache_telemetry.jsonl 最新记录（最多 max_samples 条）。
+    返回 (demand_count, sample_count)。
+    若文件不存在或读取失败，平滑返回 (0, 0)。
+    """
+    if not telemetry_file.is_file():
+        return (0, 0)
+
+    records: list[dict[str, Any]] = []
+    try:
+        lock_path = telemetry_file.with_suffix(telemetry_file.suffix + ".lock")
+        with FileLock(str(lock_path), timeout=0.2):
+            with open(telemetry_file, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+
+        for line in reversed(lines):
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                data = json.loads(line_str)
+                if isinstance(data, dict):
+                    records.append(data)
+                    if len(records) >= max_samples:
+                        break
+            except Exception:
+                continue
+    except (FileNotFoundError, OSError):
+        return (0, 0)
+    except Exception:
+        return (0, 0)
+
+    sample_count = len(records)
+    demand_count = sum(
+        1 for r in records
+        if bool(
+            r.get("demand")
+            or r.get("need_files")
+            or r.get("multi_hop")
+            or r.get("has_need_files")
+            or r.get("mode") in ("need_files", "multi_hop")
+        )
+    )
+    return (demand_count, sample_count)
+
+
+async def evaluate_multi_hop_gate(
+    workspace_root: str,
+    telemetry_path: Optional[str | Path] = None,
+) -> tuple[bool, Optional[str]]:
+    """异步通过 asyncio.to_thread 读取遥测文件并判定多跳门控。
+    返回 (enabled, skipped_reason)。
+    """
+    if telemetry_path:
+        t_file = Path(telemetry_path)
+    else:
+        t_file = Path(workspace_root) / ".agents" / "logs" / "reviewer" / "cache_telemetry.jsonl"
+
+    demand_count, sample_count = await asyncio.to_thread(_read_telemetry_demand_sync, t_file, 50)
+    if sample_count < MIN_TELEMETRY_SAMPLES:
+        return (False, f"insufficient_samples (samples={sample_count} < {MIN_TELEMETRY_SAMPLES})")
+
+    if not should_enable_multi_hop(demand_count, sample_count):
+        return (
+            False,
+            f"demand_threshold_not_met (demand={demand_count}/{sample_count}, threshold={MULTI_HOP_DEMAND_PERCENT}%)",
+        )
+
+    return (True, None)
+
+
+async def _emit_consultation_audit(
+    latch: threading.Event,
+    log_dir: Path,
+    session_id: str,
+    mode: str,
+    messages: Sequence[Mapping[str, Any]],
+    usage: Mapping[str, int],
+    status: str,
+    degraded_reason: Optional[str] = None,
+    has_need_files: bool = False,
+) -> None:
+    """线程安全落盘闩锁：在任何 await 或 offload 之前同步完成 check-and-set，杜绝重复落盘。"""
+    if latch.is_set():
+        return
+    latch.set()
+
+    # 1. 遥测账本 cache_telemetry.jsonl
+    try:
+        p_toks = int(usage.get("prompt_tokens", 0))
+        c_toks = int(usage.get("prompt_cache_hit_tokens", 0))
+        m_toks = max(0, p_toks - c_toks)
+        h_ratio = round(c_toks / p_toks, 4) if p_toks > 0 else 0.0
+        prompt_hash = compute_prompt_hash(messages)
+        rec = CacheTelemetryRecord(
+            ts=datetime.now(timezone.utc).isoformat(),
+            prompt_hash=prompt_hash,
+            prompt_tokens=p_toks,
+            cached_tokens=c_toks,
+            miss_tokens=m_toks,
+            hit_ratio=h_ratio,
+            mode=mode,
+            session_id=session_id,
+            usage_available=bool(p_toks > 0 or c_toks > 0),
+        )
+        sink = RollingJsonlTelemetrySink(str(log_dir / "cache_telemetry.jsonl"))
+        await sink.aemit(rec)
+    except Exception:
+        pass
+
+    # 2. 裁决账本 verdicts.jsonl
+    try:
+        from observability_policy import make_verdict_sink
+
+        v_path = str(log_dir / "verdicts.jsonl")
+        vsink = make_verdict_sink(v_path)
+        vsink.emit_verdict(
+            task_id=session_id,
+            verdict_hash=prompt_hash,
+            payload={
+                "session_id": session_id,
+                "mode": mode,
+                "status": status,
+                "degraded_reason": degraded_reason,
+                "has_need_files": has_need_files,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            generation=0,
+        )
+    except Exception:
+        pass
+
+
+# CodeSlice is imported from reviewer_engine.py for single source of truth and backward compatibility.
 
 
 @dataclass(frozen=True)
@@ -368,76 +569,20 @@ def build_static_prefix(workspace_root: str, config: Any) -> str:
         return prefix
 
 
-MODE_INSTRUCTIONS: dict[str, str] = {
-    "critique": (
-        "### Mode: Architectural Critique (Red-Team Threat Modeling)\n"
-        "Your duty is to relentlessly challenge assumptions, uncover race conditions, identify single points of failure, "
-        "and scrutinize concurrency, persistence, and state invariants.\n"
-        "- Explicitly categorize each risk by severity (Critical / High / Medium / Low) with concrete trigger scenarios;\n"
-        "- FORBIDDEN: Stylistic or aesthetic preferences. Focus strictly on system correctness, reliability, and invariants."
-    ),
-    "evaluate": (
-        "### Mode: Technical Trade-off Evaluation (A/B Comparative Matrix)\n"
-        "Your duty is to provide an objective, multi-dimensional trade-off matrix for the architectural alternatives.\n"
-        "- Structure your assessment across: Theoretical Benefits / Operational & Engineering Costs / Latent Failure Modes / Rollback & Migration Path;\n"
-        "- Explicitly declare which design is favored under which operational conditions."
-    ),
-    "brainstorm": (
-        "### Mode: Architectural Exploration & Brainstorming\n"
-        "Your duty is to explore divergent architectural approaches and innovative patterns to address the problem statement.\n"
-        "- For each proposed direction, annotate technical feasibility, key trade-offs, and a minimal proof-of-concept verification experiment;\n"
-        "- Keep solutions grounded in realistic constraints."
-    ),
-    "audit": (
-        "### Mode: Contract & Implementation Conformance Audit\n"
-        "Your duty is to conduct a strict, read-only audit between architectural specifications/contracts and current implementations.\n"
-        "- Enumerate explicit drift points, undocumented side effects, unhandled error conditions, and lifecycle violations;\n"
-        "- Provide line-anchored citations where deviations occur."
-    ),
-}
+MODE_INSTRUCTIONS: dict[str, str] = CONSULT_MODE_INSTRUCTIONS
 
 
 def render_mode_prompt(mode: ConsultMode, query: str, slices: Sequence[CodeSlice]) -> str:
-    """渲染咨询模式提示词，融合模式指引、用户问题与安全切片上下文。"""
-    instructions = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["critique"])
-
-    parts = [
-        f"{instructions}\n",
-        "### Consultation Query\n",
-        f"{query.strip()}\n",
-    ]
-
-    if slices:
-        parts.append("\n### Injected Code Context Slices\n")
-        for s in slices:
-            parts.append(f"```\n{s.text.strip()}\n```\n")
-
-    parts.append(
-        "\n### Protocols for Reviewer Output\n"
-        "1. If you need additional code files to deepen your analysis, specify them inside:\n"
-        "<<<NEED-FILES>>>\n"
-        "relative/path/to/file1.py\n"
-        "relative/path/to/file2.py\n"
-        "<<<END>>>\n\n"
-        "2. If you propose an actionable DevTask, append the task draft inside:\n"
-        "<<<TASK_DRAFT>>>\n"
-        "### 任务 X.Y ⬜ 待确认 — <Task Title>\n"
-        "#### 【涉及文件】\n"
-        "- `[MODIFY]` `path/to/file.py`\n"
-        "#### 【缺陷根因与修改目标】\n"
-        "...\n"
-        "#### 【目标签名与类型契约】\n"
-        "...\n"
-        "#### 【分步改造指引】\n"
-        "...\n"
-        "#### 【防御与边缘校验】\n"
-        "...\n"
-        "#### 【DoD 验证命令】\n"
-        "...\n"
-        "<<<END>>>\n"
-    )
-
-    return "\n".join(parts)
+    """渲染咨询模式提示词，融合模式指引、输出协议、代码切片上下文与用户问题。
+    
+    采用四段式稳定性梯度布局，将动态 Query 绝对尾置。
+    """
+    assembled = PromptAssembler.assemble_consultation_prompt(mode=mode, slices=slices, query=query)
+    parts = [assembled.stable_prefix]
+    if assembled.context_block:
+        parts.append(assembled.context_block)
+    parts.append(assembled.dynamic_tail)
+    return "\n\n".join(parts)
 
 
 _SESSION_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
@@ -610,9 +755,15 @@ async def _execute_consultation(
 
         heartbeat_task = asyncio.create_task(_heartbeat_worker())
 
+        audit_latch = threading.Event()
+        budget = HopBudget(total=cfg_max_total_chars)
+        initial_chars = sum(len(s.text) for s in slices)
+        budget.consume(initial_chars)
+
         try:
             active_slices = list(slices)
             active_skipped = list(skipped_files)
+            conversation_history: list[dict[str, Any]] = []
 
             while True:
                 if cancel_event is not None and cancel_event.is_set():
@@ -622,22 +773,28 @@ async def _execute_consultation(
                 if abort_handle is not None and abort_handle.is_aborted:
                     raise asyncio.CancelledError("Consultation cancelled before turn")
 
-                user_content = render_mode_prompt(mode, req.query, active_slices)
-                messages = [
-                    {"role": "system", "content": static_prefix},
-                    {"role": "user", "content": user_content},
-                ]
+                if current_hop == 0:
+                    user_content = render_mode_prompt(mode, req.query, active_slices)
+                    messages = [
+                        {"role": "system", "content": static_prefix},
+                        {"role": "user", "content": user_content},
+                    ]
+                    conversation_history = list(messages)
+                else:
+                    messages = list(conversation_history)
 
+                clean_messages = strip_reasoning_from_history(messages)
                 timeout_s = getattr(re_cfg, "timeout_seconds", 60)
 
-                async def _call_engine():
+                async def _call_engine(engine_messages: list[dict[str, Any]]):
                     content_parts: list[str] = []
                     last_flush_t = time.monotonic()
                     coalescer = CoalescingTextSink(sink.write_chunk_text, tag="reasoning")
 
                     try:
                         accumulated_reasoning_chars = 0
-                        async for chunk in client.stream_chat(messages):
+                        last_usage = None
+                        async for chunk in client.stream_chat(engine_messages):
                             # 取消与打断检查
                             if cancel_event is not None and cancel_event.is_set():
                                 if abort_handle is not None:
@@ -648,6 +805,10 @@ async def _execute_consultation(
 
                             now = time.monotonic()
                             stream_stats["last_chunk_t"] = now
+
+                            chunk_usage = getattr(chunk, "usage", None)
+                            if chunk_usage is not None:
+                                last_usage = chunk_usage
 
                             reasoning = getattr(chunk, "reasoning", "") or ""
                             chunk_text = getattr(chunk, "text", "") or ""
@@ -668,10 +829,10 @@ async def _execute_consultation(
                         sink.flush()
 
                         full_text = "".join(content_parts)
-                        return {"content": full_text, "usage": {}}
+                        return {"content": full_text, "usage": last_usage or {}}
                     except (AttributeError, NotImplementedError):
                         coalescer.close()
-                        resp = await client.acomplete(messages)
+                        resp = await client.acomplete(engine_messages)
                         reasoning = extract_reasoning_text(resp)
                         if reasoning:
                             fallback_coalescer = CoalescingTextSink(sink.write_chunk_text, tag="reasoning")
@@ -687,7 +848,7 @@ async def _execute_consultation(
                             pass
 
                 try:
-                    raw_result = await asyncio.wait_for(_call_engine(), timeout=float(timeout_s))
+                    raw_result = await asyncio.wait_for(_call_engine(clean_messages), timeout=float(timeout_s))
                 except asyncio.CancelledError:
                     sink.write_chunk_text(
                         f"\n{datetime.now(timezone.utc).isoformat()} [info] Consultation cancelled\n"
@@ -699,6 +860,16 @@ async def _execute_consultation(
                         f"\n{datetime.now(timezone.utc).isoformat()} [error] Engine timeout after {timeout_s}s\n"
                     )
                     sink.flush()
+                    await _emit_consultation_audit(
+                        audit_latch,
+                        log_dir,
+                        session_id,
+                        mode,
+                        clean_messages,
+                        total_usage,
+                        status="degraded",
+                        degraded_reason="timeout",
+                    )
                     return ConsultResult(
                         status="degraded",
                         session_id=session_id,
@@ -727,6 +898,16 @@ async def _execute_consultation(
                         f"\n{datetime.now(timezone.utc).isoformat()} [error] Reasoning budget ceiling exceeded\n"
                     )
                     sink.flush()
+                    await _emit_consultation_audit(
+                        audit_latch,
+                        log_dir,
+                        session_id,
+                        mode,
+                        clean_messages,
+                        total_usage,
+                        status="degraded",
+                        degraded_reason="reasoning_budget_exceeded",
+                    )
                     return ConsultResult(
                         status="degraded",
                         session_id=session_id,
@@ -749,6 +930,49 @@ async def _execute_consultation(
                         },
                         self_verification_warning=self_verification_warning,
                     )
+                except ReviewerBadRequestError as bre:
+                    if current_hop > 0:
+                        # 自动剔除增量切片回退为单轮交付（保留第 1 轮分析结果）
+                        sink.write_chunk_text(
+                            f"\n{datetime.now(timezone.utc).isoformat()} [warning] ReviewerBadRequestError ({bre}) on hop {current_hop}; falling back to single-turn delivery\n"
+                        )
+                        sink.flush()
+                        break
+                    else:
+                        err_msg = str(bre)
+                        sink.write_chunk_text(
+                            f"\n{datetime.now(timezone.utc).isoformat()} [error] ReviewerBadRequestError: {err_msg}\n"
+                        )
+                        sink.flush()
+                        await _emit_consultation_audit(
+                            audit_latch,
+                            log_dir,
+                            session_id,
+                            mode,
+                            clean_messages,
+                            total_usage,
+                            status="degraded",
+                            degraded_reason="bad_request",
+                        )
+                        return ConsultResult(
+                            status="degraded",
+                            session_id=session_id,
+                            mode=mode,
+                            findings="",
+                            log_path=str(log_file),
+                            usage=total_usage,
+                            truncated=truncated,
+                            skipped_files=active_skipped,
+                            degraded_reason="bad_request",
+                            handoff_prompt=f"[Reviewer Bad Request: {err_msg}]\n模型请求参数或格式不合法 (HTTP 400/422)。",
+                            reviewer_identity={
+                                "provider": prov,
+                                "model": model,
+                                "thinking": thinking,
+                                "status": "degraded",
+                            },
+                            self_verification_warning=self_verification_warning,
+                        )
                 except ReviewerEngineError as ee:
                     err_msg = str(ee)
                     sink.write_chunk_text(
@@ -761,6 +985,16 @@ async def _execute_consultation(
                         deg_reason = "connect_error"
                     else:
                         deg_reason = "network"
+                    await _emit_consultation_audit(
+                        audit_latch,
+                        log_dir,
+                        session_id,
+                        mode,
+                        clean_messages,
+                        total_usage,
+                        status="degraded",
+                        degraded_reason=deg_reason,
+                    )
                     return ConsultResult(
                         status="degraded",
                         session_id=session_id,
@@ -792,28 +1026,60 @@ async def _execute_consultation(
                 # 检查上下文扩展轮次
                 need_files_match = NEED_FILES_PATTERN.search(findings_text)
                 if need_files_match and current_hop < max_hops:
-                    current_hop += 1
+                    # 1. 数据门控开启判定
+                    multi_hop_allowed, skipped_reason = await evaluate_multi_hop_gate(workspace_root)
+                    if not multi_hop_allowed:
+                        sink.write_chunk_text(
+                            f"\n{datetime.now(timezone.utc).isoformat()} [info] Multi-hop gate skipped: {skipped_reason}\n"
+                        )
+                        break
+
                     raw_extra_paths = [
                         line.strip()
                         for line in need_files_match.group(1).splitlines()
                         if line.strip() and not line.strip().startswith("#")
                     ]
                     if raw_extra_paths:
-                        current_total_chars = sum(len(s.text) for s in active_slices)
-                        remaining_budget = max(0, cfg_max_total_chars - current_total_chars)
+                        if budget.remaining <= 0:
+                            truncated = True
+                            break
+
                         extra_slices, extra_skipped, extra_trunc = resolve_context_files(
                             workspace_root,
                             raw_extra_paths,
                             max_files=MAX_CONTEXT_FILES - len(active_slices),
                             window_lines=cfg_window_lines,
-                            max_total_injection_chars=remaining_budget,
+                            max_total_injection_chars=budget.remaining,
                             max_lines_per_slice=cfg_max_lines_per_slice,
                         )
-                        active_slices.extend(extra_slices)
                         active_skipped.extend(extra_skipped)
                         if extra_trunc:
                             truncated = True
-                        continue
+
+                        extra_chars = sum(len(s.text) for s in extra_slices)
+                        if not budget.consume(extra_chars):
+                            # 预算耗尽时不得进行部分切片注入致使语义撕裂与缓存指纹污染：每 hop 聚合判定，整 hop 整体放弃并置 truncated=True
+                            truncated = True
+                            break
+
+                        if extra_slices:
+                            active_slices.extend(extra_slices)
+                            current_hop += 1
+
+                            # 构建原生多轮对话历史：
+                            conversation_history.append({"role": "assistant", "content": findings_text})
+                            sorted_extra = sorted(
+                                extra_slices,
+                                key=lambda s: (s.rel_path.replace("\\", "/"), s.start_line, s.end_line),
+                            )
+                            slice_blocks = [f"```\n{s.text.strip().replace('\\', '/')}\n```" for s in sorted_extra]
+                            turn_user_content = (
+                                "### Additional Injected Code Context Slices\n"
+                                + "\n\n".join(slice_blocks)
+                                + "\n\nPlease continue your architectural analysis based on the additional code slices above."
+                            )
+                            conversation_history.append({"role": "user", "content": turn_user_content})
+                            continue
 
                 break
 
@@ -826,6 +1092,19 @@ async def _execute_consultation(
                     "raw_markdown": draft_markdown,
                     "parsed": True,
                 }
+
+            has_need_files = bool(NEED_FILES_PATTERN.search(all_findings))
+            await _emit_consultation_audit(
+                audit_latch,
+                log_dir,
+                session_id,
+                mode,
+                clean_messages,
+                total_usage,
+                status="ok",
+                degraded_reason=None,
+                has_need_files=has_need_files,
+            )
 
             return ConsultResult(
                 status="ok",
