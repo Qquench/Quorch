@@ -451,6 +451,17 @@
       "git_head_sha": "5c7a6ee125ce01b53b655d4246e227cfaa151d85",
       "git_index_mtime": 1790765015.1843176,
       "released": true
+    },
+    "2026-09-30_fix_py311_fstring_backslash_ci::1.1": {
+      "task_id": "2026-09-30_fix_py311_fstring_backslash_ci::1.1",
+      "md_sha256": "be6cbb7581da4734927dd3b5bc4ac48f51b9a7d1472d066c1a500c0b0dc0e89c",
+      "generation": 1,
+      "holder_token": "token_1790773871959_16868",
+      "last_heartbeat_monotonic_ns": 997241406000000,
+      "last_heartbeat_wall_utc": "2026-09-30T13:17:45.701364+00:00",
+      "git_head_sha": "b19e981dc4d4462bbe63b797ba30ceb5549eb3d1",
+      "git_index_mtime": 1790772973.3728702,
+      "released": true
     }
   }
 }

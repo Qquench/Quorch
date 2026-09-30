@@ -30,6 +30,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r plugins/quench-dev-tasks/server/requirements.txt
 
+      - name: Syntax preflight (minimum supported Python)
+        run: |
+          python -m compileall -q plugins/quench-dev-tasks/server
+
       - name: Run test suite
         env:
           PYTHONPATH: plugins/quench-dev-tasks/server

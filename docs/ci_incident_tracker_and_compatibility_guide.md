@@ -61,6 +61,7 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 | **INC-20260924-01** | 2026-09-24 | `8d8ec3c` / `main` (Run 35961542829) | Ubuntu 3.11, 3.12, Win 3.11 | `RuntimeError: os.stat was called` + Session 级崩溃 | [案例 6](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃) | `4b85abc` | ✅ 已闭环 |
 | **INC-20260925-01** | 2026-09-25 | `23e08a8` / `main` (Run 36136603921) | Ubuntu 22.04 (Py 3.11, 3.12) | `AttributeError: module 'ctypes' does not have attribute 'windll'` | [案例 7](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror) | `8f97709` | ✅ 已闭环 |
 | **INC-20260925-02** | 2026-09-25 | `8f97709` / `main` (Run 36143945613) | Windows Server (Py 3.11) | `assert elapsed < 2.5` 超时测试偶发 Flaky (2.609s) | [案例 8](#案例-8-测试断言紧贴超时边界导致-ci-虚拟化宿主调度抖动偶发-flaky) | `pending` (Step 06) | ✅ 已闭环 |
+| **INC-20260930-01** | 2026-09-30 | `b19e981` / `main` (Run 36718049950) | Ubuntu 3.11, Windows 3.11 | `SyntaxError: f-string expression part cannot include a backslash` | [案例 9](#案例-9-python-311-与-312-pep-701-差异导致-f-string-表达式内反斜杠触发编译期-syntaxerror) | `pending` (Hotfix) | ✅ 已闭环 |
 
 ---
 
@@ -258,9 +259,41 @@ foreach ($job in $jobs.jobs) {
 
 ---
 
+### 案例 9: Python 3.11 与 3.12+ (PEP 701) 差异导致 f-string 表达式内反斜杠触发编译期 SyntaxError
+
+- **首次触发节点**: 提交 `b19e981`（v1.09 cache telemetry 与 multihop 增强），GitHub Actions Run `36718049950`（Jobs `109895799832` 与 `109895799923`）
+- **现象**:
+  - 本地 Windows 开发环境（Python 3.12）以及 GitHub Actions Python 3.12 矩阵（Ubuntu / Windows）全部 100% 成功通过；
+  - 仅在 GitHub Actions `ubuntu-latest (Python 3.11)` 与 `windows-latest (Python 3.11)` 上测试收集阶段崩溃抛出：
+    ```text
+    ERROR plugins/quench-dev-tasks/server/tests/test_consultation_multihop.py
+    File ".../consultation.py", line 1075
+      slice_blocks = [f"```\n{s.text.strip().replace('\\', '/')}\n```" for s in sorted_extra]
+                                                                     ^^^
+    SyntaxError: f-string expression part cannot include a backslash
+    ```
+- **根因深度复盘与机制原理**:
+  1. **PEP 701 跨版本语法禁令解除差异**：
+     - 在 Python 3.11 及更早版本中，词法分析器对 f-string 存在硬性约束：表达式 `{...}` 内部绝对禁止包含反斜杠（`\`），无论作为转义字符还是字符串字面量的一部分，均会在词法编译阶段直接抛出 `SyntaxError`。
+     - Python 3.12 引入了 PEP 701（Syntactic formalization of f-strings），重写了解析器，放开了表达式内反斜杠限制。
+  2. **本地环境与 CI 最低版本支持断层**：
+     - 本地开发机运行在 Python 3.12 上，代码编译与测试完全合法。
+     - 该语法错误属于**编译期/收集期**崩溃，只要被任何单测文件 `import`，就会导致整个 pytest session 收集失败。
+- **加固方案 (三重闭环)**:
+  1. **表达式外提与无反斜杠重构**：
+     - 将 `consultation.py` 中的 `slice_blocks` 构造改为字符串显式拼接（`"```\n" + s.text.strip().replace("\\", "/") + "\n```"`），输出逐字节一致，消除 f-string 表达式内的反斜杠。
+  2. **跨版本语法兼容守护单测 (`test_python_version_compat.py`)**：
+     - 新增独立测试文件，使用 `ast` 遍历全部 server 源码中的 `FormattedValue` 节点，断言表达式内部绝对不含反斜杠，并附带负向样本自测，确保在 Python 3.12 本地环境运行亦能第一时间拦截此类跨版本语法回归。
+  3. **CI 流水线 Syntax Preflight Fail-Fast**：
+     - 在 `.github/workflows/ci.yml` 的 `Run test suite` 前增加 `python -m compileall -q plugins/quench-dev-tasks/server` 预检步骤，快速暴露编译期问题。
+  4. **防御准则沉淀 (Guideline 8)**：
+     - 确立“严禁在 f-string 表达式内部使用反斜杠”编码规范。
+
+---
+
 ## 4. 跨平台编码安全准则 (Defensive Guidelines)
 
-后续开发与代码审查（Reviewer）必须严格执行以下七项准则：
+后续开发与代码审查（Reviewer）必须严格执行以下八项准则：
 
 1. **路径分隔符归一化 (Separator Normalization)**:
    - 任何从外部参数、配置文件、任务单或网络载荷中获取的文件路径字符串，**进入任何处理前**一律执行：
@@ -287,6 +320,10 @@ foreach ($job in $jobs.jobs) {
 7. **异步超时熔断测试严禁紧贴边界断言墙钟时长 (Asynchronous Timeout Assertion Guard)**:
    - 熔断测试的核心不变量是状态迁移（`status == "degraded"`、`degraded_reason == "timeout"`）与数据保底（partial log 落盘、零伪造 findings）。严禁将经过物理墙钟时间作为强断言边界（如 `assert elapsed < 2.5`）。
    - CI 虚拟化宿主（尤其 Windows ProactorEventLoop 与多租户 CPU 抢占）存在不可控时序抖动，任何时钟断言仅能作为防死锁/防无限挂起的宽松安全护栏（余量建议 ≥ 3~5× 调度周期，如 `5.0s`）。
+8. **最低支持 Python 版本语法兼容与 f-string 禁反斜杠规范 (Minimum Python Version Syntax Guard)**:
+   - 代码库必须保持对 CI 声明的最低 Python 版本（当前为 Python 3.11）的 100% 语法兼容。
+   - 严禁在 f-string 表达式 `{...}` 内部使用反斜杠 `\`（包括 `replace('\\', '/')`、`'\n'.join(...)`、`'\\' in x` 等），此类语法在 Python 3.12+ (PEP 701) 合法但在 Python 3.11 下会触发编译期 `SyntaxError`。
+   - 必须通过局部变量外提、常量外提或显式字符串拼接代替，且变更必须经由 `test_python_version_compat.py` 守护验证。
 
 ---
 

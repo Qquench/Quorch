@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-09-30] 2026-09-30_fix_py311_fstring_backslash_ci.md
+
+- **Task 1.1**: 修复 consultation.py f-string 反斜杠语法错误并补齐最低 Python 3.11 版本兼容守护
+
 ## [2026-09-30] 2026-09-30_v1.09_step03_multihop_need_files_guardrails.md
 
 - **Task 3.1**: NEED-FILES 多跳护栏（数据门控 + reasoning 剥离 + 累积预算 + 400 幂等回退）

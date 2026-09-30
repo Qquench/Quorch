@@ -1072,7 +1072,10 @@ async def _execute_consultation(
                                 extra_slices,
                                 key=lambda s: (s.rel_path.replace("\\", "/"), s.start_line, s.end_line),
                             )
-                            slice_blocks = [f"```\n{s.text.strip().replace('\\', '/')}\n```" for s in sorted_extra]
+                            slice_blocks = [
+                                "```\n" + s.text.strip().replace("\\", "/") + "\n```"
+                                for s in sorted_extra
+                            ]
                             turn_user_content = (
                                 "### Additional Injected Code Context Slices\n"
                                 + "\n\n".join(slice_blocks)
