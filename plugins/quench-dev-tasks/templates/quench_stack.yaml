@@ -87,10 +87,11 @@ fast_track_rules:
 # ==============================================================================
 # Reviewer Engine & External Architect Dispatch (审查模型与外置大脑调度配置)
 # Decouples strategic reasoning from everyday execution.
-# 支持可插拔的多厂商 API（DeepSeek / OpenAI / Ollama 等），实现通用架构分析与规范审查。
+# Pluggable external Reviewer engine configuration.
+# Decouples architecture review and reasoning models from local runner models.
 # ==============================================================================
 reviewer_engine:
-  # Dispatch mode: "auto" | "subagent" | "engine" | "manual" (默认: "auto")
+  # Dispatch mode: "auto" | "subagent" | "engine" | "manual" (default: "auto")
   mode: "auto"
 
   # Strategy fallback sequence: "subagent" (IDE native) -> "engine" (direct API) -> "manual"
@@ -99,18 +100,17 @@ reviewer_engine:
     - "engine"
     - "manual"
 
-  # Upstream API Provider: "deepseek" | "openai" | "ollama" | "custom" | "none"
-  provider: "deepseek"
+  # Upstream API Provider: "none" | "custom"
+  provider: "none"
 
-  # Model identifier (e.g. deepseek-flash, deepseek-reasoner, gpt-4o)
-  model: "deepseek-flash"
+  # Model identifier (user-defined model identifier)
+  model: "default"
 
-  # Environment variable name holding the API key
-  # 存放 API 密钥的环境变量名称（严禁在配置文件中硬编码明文密钥）
-  api_key_env: "DEEPSEEK_API_KEY_Quench"
+  # Environment variable name holding the API key (NEVER hardcode keys in plaintext!)
+  api_key_env: null
 
-  # Base API URL endpoint
-  base_url: "https://api.deepseek.com"
+  # Base API URL endpoint (e.g. http://localhost:8000/v1 or https://api.example.com/v1)
+  base_url: ""
 
   # Enable CoT thinking / reasoning content streaming
   # 是否开启思维链思考流输出 (reasoning_content)

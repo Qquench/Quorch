@@ -1,40 +1,35 @@
 # ==============================================================================
-# Quench 项目配置模板 (Sample Configuration)
-# 可复制此文件为 .agents/quench_stack.local.yaml 进行本地个性化配置（已在 .gitignore 中忽略）
+# Quench Project Configuration Sample (.agents/quench_stack.sample.yaml)
+# Copy this file to .agents/quench_stack.local.yaml for local developer overrides (git-ignored)
 # ==============================================================================
 
-# 基础配置已在 quench_stack.yaml 中声明。
-# 在本地覆盖配置 quench_stack.local.yaml 中，只需声明需要个性化覆盖的字段。
+# Base configuration is declared in quench_stack.yaml.
+# In local override file quench_stack.local.yaml, only declare fields requiring customization.
 
-# 示例 1: DeepSeek API (需在系统环境变量中配置对应 API Key)
+# Example 1: Remote OpenAI-compatible API endpoint (API key sourced from environment variable)
 # reviewer_engine:
-#   provider: "deepseek"
-#   model: "deepseek-chat"
-#   api_key_env: "DEEPSEEK_API_KEY"
+#   provider: "custom"
+#   model: "your-model-name"
+#   base_url: "https://api.your-provider.com/v1"
+#   api_key_env: "YOUR_PROVIDER_API_KEY"
 #   thinking: true
 #   reasoning_effort: "high"
 
-# 示例 2: OpenAI API
-# reviewer_engine:
-#   provider: "openai"
-#   model: "o3-mini"
-#   api_key_env: "OPENAI_API_KEY"
-
-# 示例 3: 本地 Ollama (零配置免 Key)
-# reviewer_engine:
-#   provider: "ollama"
-#   model: "qwen2.5-coder:32b"
-#   base_url: "http://127.0.0.1:11434/v1"
-
-# 示例 4: 本地 vLLM (零配置免 Key)
-# reviewer_engine:
-#   provider: "vllm"
-#   model: "Qwen/Qwen2.5-Coder-32B-Instruct"
-#   base_url: "http://127.0.0.1:8000/v1"
-
-# 示例 5: 自定义 OpenAI 兼容服务
+# Example 2: Local Ollama server (offline, zero credentials required)
 # reviewer_engine:
 #   provider: "custom"
-#   model: "custom-model"
-#   base_url: "https://api.your-endpoint.com/v1"
-#   api_key_env: "CUSTOM_API_KEY"
+#   model: "qwen2.5-coder:14b"
+#   base_url: "http://127.0.0.1:11434/v1"
+
+# Example 3: Local vLLM private server (offline, zero credentials required)
+# reviewer_engine:
+#   provider: "custom"
+#   model: "default"
+#   base_url: "http://127.0.0.1:8000/v1"
+
+# Example 4: Corporate proxy / aggregator gateway
+# reviewer_engine:
+#   provider: "custom"
+#   model: "internal-reviewer"
+#   base_url: "https://llm-gateway.corp.internal/v1"
+#   api_key_env: "CORP_GATEWAY_TOKEN"

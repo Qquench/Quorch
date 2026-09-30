@@ -124,17 +124,15 @@ reviewer_engine:
   max_tool_hops: 3
 ```
 
-### Supported Provider Presets (`PROVIDER_PRESETS`)
+### Declarative Provider Configuration (Vendor-Neutral)
 
-| Provider Preset | Default Model | Default Base URL | Authentication | Key Features |
-| :--- | :--- | :--- | :--- | :--- |
-| **`none`** | `default` | `https://api.openai.com/v1` | None | Completely disables external API calls; triggers graceful fallback. |
-| **`openai`** | `gpt-4o` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Standard OpenAI endpoints and reasoning models (o1, o3-mini). |
-| **`deepseek`** | `deepseek-chat` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | Native `reasoning_content` stream extraction & Prompt Cache detection. |
-| **`ollama`** | `qwen2.5-coder:14b` | `http://localhost:11434/v1` | None (Local) | 100% offline local inference, zero external credentials required. |
-| **`vllm`** | `default` | `http://localhost:8000/v1` | None (Local) | High-throughput local/private server deployment with OpenAI compatibility. |
-| **`generic-openai`** | `default` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Compatible proxy gateway / aggregator for standard chat completions. |
-| **`custom`** | User-defined | User-defined | User-defined | Custom private endpoint (remote endpoints require `api_key_env`). |
+To maintain absolute vendor neutrality and guard against rapidly obsolescing model names, Quench does not maintain hardcoded vendor presets, default models, or alias mappings. All models and endpoints are configured declaratively in `quench_stack.yaml`:
+
+- **`provider: "none"`**: Completely disables external API calls; routes to native IDE subagents or manual review cards.
+- **`provider: "custom"` (or any provider label)**: Connects to any OpenAI-compatible `/chat/completions` endpoint.
+  - Set `base_url` to your endpoint URL (e.g. `http://localhost:11434/v1` for Ollama, `http://localhost:8000/v1` for vLLM, or any cloud API endpoint).
+  - Set `model` to your target model identifier (e.g. `deepseek-flash`, `gpt-4o`, `qwen2.5-coder:14b`).
+  - Set `api_key_env` to the environment variable containing your secret key (remote non-localhost endpoints require `api_key_env`).
 
 ---
 

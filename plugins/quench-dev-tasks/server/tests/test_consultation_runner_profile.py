@@ -116,17 +116,10 @@ def test_runner_profile_parsing_from_yaml(tmp_path: Path):
     assert loaded_malformed.runner_profile.model == "unknown"
 
 
-def test_normalize_model_identity_and_aliases():
-    """断言模型别名映射与默认模型归一化。"""
-    # 别名映射
-    assert normalize_model_identity("deepseek", "deepseek") == ("deepseek", "deepseek-chat")
-    assert normalize_model_identity("deepseek", "deepseek-v3") == ("deepseek", "deepseek-chat")
-    assert normalize_model_identity("deepseek", "deepseek-r1") == ("deepseek", "deepseek-reasoner")
-    assert normalize_model_identity("deepseek-compatible", "default") == ("deepseek", "deepseek-chat")
-    assert normalize_model_identity("openai", "gpt-4") == ("openai", "gpt-4o")
-    assert normalize_model_identity("openai", "default") == ("openai", "gpt-4o")
-
-    # 未知厂商与自定义模型保持原样
+def test_normalize_model_identity():
+    """断言模型标识归一化（去除空白与大小写规范化），不再内置硬编码别名映射。"""
+    assert normalize_model_identity(" OpenAi ", " GPT-4o ") == ("openai", "gpt-4o")
+    assert normalize_model_identity("DeepSeek", "DeepSeek-Chat") == ("deepseek", "deepseek-chat")
     assert normalize_model_identity("custom", "my-model-1") == ("custom", "my-model-1")
 
 
@@ -138,10 +131,9 @@ def test_check_self_verification_warning_logic():
     assert warn is not None
     assert "homogeneous bias" in warn or "self-verification" in warn
 
-    # 2. 相同模型（通过别名与默认归一相同）
-    runner_alias = RunnerProfile(provider="deepseek-compatible", model="deepseek")
-    warn_alias = check_self_verification_warning(runner_alias, "deepseek", "default")
-    assert warn_alias is not None
+    # 2. 相同模型（大小写与空白归一后相同）
+    warn_case = check_self_verification_warning(runner, " DEEPSEEK ", " DeepSeek-Chat ")
+    assert warn_case is not None
 
     # 3. 不同模型（放行）
     runner_diff = RunnerProfile(provider="openai", model="gpt-4o")
@@ -211,7 +203,7 @@ async def test_consultation_same_model_soft_warning(tmp_path: Path, monkeypatch:
             },
             "reviewer_engine": {
                 "provider": "deepseek",
-                "model": "default",
+                "model": "deepseek-chat",
                 "base_url": "https://api.deepseek.com",
             },
         }),
@@ -233,7 +225,7 @@ async def test_consultation_same_model_soft_warning(tmp_path: Path, monkeypatch:
     # 2. 审查身份与状态透明暴露
     assert res["reviewer_identity"]["status"] == "active"
     assert res["reviewer_identity"]["provider"] == "deepseek"
-    assert res["reviewer_identity"]["model"] == "default"
+    assert res["reviewer_identity"]["model"] == "deepseek-chat"
 
     # 3. 激活非阻塞预警字段
     assert res["self_verification_warning"] is not None

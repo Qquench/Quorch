@@ -14,10 +14,10 @@ test_dir: "plugins/quench-dev-tasks/server/tests"
 test_runner: "pytest plugins/quench-dev-tasks/server/tests"
 
 constraints:
-  - "本项目为 FastMCP + Antigravity 双模型开发任务治理套件，核心业务为协议与安全网关"
-  - " FastMCP 工具层必须保持跨平台兼容与轻量化，严禁对单一客户端实现强硬硬编码绑定"
-  - "文件管控钩子必须在 50ms 内响应，任何会话锁校验失败必须幂等清理"
-  - "所有生产级变更必须由 20/20 pytest 单测套件 100% 覆盖并保证零破坏性"
+  - "This repository is a FastMCP + Antigravity dual-model dev-task governance suite; core domain is protocol & security gateway"
+  - "FastMCP tool layer must maintain cross-platform compatibility and lightweight footprint; hardcoded client bindings are strictly forbidden"
+  - "File governance pre-hooks must respond within 50ms; any session lock verification failure must be idempotently cleaned up"
+  - "All production-grade changes must achieve 100% test coverage under pytest suite with zero breaking regressions"
 
 fast_track_rules:
   allow_untracked_patterns: []
@@ -39,8 +39,9 @@ schema_version: "1.0"
 
 reviewer_engine:
   provider: "deepseek"
-  model: "deepseek-chat"
+  model: "deepseek-flash"
   api_key_env: "DEEPSEEK_API_KEY_Quench"
+  base_url: "https://api.deepseek.com"
   thinking: true
   reasoning_effort: "high"
   timeout_seconds: 180

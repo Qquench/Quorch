@@ -3,6 +3,14 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-01] 2026-09-30_bilingual_error_messages.md
+
+- **Task 1.1**: 升级 project_config.py 中的错误与告警信息为双语/英文版
+
+## [2026-10-01] 2026-09-30_remove_vendor_presets.md
+
+- **Task 1.1**: 移除 project_config.py 中的厂商预注册表、默认模型与别名映射，实现纯声明式配置
+
 ## [2026-09-30] 2026-09-30_fix_negative_self_test_on_py311.md
 
 - **Task 1.1**: 兼容 Python 3.11 原生解析器对负向用例 SyntaxError 的直接抛出行为

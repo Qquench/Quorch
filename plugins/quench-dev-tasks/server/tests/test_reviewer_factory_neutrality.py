@@ -84,19 +84,14 @@ def test_url_validation_rejections():
     assert "不得包含 userinfo 凭据" in str(e3.value)
 
 
-def test_preset_resolution_and_alias_mapping():
-    """断言别名正确映射到预设规范条目，且解析出同一个 preset 对象。"""
-    deepseek_preset = resolve_preset("deepseek")  # vendor-literal: allow
-    alias_preset = resolve_preset("deepseek-compatible")  # vendor-literal: allow
-    assert deepseek_preset is not None
-    assert alias_preset is not None
-    assert deepseek_preset is alias_preset
-
-    openai_preset = resolve_preset("openai")
-    openai_alias = resolve_preset("openai-compatible")
-    assert openai_preset is not None
-    assert openai_alias is not None
-    assert openai_preset is openai_alias
+def test_preset_registry_is_empty_and_neutral():
+    """断言预设注册表与别名映射已清空，全部依赖用户声明式配置，不再内置任何厂商端点或别名。"""
+    assert len(PROVIDER_PRESETS) == 0
+    assert len(PROVIDER_ALIASES) == 0
+    assert resolve_preset("deepseek") is None  # vendor-literal: allow
+    assert resolve_preset("deepseek-compatible") is None  # vendor-literal: allow
+    assert resolve_preset("openai") is None
+    assert resolve_preset("openai-compatible") is None
 
 
 def test_local_endpoint_exempt_from_auth_and_factory_instantiation():

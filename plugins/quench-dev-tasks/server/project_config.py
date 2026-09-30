@@ -90,12 +90,18 @@ def _reject_inline_credentials(url: str) -> None:
     try:
         parsed = urllib.parse.urlparse(url)
         if "@" in parsed.netloc or parsed.username is not None or parsed.password is not None:
-            raise ConfigError(f"URL 不得包含明文鉴权凭据 (user:pass@): '{url}'")
+            raise ConfigError(
+                f"URL must not contain plaintext credentials (user:pass@): '{url}' / "
+                f"URL 不得包含明文鉴权凭据 (user:pass@): '{url}'"
+            )
     except ConfigError:
         raise
     except Exception:
         if "@" in url and "://" in url:
-            raise ConfigError(f"URL 不得包含明文鉴权凭据: '{url}'")
+            raise ConfigError(
+                f"URL must not contain plaintext credentials: '{url}' / "
+                f"URL 不得包含明文鉴权凭据: '{url}'"
+            )
 
 
 def _validate_credentials_security(target_dict: dict[str, Any]) -> None:
@@ -110,6 +116,7 @@ def _validate_credentials_security(target_dict: dict[str, Any]) -> None:
         val = target_dict.get("api_key")
         if val is not None and str(val).strip():
             raise ConfigError(
+                "Plaintext 'api_key' is strictly prohibited in configuration; use 'api_key_env' to reference an environment variable instead / "
                 "配置文件中严禁出现 'api_key' 明文凭据字段，请使用 'api_key_env' 引用环境变量。"
             )
 
@@ -119,6 +126,7 @@ def _validate_credentials_security(target_dict: dict[str, Any]) -> None:
         if isinstance(val, str) and val.strip():
             if _looks_like_plaintext_secret(val):
                 raise ConfigError(
+                    f"api_key_env must not contain a plaintext API key; provide an environment variable name instead (e.g. 'API_KEY_ENV'): '{val}' / "
                     f"api_key_env 字段不得填入明文 API 密钥，必须填写环境变量名 (如 'API_KEY_ENV'): '{val}'"
                 )
 
@@ -129,6 +137,7 @@ def _validate_credentials_security(target_dict: dict[str, Any]) -> None:
             _reject_inline_credentials(val)
             if _looks_like_plaintext_secret(val):
                 raise ConfigError(
+                    f"base_url must not contain a plaintext API key or credential: '{val}' / "
                     f"base_url 字段不得包含明文 API 密钥或凭据: '{val}'"
                 )
 
@@ -139,10 +148,12 @@ def _validate_credentials_security(target_dict: dict[str, Any]) -> None:
             for h_key, h_val in headers.items():
                 if _looks_like_plaintext_secret(str(h_val)) or _looks_like_plaintext_secret(str(h_key)):
                     raise ConfigError(
+                        f"headers must not contain a plaintext API key or credential: '{h_key}: {h_val}' / "
                         f"headers 中不得包含明文 API 密钥或凭据: '{h_key}: {h_val}'"
                     )
         elif isinstance(headers, str) and _looks_like_plaintext_secret(headers):
             raise ConfigError(
+                f"headers must not contain plaintext credentials: '{headers}' / "
                 f"headers 字段不得包含明文凭据: '{headers}'"
             )
 
@@ -250,45 +261,14 @@ class ProviderPreset:
 
 
 # -- vendor-presets:start
-PROVIDER_PRESETS: Mapping[str, ProviderPreset | None] = MappingProxyType({
-    "openai": ProviderPreset("https://api.openai.com/v1", "OPENAI_API_KEY"),
-    "deepseek": ProviderPreset("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
-    "ollama": ProviderPreset("http://127.0.0.1:11434/v1", None),
-    "vllm": ProviderPreset("http://127.0.0.1:8000/v1", None),
-    "custom": ProviderPreset("", None),
-    "none": None,
-})
-PROVIDER_ALIASES: Mapping[str, str] = MappingProxyType({
-    "deepseek-compatible": "deepseek",
-    "openai-compatible": "openai",
-})
-
-DEFAULT_MODEL_BY_PROVIDER: Mapping[str, str] = MappingProxyType({
-    "openai": "gpt-4o",
-    "deepseek": "deepseek-chat",
-    "ollama": "llama3",
-    "vllm": "default",
-})
-
-MODEL_ALIASES: Mapping[str, str] = MappingProxyType({
-    "deepseek": "deepseek-chat",
-    "deepseek-v3": "deepseek-chat",
-    "deepseek-r1": "deepseek-reasoner",
-    "gpt4": "gpt-4o",
-    "gpt-4": "gpt-4o",
-})
+PROVIDER_PRESETS: Mapping[str, ProviderPreset | None] = MappingProxyType({})
+PROVIDER_ALIASES: Mapping[str, str] = MappingProxyType({})
 
 
 def normalize_model_identity(provider: str, model: str) -> tuple[str, str]:
-    """归一化 (provider, model) 用于同模型比对，解析别名与默认模型映射。"""
+    """归一化 (provider, model) 用于同模型比对。"""
     p = (provider or "").strip().lower()
-    if p in PROVIDER_ALIASES:
-        p = PROVIDER_ALIASES[p]
     m = (model or "").strip().lower()
-    if m in ("default", ""):
-        m = DEFAULT_MODEL_BY_PROVIDER.get(p, m or "unknown")
-    if m in MODEL_ALIASES:
-        m = MODEL_ALIASES[m]
     return p, m
 
 
@@ -422,25 +402,35 @@ def create_reviewer_client(
         # 未在注册表中
         if not base_url:
             raise ReviewerNotConfiguredError(
-                f"未知 Reviewer provider='{config.provider}' 且未显式指定 base_url。"
-                f"请在 quench_stack.yaml 中配置有效的 base_url 或使用已知预设: {list(PROVIDER_PRESETS.keys())}"
+                f"Unknown Reviewer provider='{config.provider}' with empty base_url. "
+                f"Please configure a valid base_url in quench_stack.yaml / "
+                f"未知 Reviewer provider='{config.provider}' 且未显式指定 base_url。请在 quench_stack.yaml 中配置有效的 base_url。"
             )
 
     if not base_url:
-        raise ReviewerNotConfiguredError(f"Reviewer 引擎 base_url 为空 (provider='{prov}')")
+        raise ReviewerNotConfiguredError(
+            f"Reviewer engine base_url is empty (provider='{prov}') / Reviewer 引擎 base_url 为空 (provider='{prov}')"
+        )
 
     # URL 校验
     parsed = urllib.parse.urlparse(base_url)
     if parsed.scheme not in ("http", "https"):
-        raise ReviewerNotConfiguredError(f"base_url 必须为 http 或 https 协议: '{base_url}'")
+        raise ReviewerNotConfiguredError(
+            f"base_url must use http or https protocol: '{base_url}' / base_url 必须为 http 或 https 协议: '{base_url}'"
+        )
     if not parsed.hostname:
-        raise ReviewerNotConfiguredError(f"base_url 必须包含有效的 host: '{base_url}'")
+        raise ReviewerNotConfiguredError(
+            f"base_url must contain a valid host: '{base_url}' / base_url 必须包含有效的 host: '{base_url}'"
+        )
     if "@" in parsed.netloc:
-        raise ReviewerNotConfiguredError(f"base_url 不得包含 userinfo 凭据 (@): '{base_url}'")
+        raise ReviewerNotConfiguredError(
+            f"base_url must not contain userinfo credentials (@): '{base_url}' / base_url 不得包含 userinfo 凭据 (@): '{base_url}'"
+        )
 
     is_local = (parsed.hostname or "").lower() in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
     if not is_local and not api_key_env:
         raise ReviewerNotConfiguredError(
+            f"Remote Reviewer endpoint ('{base_url}') requires api_key_env for authentication / "
             f"远端 Reviewer 端点 ('{base_url}') 必须配置 api_key_env 环境变量名以进行鉴权"
         )
 
@@ -695,6 +685,8 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "init_project.py")
         )
         raise FileNotFoundError(
+            f"Project configuration file not found: {yaml_path}\n"
+            f"Please run initialization in project root: python \"{init_script}\" \"{root}\" / "
             f"项目配置文件不存在: {yaml_path}\n"
             f"请先在项目根目录运行初始化: python \"{init_script}\" \"{root}\""
         )
@@ -703,20 +695,20 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         with open(yaml_path, "r", encoding="utf-8") as f:
             raw_content = f.read()
     except Exception as e:
-        raise ValueError(f"读取 {yaml_path} 失败: {e}") from e
+        raise ValueError(f"Failed to read {yaml_path}: {e} / 读取 {yaml_path} 失败: {e}") from e
 
     # 剥离 UTF-8 BOM
     raw_content = raw_content.lstrip("\ufeff")
     if not raw_content.strip():
-        raise ValueError(f"配置文件为空或仅包含空白字符: {yaml_path}")
+        raise ValueError(f"Configuration file is empty: {yaml_path} / 配置文件为空或仅包含空白字符: {yaml_path}")
 
     try:
         data = yaml.safe_load(raw_content) or {}
     except yaml.YAMLError as e:
-        raise ValueError(f"解析 {yaml_path} 失败（YAML 语法错误）: {e}") from e
+        raise ValueError(f"Failed to parse {yaml_path} (YAML syntax error): {e} / 解析 {yaml_path} 失败（YAML 语法错误）: {e}") from e
 
     if not isinstance(data, dict):
-        raise ValueError(f"配置文件格式无效（应为 YAML 字典键值对）: {yaml_path}")
+        raise ValueError(f"Invalid configuration format (expected a YAML dictionary): {yaml_path} / 配置文件格式无效（应为 YAML 字典键值对）: {yaml_path}")
 
     # 执行向后兼容自动升级迁移
     data, _ = migrate_config_if_needed(yaml_path, data)
@@ -732,13 +724,16 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
                 if isinstance(local_data, dict):
                     data = _deep_merge_dict(data, local_data)
         except yaml.YAMLError as e:
-            raise ValueError(f"解析本地覆盖配置 {local_yaml_path} 失败（YAML 语法错误）: {e}") from e
+            raise ValueError(f"Failed to parse local override config {local_yaml_path} (YAML syntax error): {e} / 解析本地覆盖配置 {local_yaml_path} 失败（YAML 语法错误）: {e}") from e
         except Exception as e:
-            raise ValueError(f"读取本地覆盖配置 {local_yaml_path} 失败: {e}") from e
+            raise ValueError(f"Failed to read local override config {local_yaml_path}: {e} / 读取本地覆盖配置 {local_yaml_path} 失败: {e}") from e
 
     # 静态安全防御校验：严禁明文密钥或凭据落盘
     if "api_key" in data and data.get("api_key"):
-        raise ConfigError("配置文件中严禁出现 'api_key' 明文凭据字段，请使用 'api_key_env' 引用环境变量。")
+        raise ConfigError(
+            "Plaintext 'api_key' is strictly prohibited in configuration; use 'api_key_env' to reference an environment variable instead / "
+            "配置文件中严禁出现 'api_key' 明文凭据字段，请使用 'api_key_env' 引用环境变量。"
+        )
 
     re_data_check = data.get("reviewer_engine")
     if isinstance(re_data_check, dict):
@@ -747,13 +742,14 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     # 必填项校验
     project_name = data.get("project_name")
     if not project_name:
-        raise ValueError(f"配置文件缺少必填项 'project_name': {yaml_path}")
+        raise ValueError(f"Missing required field 'project_name' in {yaml_path} / 配置文件缺少必填项 'project_name': {yaml_path}")
 
     # 路径检查：如果是绝对路径发出可移植性警告
     for p_field in ["dev_tasks_dir", "archive_dir", "changelog_path", "architecture_doc", "test_dir"]:
         val = data.get(p_field)
         if val and os.path.isabs(val):
             warnings.warn(
+                f"Field '{p_field}' uses an absolute path '{val}'; use a relative path for portability / "
                 f"字段 '{p_field}' 配置了绝对路径 '{val}'，建议使用相对路径以提高跨平台与多机可移植性。",
                 stacklevel=2,
             )
