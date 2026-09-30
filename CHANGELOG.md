@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-01] 2026-10-01_ci_fix_reviewer_client_available.md
+
+- **Task 1**: 修复 CI 本地端点可用性断言与状态机临时文件范围核对隔离
+
 ## [2026-10-01] 2026-10-01_fix_reviewer_observability_mock_url.md
 
 - **Task 1**: 修复 test_reviewer_observability 模拟测试中的 base_url 与 dummy 模型名称

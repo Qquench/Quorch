@@ -517,6 +517,17 @@
       "git_head_sha": "1c3a0332e99dc0978aef99e6f94fd79eb4a5f0a3",
       "git_index_mtime": 1790777183.134442,
       "released": true
+    },
+    "2026-10-01_ci_fix_reviewer_client_available::1": {
+      "task_id": "2026-10-01_ci_fix_reviewer_client_available::1",
+      "md_sha256": "7742d66972a13ade67fb538c0d527d81a27fdd70e55c67eb99f0453fb00763ae",
+      "generation": 1,
+      "holder_token": "token_1790781411031_12324",
+      "last_heartbeat_monotonic_ns": 1004528984000000,
+      "last_heartbeat_wall_utc": "2026-09-30T15:19:13.288283+00:00",
+      "git_head_sha": "53a8cd68433a969f6ceef76d7fbeb3b7c59044d8",
+      "git_index_mtime": 1790780280.0687256,
+      "released": true
     }
   }
 }

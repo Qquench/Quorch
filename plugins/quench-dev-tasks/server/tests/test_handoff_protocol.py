@@ -96,12 +96,38 @@ def test_reviewer_client_decoupling():
     assert client.config.model == "gpt-4o"
 
 
-def test_reviewer_client_is_available_ollama(monkeypatch):
-    """Verify is_available works for ollama even without an API key."""
-    cfg = ReviewerEngineConfig(provider="ollama", model="qwen2.5-coder")
+def test_reviewer_client_is_available_local_endpoint(monkeypatch):
+    """Verify is_available works for local endpoint (INV-5 vendor neutral) even without an API key."""
+    cfg = ReviewerEngineConfig(
+        provider="local",
+        base_url="http://127.0.0.1:11434/v1",
+        model="local-model",
+    )
     client = ReviewerClient(cfg)
     monkeypatch.delenv("DEEPSEEK_API_KEY_Quench", raising=False)
-    assert client.is_available() is True
+    monkeypatch.delenv("DEEPSEEK_API_KEY_QUENCH", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from unittest.mock import patch
+    with patch("reviewer_engine._read_windows_env_var", return_value=None):
+        assert client.is_available() is True
+
+
+def test_reviewer_client_is_available_ollama(monkeypatch):
+    """Backward compatibility alias for local endpoint test with explicit base_url."""
+    cfg = ReviewerEngineConfig(
+        provider="ollama",
+        base_url="http://localhost:11434/v1",
+        model="qwen2.5-coder",
+    )
+    client = ReviewerClient(cfg)
+    monkeypatch.delenv("DEEPSEEK_API_KEY_Quench", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY_QUENCH", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from unittest.mock import patch
+    with patch("reviewer_engine._read_windows_env_var", return_value=None):
+        assert client.is_available() is True
 
 
 def test_reviewer_client_is_available_none():

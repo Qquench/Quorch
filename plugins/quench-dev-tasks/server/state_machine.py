@@ -207,9 +207,16 @@ def _verify_scope_reconciliation(
                 break
             cand = os.path.dirname(cand)
         if not workspace_root:
-            workspace_root = os.getcwd()
+            return
 
     ws = os.path.realpath(os.path.abspath(workspace_root))
+    try:
+        common = os.path.commonpath([ws, os.path.realpath(os.path.abspath(filepath))])
+        if common != ws:
+            return
+    except ValueError:
+        return
+
     baseline_path = get_baseline_path(ws, task_id)
     if not os.path.isfile(baseline_path):
         return
