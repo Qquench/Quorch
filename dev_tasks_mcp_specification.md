@@ -1,7 +1,7 @@
 # Quench-DevTasks MCP Service Architecture & Specification (DevTasks Orchestrator Spec)
 
-> **Version**: v1.7.0 (Implemented & Verified)  
-> **Implementation Status**: ✔️ Fully implemented and verified with 572+ automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, ad-hoc architectural consultation `dev_reviewer_consult`, async job system `dev_reviewer_submit`/`poll`/`cancel`, single-egress AST gate, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
+> **Version**: v1.08 (Implemented & Verified)  
+> **Implementation Status**: ✔️ Fully implemented and verified with 588 automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, ad-hoc architectural consultation `dev_reviewer_consult`, async job system `dev_reviewer_submit`/`poll`/`cancel`, single-egress AST gate, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
 > **Source Specification**: `dev_tasks_mcp_specification.md`  
 > **Workflow Reference**: [DevTasks Workflow Specification](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
 > **Role & Purpose**: General-purpose development task governance and dual-model orchestration MCP server for engineering repositories.
