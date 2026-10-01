@@ -135,7 +135,7 @@ The server exposes 17 atomic FastMCP tools:
 
 1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status.
-3. **`dev_tasks_confirm`**: Advances tasks to `[Confirmed]`, `[Skipped]`, or transitions them to `[Rework]`.
+3. **`dev_tasks_confirm`**: Advances tasks to `[Confirmed]`, `[Skipped]`, or transitions them to `[Rework]`. Enforces Pre-Confirm audit gate policy on Tier-1 managed paths outside manifest lock, validating against verdicts ledger with exact 5-key blocking payload (`ok`, `reason`, `artifact_ref`, `audit_ref`, `parse_skipped_lines`) and lock-time `precondition_changed` re-validation.
 4. **`dev_tasks_checkout`**: Checks out the next confirmed task, sets its state to `[In Progress]`, captures a physical baseline snapshot, and provides step-by-step guidance.
 5. **`dev_tasks_complete`**: Submits a completed task, requiring DoD test command output, physical test assertion auditing, and physical scope reconciliation against the declared whitelist.
 6. **`dev_tasks_escalate`**: Awakens the Reviewer role with focused contextual snippets when encountering roadblocks.

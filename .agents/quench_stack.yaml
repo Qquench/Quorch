@@ -57,3 +57,10 @@ observability:
 governance:
   manifest_path: ".agents/.quorch/manifest.json"
   lease_ttl_seconds: 300
+
+audit_gate:
+  enabled: true
+  on_missing_record: "block"
+  on_degraded: "warn"
+  tail_window_exhausted_policy: "warn"
+  on_internal_error: "allow"

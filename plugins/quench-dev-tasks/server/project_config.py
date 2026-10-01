@@ -12,10 +12,11 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Tuple, Literal
+from typing import Any, Mapping, Optional, Tuple, Literal, TypedDict
 import math
 import urllib.parse
 import yaml
+from pydantic import BaseModel, model_validator
 
 CURRENT_SCHEMA_VERSION = "1.0"
 
@@ -471,6 +472,66 @@ class ReaperPolicyConfig:
         )
 
 
+def canonical_artifact_ref(workspace_root: str, task_file: str, task_id: str) -> str:
+    """SSOT 复合键：f"{posix_relpath(workspace_root, task_file)}#{task_id}"。
+    task_id 必须复用 TaskItem.id，禁止在此二次派生或归一化。"""
+    ws = os.path.abspath(workspace_root)
+    if not os.path.isabs(task_file):
+        abs_task_file = os.path.abspath(os.path.join(ws, task_file))
+    else:
+        abs_task_file = os.path.abspath(task_file)
+    rel = os.path.relpath(abs_task_file, ws)
+    rel_posix = rel.replace(os.sep, "/").replace("\\", "/")
+    while rel_posix.startswith("./"):
+        rel_posix = rel_posix[2:]
+    return f"{rel_posix}#{str(task_id).strip()}"
+
+
+AuditGateReason = Literal[
+    "disabled", "not_managed_scope", "session_bypass_active", "matched",
+    "no_matching_record", "record_stale", "record_timestamp_invalid", "record_degraded",
+    "tail_window_exhausted", "log_missing", "log_unparsable", "precondition_changed", "internal_error",
+]
+
+
+class AuditGatePolicy(BaseModel):
+    enabled: bool = False
+    scope: Literal["managed_paths"] = "managed_paths"
+    audit_log_path: Optional[str] = None
+    bind_artifact: bool = True
+    freshness_anchor: Literal["recency_only"] = "recency_only"
+    future_skew_policy: Literal["timestamp_invalid"] = "timestamp_invalid"
+    max_age_minutes: int = 1440
+    max_tail_bytes: int = 1048576
+    on_missing_record: Literal["block", "warn"] = "block"
+    on_degraded: Literal["warn", "block"] = "block"
+    tail_window_exhausted_policy: Literal["warn", "block"] = "warn"
+    on_internal_error: Literal["allow", "warn"] = "allow"
+    require_undegraded_record: bool = True
+    clock_skew_tolerance_seconds: int = 2
+
+    @model_validator(mode="after")
+    def validate_bind_artifact_when_enabled(self) -> "AuditGatePolicy":
+        if self.enabled and not self.bind_artifact:
+            raise ValueError("bind_artifact must be True when audit gate is enabled")
+        return self
+
+
+class AuditGateResult(TypedDict):
+    allowed: bool
+    reason: AuditGateReason
+    artifact_ref: Optional[str]
+    audit_ref: Optional[str]
+    parse_skipped_lines: int
+
+
+@dataclass
+class ObservabilityConfig:
+    verdict_path: str = ".agents/logs/reviewer/verdicts.jsonl"
+    max_record_bytes: int = 16384
+    stream_in_subagent: bool = False
+
+
 @dataclass
 class QuenchStackConfig:
     workspace_root: str
@@ -488,6 +549,8 @@ class QuenchStackConfig:
     reviewer_engine: ReviewerEngineConfig = field(default_factory=ReviewerEngineConfig)
     reaper_policy: ReaperPolicyConfig = field(default_factory=ReaperPolicyConfig)
     runner_profile: RunnerProfile = field(default_factory=RunnerProfile)
+    observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+    audit_gate: AuditGatePolicy = field(default_factory=AuditGatePolicy)
 
     def resolve_path(self, field_name: str) -> str:
         """将相对路径属性解析为基于 workspace_root 的绝对路径"""
@@ -859,6 +922,25 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     else:
         runner_profile = RunnerProfile()
 
+    obs_raw = data.get("observability")
+    if isinstance(obs_raw, dict):
+        observability = ObservabilityConfig(
+            verdict_path=str(obs_raw.get("verdict_path", ".agents/logs/reviewer/verdicts.jsonl")).strip(),
+            max_record_bytes=_coerce_positive_int(obs_raw.get("max_record_bytes"), default=16384, lo=1024, hi=1048576),
+            stream_in_subagent=bool(obs_raw.get("stream_in_subagent", False)),
+        )
+    else:
+        observability = ObservabilityConfig()
+
+    ag_raw = data.get("audit_gate")
+    if isinstance(ag_raw, dict):
+        ag_dict = dict(ag_raw)
+        if ag_dict.get("audit_log_path") is None:
+            ag_dict["audit_log_path"] = observability.verdict_path
+        audit_gate = AuditGatePolicy(**ag_dict)
+    else:
+        audit_gate = AuditGatePolicy()
+
     return QuenchStackConfig(
         workspace_root=root,
         project_name=project_name,
@@ -875,6 +957,8 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         reviewer_engine=reviewer_engine,
         reaper_policy=reaper_policy,
         runner_profile=runner_profile,
+        observability=observability,
+        audit_gate=audit_gate,
     )
 
 

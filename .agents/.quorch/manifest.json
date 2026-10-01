@@ -432,14 +432,14 @@
     },
     "2026-09-30_v1.10_step01_pre_confirm_audit_gate::1.1": {
       "task_id": "2026-09-30_v1.10_step01_pre_confirm_audit_gate::1.1",
-      "md_sha256": "dfc7009ac53a50170fc7d812cc112365dd42da2861b096d2a358a23808d2989d",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 987747156000000,
-      "last_heartbeat_wall_utc": "2026-09-30T10:39:31.448999+00:00",
-      "git_head_sha": "7116fecac06537a26a76932bbfac7b359e939e1a",
-      "git_index_mtime": 1790756346.803687,
-      "released": false
+      "md_sha256": "8076af071f19650d4a88484671815a3a87a3b57dd6240f6188c2cb4cc7dae38b",
+      "generation": 1,
+      "holder_token": "token_a826e797-eda8-4b3f-992f-03fe9c8d1593_1790870667534_13544",
+      "last_heartbeat_monotonic_ns": 1095585953000000,
+      "last_heartbeat_wall_utc": "2026-10-01T16:36:50.250321+00:00",
+      "git_head_sha": "83d3e76dba777d10c418643a9c29b5d19f1b0547",
+      "git_index_mtime": 1790848454.825619,
+      "released": true
     },
     "2026-09-30_v1.09_step01_cache_telemetry_and_rolling_retention::1.3": {
       "task_id": "2026-09-30_v1.09_step01_cache_telemetry_and_rolling_retention::1.3",
@@ -594,6 +594,17 @@
       "git_head_sha": "d41ffce5c79786c544120b609aeb95084fc54652",
       "git_index_mtime": 1790844736.0384376,
       "released": true
+    },
+    "2026-10-02_v1.10_step03_job_record_cascade_reaper::1.1": {
+      "task_id": "2026-10-02_v1.10_step03_job_record_cascade_reaper::1.1",
+      "md_sha256": "0bdb2b90efa8f05b0d4ac407d51a7244263994b7cfe77a1e44cc410b87ba73b7",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1093586859000000,
+      "last_heartbeat_wall_utc": "2026-10-01T16:03:31.161563+00:00",
+      "git_head_sha": "83d3e76dba777d10c418643a9c29b5d19f1b0547",
+      "git_index_mtime": 1790848454.825619,
+      "released": false
     }
   }
 }

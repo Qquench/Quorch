@@ -144,6 +144,10 @@ Latency target: **< 50ms** per hook invocation.
 - At `dev_tasks_complete` / `dev_tasks_escalate`, the state machine runs `reconcile_workspace_against_whitelist` (pure function with dual fast-path / slow-path comparison and 50ms timeout circuit breaker);
 - Any modified or created files outside the declared `【涉及文件】` whitelist are rejected with `ScopeViolationError`, preventing external runners from bypassing file boundaries.
 
+3. **Pre-Confirm Audit Gate (Server-Side Discipline Function)**:
+- At `dev_tasks_confirm`, when transitioning tasks from `⬜ 待确认` to `✅ 已确认` for Tier-1 managed files, the server validates against the audit ledger (`verdicts.jsonl`) that a genuine, fresh, undegraded review record exists for the task (`canonical_artifact_ref`);
+- Evaluated strictly outside the manifest lock; re-validated under lock with `precondition_changed` fail-closed protection.
+
 ### 3.3 Unified Asynchronous Reviewer Job Pipeline
 
 Quench establishes a unified asynchronous Reviewer execution path, converging all heavy reasoning onto a background worker daemon:

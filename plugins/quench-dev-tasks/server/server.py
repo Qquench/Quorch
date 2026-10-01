@@ -54,13 +54,22 @@ import anyio
 from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
 from handoff_card import render_handoff_card
-from path_guard import to_workspace_relative_path, PathTraversalError
+from path_guard import (
+    to_workspace_relative_path,
+    PathTraversalError,
+    is_within_whitelist,
+    sanitize_workspace_path,
+)
 from project_config import (
     load_project_config,
     QuenchStackConfig,
     ReviewerEngineConfig,
     DispatchStrategy,
     create_reviewer_client,
+    canonical_artifact_ref,
+    AuditGatePolicy,
+    AuditGateReason,
+    AuditGateResult,
 )
 from reviewer_engine import (
     PromptAssembler,
@@ -89,6 +98,7 @@ from state_machine import (
     parse_task_file,
     transition_task,
     assert_task_checkout_allowed,
+    extract_task_whitelist,
 )
 from pathlib import Path
 from manifest import (
@@ -752,9 +762,407 @@ def dev_tasks_propose(
     }
 
 
+ReadStatus = Literal["ok", "missing", "unparsable", "truncated"]
+
+
+def _managed_path_matches(scoped_path: str, managed_patterns: list[str]) -> bool:
+    """基于 glob 语义（fnmatch/pathlib）匹配受管路径，支持 ** 递归。"""
+    if not scoped_path or not managed_patterns:
+        return False
+    norm_scoped = scoped_path.replace("\\", "/").strip()
+    while norm_scoped.startswith("./"):
+        norm_scoped = norm_scoped[2:]
+    return is_within_whitelist(norm_scoped, managed_patterns)
+
+
+def _freshness_ok(now: datetime, record_ts: datetime, policy: AuditGatePolicy) -> tuple[bool, str]:
+    """容差吸收式：-tol <= (now - record_ts).total_seconds() <= max_age*60。前置：已 UTC 归一化。"""
+    age_seconds = (now - record_ts).total_seconds()
+    tol = float(policy.clock_skew_tolerance_seconds)
+    max_age_seconds = float(policy.max_age_minutes * 60)
+    if -tol <= age_seconds <= max_age_seconds:
+        return True, "fresh"
+    elif age_seconds < -tol:
+        return False, "future_skew"
+    else:
+        return False, "stale"
+
+
+def _extract_task_scoped_files(task: Any) -> list[str]:
+    """剥离 [MODIFY]/[NEW]/[DELETE] 标注符与反引号，提取纯净 POSIX 路径。"""
+    raw_items: list[str] = []
+    if isinstance(task, dict):
+        raw_items = task.get("affected_files") or []
+    elif hasattr(task, "affected_files"):
+        raw_items = getattr(task, "affected_files") or []
+    elif hasattr(task, "task_file") and getattr(task, "task_file"):
+        tf = getattr(task, "task_file")
+        tid = getattr(task, "id", "")
+        if os.path.exists(tf):
+            try:
+                with open(tf, "r", encoding="utf-8") as f:
+                    content = f.read()
+                raw_items = extract_task_whitelist(content, str(tid))
+            except Exception:
+                pass
+
+    if isinstance(raw_items, str):
+        raw_items = raw_items.splitlines()
+
+    result: list[str] = []
+    for item in raw_items:
+        s = str(item).strip()
+        if not s or s.startswith("```"):
+            continue
+        # 剥除前导列表符号 (- , * , + ) 与操作标记
+        s = re.sub(r"^[\s\-\*\+\d\.\>\#]+\s*", "", s).strip()
+        s = re.sub(r"^\[\s*(?:MODIFY|NEW|DELETE|RENAME)\s*\]\s*", "", s, flags=re.IGNORECASE).strip()
+        # 剥除反引号与引号
+        s = s.strip("`'\" ").strip()
+        # 剥除 Markdown 超链接与括号注释
+        m_link = re.search(r"\[.*?\]\((.*?)\)", s)
+        if m_link:
+            s = m_link.group(1).strip()
+        s = s.split("（")[0].split("(")[0].strip()
+        s = s.strip("`'\" ").strip()
+        if s.startswith("file:///"):
+            s = s[8:].lstrip("/\\")
+        if s:
+            posix_path = s.replace("\\", "/")
+            while posix_path.startswith("./"):
+                posix_path = posix_path[2:]
+            result.append(posix_path)
+    return result
+
+
+def _read_recent_audit_records(path: str, max_tail_bytes: int) -> tuple[list[dict], ReadStatus, int]:
+    """返回 (records, status, parse_skipped_lines)。首字节残缺多字节丢弃后再解码。"""
+    if not os.path.isfile(path):
+        return [], "missing", 0
+
+    try:
+        file_size = os.path.getsize(path)
+    except Exception:
+        return [], "unparsable", 0
+
+    if file_size == 0:
+        return [], "ok", 0
+
+    is_truncated = file_size > max_tail_bytes
+    records: list[dict] = []
+    parse_skipped_lines = 0
+
+    try:
+        with open(path, "rb") as f:
+            if is_truncated:
+                seek_pos = file_size - max_tail_bytes
+                f.seek(seek_pos)
+                raw_bytes = f.read(max_tail_bytes)
+                first_nl = raw_bytes.find(b"\n")
+                if first_nl != -1:
+                    tail_bytes = raw_bytes[first_nl + 1:]
+                else:
+                    tail_bytes = b""
+
+                # 计算截断后起始行的 1-based 行号
+                f.seek(0)
+                prec = f.read(seek_pos)
+                start_line_no = prec.count(b"\n") + (1 if first_nl != -1 else 0) + 1
+            else:
+                tail_bytes = f.read()
+                start_line_no = 1
+    except Exception:
+        return [], "unparsable", 0
+
+    text = tail_bytes.decode("utf-8", errors="replace")
+    current_line_no = start_line_no
+    valid_count = 0
+
+    for line in text.splitlines():
+        trimmed = line.strip()
+        if not trimmed:
+            current_line_no += 1
+            continue
+        try:
+            entry = json.loads(trimmed)
+            if isinstance(entry, dict):
+                entry["_line_no"] = current_line_no
+                records.append(entry)
+                valid_count += 1
+            else:
+                parse_skipped_lines += 1
+        except Exception:
+            parse_skipped_lines += 1
+        current_line_no += 1
+
+    if is_truncated:
+        return records, "truncated", parse_skipped_lines
+
+    if valid_count == 0 and parse_skipped_lines > 0:
+        return records, "unparsable", parse_skipped_lines
+
+    return records, "ok", parse_skipped_lines
+
+
+def _check_audit_gate(
+    workspace_root: str,
+    task_file: str,
+    task: "TaskItem",
+    config: "QuenchStackConfig",
+    session_id: Optional[str] = None,
+) -> AuditGateResult:
+    """manifest 锁外只读决策。audit_ref := f"{posix_relpath(audit_log_path)}#{line_no}"。"""
+    try:
+        policy = config.audit_gate if hasattr(config, "audit_gate") and config.audit_gate else AuditGatePolicy()
+        target_ref = canonical_artifact_ref(workspace_root, task_file, str(getattr(task, "id", "")).strip())
+
+        # step 0: enabled is False → disabled (allow)
+        if not policy.enabled:
+            return {
+                "allowed": True,
+                "reason": "disabled",
+                "artifact_ref": target_ref,
+                "audit_ref": None,
+                "parse_skipped_lines": 0,
+            }
+
+        # step 1: scope == "managed_paths" ∧ not any(_managed_path_matches(f, managed_paths) for f in task_scoped_files) → not_managed_scope (allow)
+        if policy.scope == "managed_paths":
+            managed_paths = []
+            if hasattr(config, "governance_scope") and isinstance(config.governance_scope, dict):
+                managed_paths = config.governance_scope.get("managed_paths", [])
+            task_scoped_files = _extract_task_scoped_files(task)
+            if not task_scoped_files:
+                tf_abs = _resolve_task_file_path(workspace_root, task_file) if "_resolve_task_file_path" in globals() else os.path.join(workspace_root, task_file)
+                if os.path.isfile(tf_abs):
+                    try:
+                        with open(tf_abs, "r", encoding="utf-8") as f:
+                            c = f.read()
+                        raw_wl = extract_task_whitelist(c, str(getattr(task, "id", "")))
+                        task_scoped_files = _extract_task_scoped_files({"affected_files": raw_wl})
+                    except Exception:
+                        pass
+
+            if not any(_managed_path_matches(f, managed_paths) for f in task_scoped_files):
+                return {
+                    "allowed": True,
+                    "reason": "not_managed_scope",
+                    "artifact_ref": target_ref,
+                    "audit_ref": None,
+                    "parse_skipped_lines": 0,
+                }
+
+        # step 2: session Tier-2 bypass 有效 → session_bypass_active (allow)
+        if session_id:
+            bypass_file = os.path.join(workspace_root, ".agents", ".quench_bypass.json")
+            if os.path.isfile(bypass_file):
+                try:
+                    with open(bypass_file, "r", encoding="utf-8") as f:
+                        bdata = json.load(f)
+                    if bdata.get("active") and bdata.get("session_id") == session_id:
+                        expires_at = bdata.get("expires_at")
+                        is_expired = False
+                        if expires_at:
+                            try:
+                                exp_dt = datetime.fromisoformat(expires_at).astimezone(timezone.utc)
+                                if datetime.now(timezone.utc) > exp_dt:
+                                    is_expired = True
+                            except Exception:
+                                is_expired = True
+                        if not is_expired:
+                            return {
+                                "allowed": True,
+                                "reason": "session_bypass_active",
+                                "artifact_ref": target_ref,
+                                "audit_ref": None,
+                                "parse_skipped_lines": 0,
+                            }
+                except Exception:
+                    pass
+
+        # 解析审计日志路径（防路径穿越，PathTraversalError 必须透传抛出）
+        raw_log_path = policy.audit_log_path or (
+            config.observability.verdict_path if hasattr(config, "observability") and config.observability else ".agents/logs/reviewer/verdicts.jsonl"
+        )
+        ws_abs = os.path.abspath(workspace_root)
+        if os.path.isabs(raw_log_path):
+            try:
+                rel_cand = os.path.relpath(os.path.abspath(raw_log_path), ws_abs)
+            except Exception:
+                raise PathTraversalError(f"Log path escapes workspace: {raw_log_path}")
+            if rel_cand.startswith("..") or os.path.isabs(rel_cand):
+                raise PathTraversalError(f"Log path escapes workspace: {raw_log_path}")
+            raw_log_path = rel_cand
+
+        abs_log_path = sanitize_workspace_path(workspace_root, raw_log_path)
+        try:
+            rel_log_path = to_workspace_relative_path(workspace_root, abs_log_path)
+        except Exception:
+            rel_log_path = raw_log_path.replace("\\", "/")
+
+        # step 3: log 不存在 → log_missing [on_degraded]
+        if not os.path.isfile(abs_log_path):
+            return {
+                "allowed": policy.on_degraded != "block",
+                "reason": "log_missing",
+                "artifact_ref": target_ref,
+                "audit_ref": None,
+                "parse_skipped_lines": 0,
+            }
+
+        # 读取尾部记录
+        records, read_status, parse_skipped_lines = _read_recent_audit_records(
+            abs_log_path, max_tail_bytes=policy.max_tail_bytes
+        )
+
+        # step 4: log I/O 读取/解码失败（非截断所致） → log_unparsable [on_degraded]
+        if read_status == "unparsable":
+            return {
+                "allowed": policy.on_degraded != "block",
+                "reason": "log_unparsable",
+                "artifact_ref": target_ref,
+                "audit_ref": None,
+                "parse_skipped_lines": parse_skipped_lines,
+            }
+
+        # 逆序匹配（最新记录优先）
+        matching_rec = None
+        for rec in reversed(records):
+            rec_refs = set()
+            if "artifact_ref" in rec and rec["artifact_ref"]:
+                rec_refs.add(str(rec["artifact_ref"]).strip())
+            if "context_files" in rec and isinstance(rec["context_files"], (list, tuple)):
+                for cf in rec["context_files"]:
+                    rec_refs.add(str(cf).strip())
+            if target_ref in rec_refs:
+                matching_rec = rec
+                break
+
+        if matching_rec is not None:
+            line_no = matching_rec.get("_line_no")
+            audit_ref_val = f"{rel_log_path}#{line_no}" if line_no is not None else rel_log_path
+
+            # 解析时间戳
+            raw_ts = (
+                matching_rec.get("updated_wall_utc")
+                or matching_rec.get("created_wall_utc")
+                or matching_rec.get("timestamp")
+                or matching_rec.get("created_at")
+            )
+            parsed_ts = None
+            if raw_ts:
+                try:
+                    s_ts = str(raw_ts).strip()
+                    if s_ts.endswith("Z"):
+                        s_ts = s_ts[:-1] + "+00:00"
+                    parsed_ts = datetime.fromisoformat(s_ts)
+                except Exception:
+                    parsed_ts = None
+
+            # step 8 前置：ts 不可解析 ∨ 未完成 tz 归一化 (naive TS 直入 step 8，严禁进入 timedelta 运算)
+            if parsed_ts is None or parsed_ts.tzinfo is None or parsed_ts.tzinfo.utcoffset(parsed_ts) is None:
+                return {
+                    "allowed": policy.on_degraded != "block",
+                    "reason": "record_timestamp_invalid",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            record_ts_utc = parsed_ts.astimezone(timezone.utc)
+            now_utc = datetime.now(timezone.utc)
+            tol_seconds = float(policy.clock_skew_tolerance_seconds)
+            skew_limit = now_utc + timedelta(seconds=tol_seconds)
+
+            # 超容差未来时间戳归入 step 8
+            if record_ts_utc > skew_limit:
+                return {
+                    "allowed": policy.on_degraded != "block",
+                    "reason": "record_timestamp_invalid",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            # 容差吸收式 freshness 检验
+            is_fresh, _ = _freshness_ok(now_utc, record_ts_utc, policy)
+
+            # step 6: 命中 ∧ ts 可解析 ∧ record_ts ≤ now + tolerance ∧ _freshness_ok is False → record_stale [on_missing_record]
+            if not is_fresh:
+                return {
+                    "allowed": policy.on_missing_record != "block",
+                    "reason": "record_stale",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            # 降级判断
+            is_degraded = bool(matching_rec.get("degraded_reason")) or matching_rec.get("status") == "degraded" or matching_rec.get("state") == "degraded"
+
+            # step 7: 命中 ∧ require_undegraded ∧ 有 degraded_reason ∧ ts 可解析 ∧ record_ts ≤ now + tolerance ∧ _freshness_ok is True → record_degraded [on_degraded]
+            if policy.require_undegraded_record and is_degraded:
+                return {
+                    "allowed": policy.on_degraded != "block",
+                    "reason": "record_degraded",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            # step 5: 命中 canonical artifact_ref ∧ ts 可解析 ∧ record_ts ≤ now + tolerance ∧ _freshness_ok is True ∧ (¬require_undegraded ∨ 未 degraded) → matched (allow)
+            return {
+                "allowed": True,
+                "reason": "matched",
+                "artifact_ref": target_ref,
+                "audit_ref": audit_ref_val,
+                "parse_skipped_lines": parse_skipped_lines,
+            }
+
+        # step 9: truncated（size > max_tail_bytes）且可读尾部无匹配 → tail_window_exhausted [tail_window_exhausted_policy]
+        if read_status == "truncated":
+            return {
+                "allowed": policy.tail_window_exhausted_policy != "block",
+                "reason": "tail_window_exhausted",
+                "artifact_ref": target_ref,
+                "audit_ref": None,
+                "parse_skipped_lines": parse_skipped_lines,
+            }
+
+        # step 10: 其余（可读、未截断、确无匹配记录） → no_matching_record [on_missing_record]
+        return {
+            "allowed": policy.on_missing_record != "block",
+            "reason": "no_matching_record",
+            "artifact_ref": target_ref,
+            "audit_ref": None,
+            "parse_skipped_lines": parse_skipped_lines,
+        }
+
+    except PathTraversalError:
+        raise
+    except Exception:
+        # 结构性 fail-open：on_internal_error 绝不 block，永远 allowed=True
+        target_ref = None
+        try:
+            target_ref = canonical_artifact_ref(workspace_root, task_file, str(getattr(task, "id", "")).strip())
+        except Exception:
+            pass
+        return {
+            "allowed": True,
+            "reason": "internal_error",
+            "artifact_ref": target_ref,
+            "audit_ref": None,
+            "parse_skipped_lines": 0,
+        }
+
+
 @mcp.tool()
 def dev_tasks_confirm(
-    workspace_root: str, task_file: str, task_ids: List[str], action: str = "confirm"
+    workspace_root: str,
+    task_file: str,
+    task_ids: List[str],
+    action: str = "confirm",
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Transition or adjust task states. action: 'confirm' (approved for execution) | 'rework' (requires review model revision) | 'skip' (skipped) | 'revoke' (revert to pending).
 
@@ -765,6 +1173,7 @@ def dev_tasks_confirm(
         task_file: Task file name or path / 任务单文件名或相对路径。
         task_ids: List of task IDs to transition (e.g. ['1.1', '1.2']) / 待流转的任务ID列表。
         action: Target transition action ('confirm', 'rework', 'skip', 'revoke') / 目标流转动作。
+        session_id: Optional caller session ID for Tier-2 bypass check / 可选的调用方会话 ID。
     """
     target_path = _resolve_task_file_path(workspace_root, task_file)
     action_map = {
@@ -785,6 +1194,7 @@ def dev_tasks_confirm(
     tasks = parse_task_file(target_path) if os.path.isfile(target_path) else []
     task_map = {str(t.id).strip(): t for t in tasks}
 
+    # 0. 状态机防线拦截：禁止通过 dev_tasks_confirm 将执行中任务直接重置为已确认状态
     for tid in task_ids:
         clean_tid = str(tid).strip()
         t_item = task_map.get(clean_tid)
@@ -797,13 +1207,93 @@ def dev_tasks_confirm(
                     f"禁止通过 dev_tasks_confirm 将执行中任务直接重置为已确认状态。该流转严格保留给 dev_tasks_reclaim 回收通道以确保代际递增。"
                 ),
             })
-            continue
+    if errors:
+        return {
+            "file": target_path,
+            "action": action,
+            "updated": updated,
+            "errors": errors,
+        }
 
+    # 1. 门禁仅在 action == 'confirm' 时生效 (rework / skip / revoke 不受门禁阻断)
+    # 门禁在 manifest 锁外只读决策 (INV-1 / R11 锁序)
+    if action.lower() == "confirm":
         try:
-            res = transition_task(target_path, str(tid), target_status)
-            updated.append({"id": res.id, "title": res.title, "new_status": res.status})
-        except Exception as e:
-            errors.append({"id": tid, "error": str(e)})
+            cfg = load_project_config(workspace_root)
+        except Exception:
+            cfg = QuenchStackConfig(workspace_root=workspace_root, project_name="default")
+
+        for tid in task_ids:
+            clean_tid = str(tid).strip()
+            t_item = task_map.get(clean_tid)
+            if not t_item:
+                continue
+
+            gate_res = _check_audit_gate(
+                workspace_root, target_path, t_item, cfg, session_id=session_id
+            )
+            if not gate_res["allowed"]:
+                # MCP 阻断载荷五键契约 (禁止透传 allowed 键)
+                return {
+                    "ok": False,
+                    "reason": gate_res["reason"],
+                    "artifact_ref": gate_res["artifact_ref"],
+                    "audit_ref": gate_res["audit_ref"],
+                    "parse_skipped_lines": gate_res["parse_skipped_lines"],
+                }
+
+    # 2. 持锁段流转与重校验 (R11 契约)
+    lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    manifest_lock = filelock.FileLock(lock_path, timeout=5.0)
+
+    with manifest_lock:
+        fresh_tasks = parse_task_file(target_path) if os.path.isfile(target_path) else []
+        fresh_task_map = {str(t.id).strip(): t for t in fresh_tasks}
+
+        if action.lower() == "confirm":
+            for tid in task_ids:
+                clean_tid = str(tid).strip()
+                t_item = fresh_task_map.get(clean_tid)
+                expected_ref = canonical_artifact_ref(workspace_root, target_path, clean_tid)
+                # 锁内重校验：断言任务仍为 ⬜ 待确认 且 artifact_ref 未变
+                if not t_item or t_item.status != STATUS_PENDING:
+                    return {
+                        "ok": False,
+                        "reason": "precondition_changed",
+                        "artifact_ref": expected_ref,
+                        "audit_ref": None,
+                        "parse_skipped_lines": 0,
+                    }
+                curr_ref = canonical_artifact_ref(workspace_root, target_path, t_item.id)
+                if curr_ref != expected_ref:
+                    return {
+                        "ok": False,
+                        "reason": "precondition_changed",
+                        "artifact_ref": expected_ref,
+                        "audit_ref": None,
+                        "parse_skipped_lines": 0,
+                    }
+
+        for tid in task_ids:
+            clean_tid = str(tid).strip()
+            t_item = fresh_task_map.get(clean_tid)
+            if t_item and t_item.status == STATUS_IN_PROGRESS and target_status == STATUS_CONFIRMED:
+                errors.append({
+                    "id": tid,
+                    "error": (
+                        f"Cannot transition task '{tid}' from 'In Progress' to 'Confirmed' via dev_tasks_confirm. "
+                        f"This transition is strictly reserved for dev_tasks_reclaim to ensure fencing generation monotonicity / "
+                        f"禁止通过 dev_tasks_confirm 将执行中任务直接重置为已确认状态。该流转严格保留给 dev_tasks_reclaim 回收通道以确保代际递增。"
+                    ),
+                })
+                continue
+
+            try:
+                res = transition_task(target_path, str(tid), target_status)
+                updated.append({"id": res.id, "title": res.title, "new_status": res.status})
+            except Exception as e:
+                errors.append({"id": tid, "error": str(e)})
 
     return {
         "file": target_path,

@@ -154,6 +154,7 @@ class JobRecord:
     result_ref: Optional[str]
     tokens_billed_after_cancel: Optional[int] = None
     degraded_reason: Optional[DegradedReason] = None
+    context_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -489,6 +490,7 @@ def _record_from_dict(d: dict[str, Any]) -> JobRecord:
         result_ref=d.get("result_ref"),
         tokens_billed_after_cancel=d.get("tokens_billed_after_cancel"),
         degraded_reason=d.get("degraded_reason"),
+        context_files=tuple(d.get("context_files", ())),
     )
 
 
@@ -699,6 +701,7 @@ class ReviewerJobSupervisor:
             v_path = self._get_verdicts_path()
             v_path.parent.mkdir(parents=True, exist_ok=True)
             v_lock_path = v_path.with_suffix(".jsonl.lock")
+            c_files = list(record.context_files) if hasattr(record, "context_files") and record.context_files else []
             payload: dict[str, Any] = {
                 "job_id": record.job_id,
                 "session_id": record.session_id,
@@ -709,11 +712,14 @@ class ReviewerJobSupervisor:
                 "updated_wall_utc": record.updated_wall_utc,
                 "log_path": record.log_path,
                 "degraded_reason": record.degraded_reason,
+                "context_files": c_files,
             }
             if result_dict:
                 payload["usage"] = result_dict.get("usage", {})
                 if "status" in result_dict:
                     payload["status"] = result_dict["status"]
+                if "context_files" in result_dict and result_dict["context_files"]:
+                    payload["context_files"] = list(result_dict["context_files"])
 
             line = json.dumps(payload, ensure_ascii=False)
             with FileLock(str(v_lock_path), timeout=5.0):
@@ -909,6 +915,7 @@ class ReviewerJobSupervisor:
                 log_path=allocated_log_path,
                 progress=initial_progress,
                 result_ref=None,
+                context_files=tuple(context_files),
             )
 
             # 原子落盘并启动后台 worker

@@ -115,3 +115,24 @@ Upon developer confirmation:
 主模型必须原样转呈降级卡，并明确告知开发者：
 > 审查引擎未配置或当前离线。请开启新会话并切换到旗舰 Reviewer 模型后重新提问；
 > 当前会话的实现模型不会、也不得代行架构审查职责。
+
+---
+
+## 7. Pre-Confirm 审计策略门禁纪律 (Pre-Confirm Audit Gate Discipline)
+
+### ① 拦截目标与定位
+在执行模型调用 `dev_tasks_confirm` 将任务从 `⬜ 待确认` 推进至 `✅ 已确认` 时，物理门禁验证该任务在 Tier-1 受管路径生效范围内的审查真实性记录。审计门禁是【纪律强制函数】而非对抗性安全边界，核心目标是确保「诚实成本 < 绕过成本」。
+
+### ② 确定性守卫序阶梯 (R11 互斥完备)
+1. **Disabled 放行** (`disabled`): `audit_gate.enabled` 为 false 时放行。
+2. **非受管资产放行** (`not_managed_scope`): 任务涉及文件均未命中 `managed_paths` 时天然豁免放行。
+3. **会话旁路放行** (`session_bypass_active`): 当前会话在有效时间内具备 Tier-2 旁路时放行（`session_id=None` 绝不放行）。
+4. **日志完整性与记录匹配**:
+   - 日志缺失 (`log_missing`)、日志不可解析 (`log_unparsable`)、降级记录 (`record_degraded`)、时间戳异常 (`record_timestamp_invalid`) 受 `on_degraded` 策略控制；
+   - 记录过期 (`record_stale`)、无匹配记录 (`no_matching_record`) 受 `on_missing_record` 策略控制；
+   - 尾读窗口耗尽 (`tail_window_exhausted`) 受 `tail_window_exhausted_policy` 策略控制；
+   - 内部错误 (`internal_error`) 遵循结构性 fail-open (永远放行)。
+5. **最新有效审计匹配** (`matched`): 命中 canonical artifact_ref 且时间戳在容差内新鲜且未降级时允许流转。
+
+### ③ 锁内重校验与 precondition_changed
+门禁在 manifest 锁外进行只读裁决。`dev_tasks_confirm` 获锁后，必须重算 `canonical_artifact_ref` 并断言任务仍处于 `⬜ 待确认` 状态；任一前置条件不满足时以 `precondition_changed` fail-closed 阻断，manifest 零写入。

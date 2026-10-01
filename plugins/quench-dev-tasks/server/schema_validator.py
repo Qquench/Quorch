@@ -23,6 +23,7 @@ REQUIRED_FIELDS = [
     "dod_commands",
 ]
 
+# Operations recognized across schema validator, scope reconciliation, and pre-confirm audit gate
 VALID_AFFECTED_PREFIXES = ("[MODIFY]", "[NEW]", "[DELETE]", "[RENAME]")
 
 
