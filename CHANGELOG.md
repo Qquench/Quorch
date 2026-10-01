@@ -3,6 +3,11 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-01] 2026-10-01_v1.10_step02_reviewer_supervisor_hardening.md
+
+- **Task 1.1**: 配额裁决持久闭环：pin 生命周期、跨进程存活生产者与保护集 SSOT 统驭
+- **Task 1.2**: 统一纯净异步主通路：三态判别联合契约、沙箱截断前置与全量文档 SSOT 同步
+
 ## [2026-10-01] 2026-10-01_ci_fix_reviewer_client_available.md
 
 - **Task 1**: 修复 CI 本地端点可用性断言与状态机临时文件范围核对隔离
