@@ -561,6 +561,39 @@
       "git_head_sha": "954a44d38fe9c240fd0773ef19735e5ac240b081",
       "git_index_mtime": 1790781837.0447178,
       "released": false
+    },
+    "2026-10-01_v1.10_step02_reviewer_supervisor_hardening::2026-10-01_v1.10_step02_reviewer_supervisor_hardening": {
+      "task_id": "2026-10-01_v1.10_step02_reviewer_supervisor_hardening::2026-10-01_v1.10_step02_reviewer_supervisor_hardening",
+      "md_sha256": "23033860460c2dbce6f5a931d802e3abb86c6dfba5580cb00441358251edb049",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1067811140000000,
+      "last_heartbeat_wall_utc": "2026-10-01T08:53:55.440839+00:00",
+      "git_head_sha": "d41ffce5c79786c544120b609aeb95084fc54652",
+      "git_index_mtime": 1790844736.0384376,
+      "released": false
+    },
+    "2026-10-01_v1.10_step02_reviewer_supervisor_hardening::1.1": {
+      "task_id": "2026-10-01_v1.10_step02_reviewer_supervisor_hardening::1.1",
+      "md_sha256": "23033860460c2dbce6f5a931d802e3abb86c6dfba5580cb00441358251edb049",
+      "generation": 1,
+      "holder_token": "token_1790844871837_20464",
+      "last_heartbeat_monotonic_ns": 1068812281000000,
+      "last_heartbeat_wall_utc": "2026-10-01T09:10:36.576529+00:00",
+      "git_head_sha": "d41ffce5c79786c544120b609aeb95084fc54652",
+      "git_index_mtime": 1790844736.0384376,
+      "released": true
+    },
+    "2026-10-01_v1.10_step02_reviewer_supervisor_hardening::1.2": {
+      "task_id": "2026-10-01_v1.10_step02_reviewer_supervisor_hardening::1.2",
+      "md_sha256": "23033860460c2dbce6f5a931d802e3abb86c6dfba5580cb00441358251edb049",
+      "generation": 1,
+      "holder_token": "token_1790845843221_20464",
+      "last_heartbeat_monotonic_ns": 1071085968000000,
+      "last_heartbeat_wall_utc": "2026-10-01T09:48:30.262565+00:00",
+      "git_head_sha": "d41ffce5c79786c544120b609aeb95084fc54652",
+      "git_index_mtime": 1790844736.0384376,
+      "released": true
     }
   }
 }

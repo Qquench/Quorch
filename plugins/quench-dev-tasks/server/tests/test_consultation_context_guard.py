@@ -465,4 +465,45 @@ def test_multihop_guardrails_contract_and_budget():
     assert cleaned[2] == {"role": "assistant", "content": "ast", "extra": 123}
 
 
+def test_assert_read_only_sandbox_guards(tmp_path: Path):
+    """断言 assert_read_only_sandbox 对非法工作区与逃逸路径 fail-closed 抛异常 (INV-6)。"""
+    from consultation import assert_read_only_sandbox
+    from path_guard import PathTraversalError
+
+    # 1. 非法工作区
+    with pytest.raises(ValueError, match="Invalid workspace_root"):
+        assert_read_only_sandbox(str(tmp_path / "non_existing"))
+
+    # 2. 合法空文件列表
+    ws = tmp_path / "ws_sandbox"
+    ws.mkdir()
+    assert_read_only_sandbox(str(ws), [])
+
+    # 3. 合法工作区内文件 (无需物理存在)
+    assert_read_only_sandbox(str(ws), ["src/valid.py", "app.py:10-50"])
+
+    # 4. 逃逸路径抛 PathTraversalError (fail-closed)
+    with pytest.raises(PathTraversalError):
+        assert_read_only_sandbox(str(ws), ["../escape.py"])
+
+
+def test_assemble_reviewer_context_budget_cap(tmp_path: Path):
+    """断言 assemble_reviewer_context 遵循 INV-8 max_total_injection_chars 截断约束。"""
+    from consultation import assemble_reviewer_context
+
+    ws = tmp_path / "ws_ctx"
+    ws.mkdir()
+    f1 = ws / "big_file.py"
+    f1.write_text("A" * 5000 + "\n", encoding="utf-8")
+
+    slices, skipped, truncated = assemble_reviewer_context(
+        str(ws),
+        ["big_file.py"],
+        max_total_injection_chars=2000,
+    )
+    assert len(slices) == 1
+    assert truncated is True
+    assert len(slices[0].text) <= 2000
+
+
 

@@ -14,6 +14,7 @@
 | Milestone | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
 | :--- | :--- | :--- | :--- | :---: |
 | **Proposal (TBD)** | 📋 **[plan_frontiers_dag_and_dynamic_governance.md](./plan_frontiers_dag_and_dynamic_governance.md)** | **Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback** | Tokenizer-aware budget & truncation telemetry (P1), monotonic Epoch fencing & revert primitive (P2), depends_on task DAG (P3), step-level rejection (P4), Repo-Map & Subagent review isolation (P5) | 📋 **Architecture Blueprint** |
+| **Proposal (TBD)** | 📋 **[plan_cost_efficiency_and_governance_hardening.md](./plan_cost_efficiency_and_governance_hardening.md)** | **Resource Efficiency & Governance Hardening: DoD Contract, Role Authorization & Repo-Map Slicing** | Measurement baseline (Epic 0), structured DoD exit-code authority (Epic A), server-side role dispatch authorization (Epic B), adapter-aligned token budget (Epic C), deterministic Repo-Map slicing (Epic D), verdict atomic channel (Epic E), risk-graded fast track (Epic F) | 📋 **Architecture Blueprint** |
 
 ---
 

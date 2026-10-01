@@ -882,3 +882,9 @@ def resolve_path(config: QuenchStackConfig, field_name: str) -> str:
     """辅助函数：解析绝对路径"""
     return config.resolve_path(field_name)
 
+
+def resolve_reviewer_log_dir(workspace_root: str | os.PathLike[str]) -> str:
+    """唯一解析 reviewer 日志目录的 SSOT 辅助函数。"""
+    return os.path.abspath(os.path.join(str(workspace_root), ".agents", "logs", "reviewer"))
+
+

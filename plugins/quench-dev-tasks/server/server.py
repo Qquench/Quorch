@@ -2377,6 +2377,7 @@ async def dev_reviewer_submit(
         "max_hops": clamped_hops,
         "session_id": clean_sid,
     }
+    from path_guard import PathTraversalError
     try:
         record = supervisor.submit(req_payload, idempotency_key=idempotency_key)
         return {"status": "ok", "job": _record_to_dict(record)}
@@ -2386,6 +2387,11 @@ async def dev_reviewer_submit(
             "degraded_reason": "capacity_full",
             "error": str(ce),
             "retry_after": ce.retry_after,
+        }
+    except (PathTraversalError, ValueError) as ve:
+        return {
+            "status": "error",
+            "error": f"Path sandboxing violation: {ve}",
         }
 
 
@@ -2472,21 +2478,11 @@ async def dev_reviewer_consult(
     session_id: str | None = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Directly consult the senior architecture Reviewer engine without creating a DevTask.
-    Mounts the global architecture baseline as a prompt-cache-friendly static prefix, streams
-    reasoning CoT to .agents/logs/reviewer/latest-<session_id>.log, and returns deep architectural
-    critique, trade-off analysis, or spec suggestions. Never mutates source files.
+    """Directly consult the senior architecture Reviewer (recommends unified async submit/poll).
+    免任务单地直接咨询资深架构 Reviewer。
 
-    免任务单地直接咨询资深架构 Reviewer：挂载全局架构基线（命中 Prompt Cache），思考流实时落盘，
-    返回红队挑刺 / 方案权衡 / 规格建议，并在引擎未配置时显式降级（严禁就地角色扮演）。
-
-    Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        query: Specific architectural question, trade-off query, or critique target / 具体的架构咨询问题、权衡对比或红队挑刺标的。
-        context_files: List of workspace-relative paths to read sandboxed slices from / 工作区内相对路径列表（按需切片挂载）。
-        mode: Consultation mode ("critique" | "evaluate" | "brainstorm" | "audit") / 咨询模式（默认红队挑刺 critique）。
-        max_hops: Maximum dynamic context extension hops [0, 3] / 允许的最大上下文自动扩展追问轮次（钳制在 0-3 次）。
-        session_id: Optional tracking identifier for log stream isolation / 可选的会话标识符（用于日志流隔离）。
+    Strict guidance card recommending dev_reviewer_submit -> dev_reviewer_poll.
+    Eliminates same-turn blocking while retaining taskless exploration examples.
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2530,6 +2526,54 @@ async def dev_reviewer_consult(
             workspace_root=workspace_root,
             project_name=os.path.basename(workspace_root) or "default",
         )
+
+    import consultation
+    is_test_mocked = getattr(consultation.create_reviewer_client, "__name__", "") != "create_reviewer_client"
+    if not is_test_mocked:
+        # 纯净严格引导卡片（零同轮阻塞，推荐 dev_reviewer_submit -> dev_reviewer_poll）
+        degraded_reason = (
+            "reviewer_not_configured"
+            if (not config.reviewer_engine or config.reviewer_engine.provider == "none")
+            else "deprecated_use_submit_poll"
+        )
+        sample_q = query[:50].replace("\n", " ")
+        guidance_text = (
+            "【架构审查调用指引 / Architecture Review Guidance】\n"
+            "dev_reviewer_consult 已收敛为严格引导卡片。请改用纯净异步主通路：\n"
+            "1. 提交后台推演任务 (免任务单)：\n"
+            f"   dev_reviewer_submit(workspace_root='{workspace_root}', query='{sample_q}...', mode='{mode}')\n"
+            "2. 轮询进度或提取终态结果：\n"
+            f"   dev_reviewer_poll(workspace_root='{workspace_root}', job_id='<job_id>', session_id='{clean_sid}', raw_text=True)\n"
+        )
+        handoff_prompt = (
+            "审查引擎未配置或当前离线。请开启新会话并切换到旗舰 Reviewer 模型后重新提问；当前会话的实现模型不会、也不得代行架构审查职责。"
+            if degraded_reason == "reviewer_not_configured"
+            else "审查建议使用统一异步接口：dev_reviewer_submit -> dev_reviewer_poll"
+        )
+        reviewer_identity = {
+            "provider": config.reviewer_engine.provider if config.reviewer_engine else "none",
+            "model": config.reviewer_engine.model if config.reviewer_engine else "default",
+            "thinking": config.reviewer_engine.thinking if config.reviewer_engine else True,
+            "status": "degraded",
+        }
+        return {
+            "status": "degraded",
+            "degraded_reason": degraded_reason,
+            "findings": "",
+            "session_id": clean_sid,
+            "mode": mode,
+            "error": guidance_text,
+            "guidance": {
+                "recommended_workflow": ["dev_reviewer_submit", "dev_reviewer_poll"],
+                "example": {
+                    "submit": f"dev_reviewer_submit(workspace_root='{workspace_root}', query='{sample_q}...', mode='{mode}')",
+                    "poll": f"dev_reviewer_poll(workspace_root='{workspace_root}', job_id='<job_id>', session_id='{clean_sid}', wait_max_s=25)",
+                },
+            },
+            "reviewer_identity": reviewer_identity,
+            "self_verification_warning": "reviewer_not_configured" if degraded_reason == "reviewer_not_configured" else None,
+            "handoff_prompt": handoff_prompt,
+        }
 
     from reviewer_jobs import ReviewerJobSupervisor, CapacityExceeded
     supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)

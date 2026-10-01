@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, ClassVar, Final, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, ClassVar, Final, Literal, Mapping, Optional, Sequence, Union
 from uuid import uuid4
 
 import anyio
@@ -24,15 +24,20 @@ from filelock import FileLock
 
 from log_naming import (
     MAX_LOG_REF_CHARS,
+    REVIEWER_LOG_QUOTA_KEEP,
+    REVIEWER_TERMINAL_LOG_RETENTION,
     SESSION_ID_PATTERN,
     SLUG_MAX_LEN,
     ActiveLogRegistry,
     allocate_log_file,
+    enforce_unified_log_quota,
     norm_registry_key,
     validate_log_ref,
 )
+from project_config import resolve_reviewer_log_dir
 from workspace_lease import WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
 from reviewer_engine import format_heartbeat_line
+
 
 JOB_ID_PATTERN: Final[re.Pattern] = re.compile(r"^[0-9a-zA-Z_-]{1,64}$")
 if MAX_LOG_REF_CHARS < 13 + SLUG_MAX_LEN + 4:
@@ -104,15 +109,16 @@ class JobState(str, Enum):
     ORPHANED = "ORPHANED"
 
 
-TERMINAL_STATES: Final[frozenset[JobState]] = frozenset(
-    {
-        JobState.COMPLETED,
-        JobState.FAILED,
-        JobState.CANCELLED,
-        JobState.CANCELLED_PENDING_REAP,
-        JobState.ORPHANED,
-    }
+POLL_TERMINAL_STATES: Final[frozenset[JobState]] = frozenset(
+    {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED, JobState.ORPHANED}
 )
+PIN_RELEASABLE_STATES: Final[frozenset[JobState]] = frozenset(
+    {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED, JobState.ORPHANED}
+)
+TERMINAL_STATES: Final[frozenset[JobState]] = PIN_RELEASABLE_STATES  # 消除双重终态分裂
+if not (POLL_TERMINAL_STATES == PIN_RELEASABLE_STATES == TERMINAL_STATES):
+    raise AssertionError("Inconsistent terminal states invariants")
+
 
 
 class ReviewerPhase(str, Enum):
@@ -253,10 +259,16 @@ def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:
 
 
 def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any]:
-    """终态双源对称投影函数 (N-3, C-5)：
+    """终态双源对称投影函数 (N-3, C-5, 权威三态判别联合)：
+    - 判别字段 state 恒为终态之一 (COMPLETED, FAILED, CANCELLED, ORPHANED)；
     - 输出键集合恒等于 POLL_TERMINAL_FIELDS；
     - 从 JobRecord 提取 log_path；从 result 提取 usage；
     - 严格校验禁止 raw reasoning 键，并使用固定白名单 TERMINAL_RESULT_ALLOWED_FIELDS 过滤，杜绝思维链泄露；
+    - Form A (state == "COMPLETED"):
+        result 包含 ok 审查正文，degraded_reason 恒为 None；
+    - Form B (state in {"FAILED", "CANCELLED", "ORPHANED"}):
+        degraded_reason 为非空降级枚举值，
+        result 严格为降级形态 {"status": "degraded", "findings": "", "degraded_reason": ...} (INV-3)；
     - 所有断言抛出 SnapshotContractViolation，确保 python -O 下校验不脱保。
     """
     clean_result = None
@@ -278,6 +290,31 @@ def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any
 
         usage = dict(clean_result.get("usage", {}))
 
+    degraded_reason = record.degraded_reason
+    if record.state in (JobState.FAILED, JobState.CANCELLED, JobState.ORPHANED):
+        if degraded_reason is None:
+            if record.state == JobState.CANCELLED:
+                degraded_reason = "cancelled"
+            elif record.state == JobState.ORPHANED:
+                degraded_reason = "orphaned"
+            else:
+                degraded_reason = "network"
+
+        if clean_result is None:
+            clean_result = {
+                "status": "degraded",
+                "findings": "",
+                "degraded_reason": degraded_reason,
+                "session_id": record.session_id,
+                "mode": record.mode,
+            }
+        else:
+            clean_result["status"] = "degraded"
+            clean_result["findings"] = ""
+            clean_result["degraded_reason"] = degraded_reason
+    elif record.state == JobState.COMPLETED:
+        degraded_reason = None
+
     res = {
         "job_id": record.job_id,
         "session_id": record.session_id,
@@ -287,7 +324,7 @@ def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any
         "log_path": record.log_path,
         "usage": usage,
         "result": clean_result,
-        "degraded_reason": record.degraded_reason,
+        "degraded_reason": degraded_reason,
     }
     if set(res.keys()) != POLL_TERMINAL_FIELDS:
         raise SnapshotContractViolation(
@@ -455,6 +492,142 @@ def _record_from_dict(d: dict[str, Any]) -> JobRecord:
     )
 
 
+def compute_protected_logs(
+    jobs_dir: str | os.PathLike[str],
+    *,
+    retention: int = REVIEWER_TERMINAL_LOG_RETENTION,
+) -> frozenset[str]:
+    """保护集 = 最近 retention 条终态(basename字典序) ∪ 非终态在途 ∪ 排除 latest-*。
+    零系统调用 (zero-stat) 扫描 durable JobRecord，仅依据 basename 字典序排序。
+    """
+    j_dir = os.path.abspath(jobs_dir)
+    if not os.path.isdir(j_dir):
+        return frozenset()
+
+    inflight_logs: set[str] = set()
+    terminal_entries: list[tuple[str, str]] = []  # (basename, log_path)
+
+    try:
+        for root, _, files in os.walk(j_dir):
+            for file in files:
+                if not file.endswith(".record.json"):
+                    continue
+                record_path = os.path.join(root, file)
+                try:
+                    with open(record_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
+
+                log_path = data.get("log_path")
+                if not log_path or not isinstance(log_path, str):
+                    continue
+
+                basename = os.path.basename(log_path)
+                # 显式排除 latest-* 命名空间
+                if basename.startswith("latest-") or basename == "latest.log":
+                    continue
+
+                state_str = data.get("state")
+                # 在途状态保护：QUEUED, RUNNING, CANCELLED_PENDING_REAP
+                if state_str in ("QUEUED", "RUNNING", "CANCELLED_PENDING_REAP"):
+                    inflight_logs.add(log_path)
+                elif state_str in (
+                    JobState.COMPLETED.value,
+                    JobState.FAILED.value,
+                    JobState.CANCELLED.value,
+                    JobState.ORPHANED.value,
+                ):
+                    terminal_entries.append((basename, log_path))
+    except Exception:
+        pass
+
+    # Basename 字典序排序（等价于时间序，零系统调用）
+    terminal_entries.sort(key=lambda item: item[0])
+    recent_terminal = (
+        terminal_entries[-retention:]
+        if len(terminal_entries) > retention
+        else terminal_entries
+    )
+
+    protected: set[str] = {item[1] for item in recent_terminal} | inflight_logs
+    return frozenset(protected)
+
+
+def build_peer_liveness_probe(
+    jobs_dir: str | os.PathLike[str],
+    workspace_root: str,
+) -> Callable[[str], bool]:
+    """构建跨进程存活探测器。
+    严格遵守 Zero-stat：仅遍历 durable JobRecord，绝不 stat 候选日志文件；
+    无匹配 record 时默认极性 fail-safe 返回 True (alive)。
+    """
+    j_dir = os.path.abspath(jobs_dir)
+
+    def _is_alive_probe(log_path: str) -> bool:
+        if not os.path.isdir(j_dir):
+            return True
+
+        norm_target_key = norm_registry_key(log_path)
+        matching_record: dict[str, Any] | None = None
+
+        try:
+            for root, _, files in os.walk(j_dir):
+                for file in files:
+                    if not file.endswith(".record.json"):
+                        continue
+                    r_path = os.path.join(root, file)
+                    try:
+                        with open(r_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception:
+                        continue
+
+                    r_log = data.get("log_path")
+                    if r_log and norm_registry_key(r_log) == norm_target_key:
+                        matching_record = data
+                        break
+                if matching_record is not None:
+                    break
+        except Exception:
+            return True
+
+        if matching_record is None:
+            # 零 record 对应项：fail-safe 默认存活
+            return True
+
+        state_str = matching_record.get("state")
+        if state_str in (
+            JobState.COMPLETED.value,
+            JobState.FAILED.value,
+            JobState.CANCELLED.value,
+            JobState.ORPHANED.value,
+        ):
+            return False
+
+        owner_pid = matching_record.get("owner_pid")
+        owner_boot_nonce = matching_record.get("owner_boot_nonce")
+
+        if not isinstance(owner_pid, int) or owner_pid <= 0:
+            return True
+
+        try:
+            peer = WorkspaceLeaseGuard.probe_peer(
+                owner_pid, owner_boot_nonce or "", workspace_root
+            )
+            return peer.is_alive
+        except Exception:
+            try:
+                os.kill(owner_pid, 0)
+                return True
+            except OSError as err:
+                import errno
+
+                return err.errno == errno.EPERM
+
+    return _is_alive_probe
+
+
 class ReviewerJobSupervisor:
     """MCP 服务进程内的单例 Job 调度主管与状态机。"""
 
@@ -466,7 +639,7 @@ class ReviewerJobSupervisor:
         self._boot_nonce = f"boot_{os.getpid()}_{time.time_ns()}_{uuid4().hex[:8]}"
         self._ws_hash = hashlib.sha256(self.workspace_root.encode("utf-8")).hexdigest()[:16]
         self._jobs_base = (
-            Path(self.workspace_root) / ".agents" / "logs" / "reviewer" / "jobs" / self._ws_hash
+            Path(resolve_reviewer_log_dir(self.workspace_root)) / "jobs" / self._ws_hash
         )
         self._jobs_base.mkdir(parents=True, exist_ok=True)
         self._lease_guard = WorkspaceLeaseGuard(self.workspace_root)
@@ -477,8 +650,25 @@ class ReviewerJobSupervisor:
         self._abort_handles: dict[str, Any] = {}
         self._running_jobs_lock = threading.Lock()
 
+    def _pin_log(self, log_path: str) -> str:
+        key = norm_registry_key(log_path)
+        self._registry.pin(key)
+        return key
+
+    def _release_log_pin(self, record: Union[JobRecord, str, None]) -> None:
+        try:
+            if record is None:
+                return
+            if isinstance(record, str):
+                self._registry.unpin(record)
+            elif hasattr(record, "log_path") and record.log_path:
+                self._registry.unpin(record.log_path)
+        except Exception:
+            pass
+
     def _get_verdicts_path(self) -> Path:
-        return Path(self.workspace_root) / ".agents" / "logs" / "reviewer" / "verdicts.jsonl"
+        return Path(resolve_reviewer_log_dir(self.workspace_root)) / "verdicts.jsonl"
+
 
     def _read_existing_verdict_job_ids(self) -> set[str]:
         v_path = self._get_verdicts_path()
@@ -642,7 +832,11 @@ class ReviewerJobSupervisor:
             return True
 
     def submit(self, req: dict, *, idempotency_key: Optional[str] = None) -> JobRecord:
-        """提交异步长推演任务，遵循准入控制与常驻所有权模型。"""
+        """提交异步长推演任务，遵循准入控制与常驻所有权模型。
+        权威步骤序：
+        准入判定 (CapacityLimiter) → 幂等键查重 (命中直接返回既有 record，不二次组装上下文也不二次 pin)
+        → allocate_log_file() → _pin_log() → 落盘 JobRecord → 机会式清理 (传入 compute_protected_logs)
+        """
         # I8: 并发准入控制（CapacityLimiter 纯读快速失败判据）
         if self._limiter.borrowed_tokens >= self._limiter.total_tokens:
             raise CapacityExceeded(retry_after=5)
@@ -661,46 +855,92 @@ class ReviewerJobSupervisor:
         else:
             job_id = f"job_{int(time.time())}_{uuid4().hex[:8]}"
 
-        log_dir = Path(self.workspace_root) / ".agents" / "logs" / "reviewer"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        allocated_log_path, _ = allocate_log_file(
-            str(log_dir),
-            slug=session_id,
-            header_metadata={"mode": mode, "session_id": session_id, "job_id": job_id},
-            registry=self._registry,
-        )
+        # 前置 fail-closed 沙箱检查与上下文组装截断 (INV-6 / INV-8)
+        # 必须在 allocate_log_file() 之前执行，失败直接阻断，零残留日志与 pin
+        from consultation import assert_read_only_sandbox, assemble_reviewer_context
+        context_files = req.get("context_files") or []
+        assert_read_only_sandbox(self.workspace_root, context_files)
 
-        now_mono = time.monotonic()
-        now_wall = datetime.now(timezone.utc).isoformat()
-        initial_progress = JobProgress(
-            elapsed_s=0.0,
-            approx_reasoning_tokens=0,
-            phase=ReviewerPhase.ASSEMBLING,
-            idle_s=0.0,
+        cfg = req.get("config")
+        slices, skipped_files, truncated = assemble_reviewer_context(
+            self.workspace_root,
+            context_files,
+            config=cfg,
         )
+        req["_assembled_slices"] = slices
+        req["_skipped_files"] = skipped_files
+        req["_context_truncated"] = truncated
 
-        record = JobRecord(
-            job_id=job_id,
-            session_id=session_id,
-            workspace_root=self.workspace_root,
-            mode=mode,
-            owner_pid=os.getpid(),
-            owner_boot_nonce=self._boot_nonce,
-            generation=1,
-            state=JobState.QUEUED,
-            created_monotonic=now_mono,
-            updated_monotonic=now_mono,
-            created_wall_utc=now_wall,
-            updated_wall_utc=now_wall,
-            log_path=allocated_log_path,
-            progress=initial_progress,
-            result_ref=None,
-        )
+        log_dir = resolve_reviewer_log_dir(self.workspace_root)
+        os.makedirs(log_dir, exist_ok=True)
 
-        # 原子落盘并启动后台 worker
-        self._save_job_record(record)
-        self._launch_worker(record, req)
+        allocated_log_path = None
+        try:
+            allocated_log_path, _ = allocate_log_file(
+                log_dir,
+                slug=session_id,
+                header_metadata={"mode": mode, "session_id": session_id, "job_id": job_id},
+                registry=self._registry,
+            )
+            self._pin_log(allocated_log_path)
+
+            now_mono = time.monotonic()
+            now_wall = datetime.now(timezone.utc).isoformat()
+            initial_progress = JobProgress(
+                elapsed_s=0.0,
+                approx_reasoning_tokens=0,
+                phase=ReviewerPhase.ASSEMBLING,
+                idle_s=0.0,
+            )
+
+            record = JobRecord(
+                job_id=job_id,
+                session_id=session_id,
+                workspace_root=self.workspace_root,
+                mode=mode,
+                owner_pid=os.getpid(),
+                owner_boot_nonce=self._boot_nonce,
+                generation=1,
+                state=JobState.QUEUED,
+                created_monotonic=now_mono,
+                updated_monotonic=now_mono,
+                created_wall_utc=now_wall,
+                updated_wall_utc=now_wall,
+                log_path=allocated_log_path,
+                progress=initial_progress,
+                result_ref=None,
+            )
+
+            # 原子落盘并启动后台 worker
+            self._save_job_record(record)
+            self._launch_worker(record, req)
+        except Exception:
+            if allocated_log_path:
+                self._release_log_pin(allocated_log_path)
+            raise
+
+        # 机会式清理（传入 compute_protected_logs 与 build_peer_liveness_probe）
+        try:
+            protected = compute_protected_logs(
+                str(self._jobs_base), retention=REVIEWER_TERMINAL_LOG_RETENTION
+            )
+            is_peer_alive = build_peer_liveness_probe(
+                str(self._jobs_base), self.workspace_root
+            )
+            enforce_unified_log_quota(
+                log_dir,
+                keep=REVIEWER_LOG_QUOTA_KEEP,
+                retention=REVIEWER_TERMINAL_LOG_RETENTION,
+                registry=self._registry,
+                require_lease=False,
+                is_peer_alive=is_peer_alive,
+                protected_paths=protected,
+            )
+        except Exception:
+            pass
+
         return record
+
 
     def _launch_worker(self, record: JobRecord, req: dict) -> None:
         """启动后台 Worker 协程，强引用常驻持有 Task (I2)。"""
@@ -843,8 +1083,32 @@ class ReviewerJobSupervisor:
                     self._abort_handles.pop(record.job_id, None)
                     self._tasks.pop(record.job_id, None)
                     self._worker_threads.pop(record.job_id, None)
-                # 终态安全 unpin
-                self._registry.unpin(record.log_path)
+
+                # 终态安全 unpin：仅当已处于 PIN_RELEASABLE_STATES 时释放 pin
+                final_rec = self._load_job_record(record.session_id, record.job_id)
+                if final_rec and final_rec.state in PIN_RELEASABLE_STATES:
+                    self._release_log_pin(final_rec)
+                    # 随后调用 compute_protected_logs 传入配额清理
+                    try:
+                        log_dir = resolve_reviewer_log_dir(self.workspace_root)
+                        protected = compute_protected_logs(
+                            str(self._jobs_base), retention=REVIEWER_TERMINAL_LOG_RETENTION
+                        )
+                        is_peer_alive = build_peer_liveness_probe(
+                            str(self._jobs_base), self.workspace_root
+                        )
+                        enforce_unified_log_quota(
+                            log_dir,
+                            keep=REVIEWER_LOG_QUOTA_KEEP,
+                            retention=REVIEWER_TERMINAL_LOG_RETENTION,
+                            registry=self._registry,
+                            require_lease=False,
+                            is_peer_alive=is_peer_alive,
+                            protected_paths=protected,
+                        )
+                    except Exception:
+                        pass
+
 
         try:
             loop = asyncio.get_running_loop()
@@ -973,8 +1237,27 @@ class ReviewerJobSupervisor:
         if final_rec:
             self._append_verdict_audit(final_rec)
 
-        if worker_joined:
-            self._registry.unpin(record.log_path)
+        if final_rec and final_rec.state in PIN_RELEASABLE_STATES:
+            self._release_log_pin(final_rec)
+            try:
+                log_dir = resolve_reviewer_log_dir(self.workspace_root)
+                protected = compute_protected_logs(
+                    str(self._jobs_base), retention=REVIEWER_TERMINAL_LOG_RETENTION
+                )
+                is_peer_alive = build_peer_liveness_probe(
+                    str(self._jobs_base), self.workspace_root
+                )
+                enforce_unified_log_quota(
+                    log_dir,
+                    keep=REVIEWER_LOG_QUOTA_KEEP,
+                    retention=REVIEWER_TERMINAL_LOG_RETENTION,
+                    registry=self._registry,
+                    require_lease=False,
+                    is_peer_alive=is_peer_alive,
+                    protected_paths=protected,
+                )
+            except Exception:
+                pass
 
         return self.poll(job_id, session_id=session_id)
 
@@ -1033,13 +1316,14 @@ class ReviewerJobSupervisor:
                             JobState.ORPHANED,
                             updates={"degraded_reason": "orphaned"},
                         ):
-                            self._registry.unpin(rec.log_path)
+                            self._release_log_pin(rec)
                             orphaned.append(rec.job_id)
                             updated_rec = self._load_job_record(rec.session_id, rec.job_id)
                             if updated_rec:
                                 self._append_verdict_audit(updated_rec)
                                 existing_verdict_ids.add(rec.job_id)
         return orphaned
+
 
     def gc_terminal_jobs(self, *, max_records: int = 100, max_age_s: float = 1800.0) -> int:
         """终态 GC 与容错：仅回收超 TTL 终态任务，GC 期间对已解引用文件优雅容忍 ENOENT (I10)。"""

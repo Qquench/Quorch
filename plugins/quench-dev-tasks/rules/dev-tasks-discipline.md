@@ -100,7 +100,7 @@ Upon developer confirmation:
 
 ### ② 唯一合法通道 (Mandatory External Channels)
 审查类意图的结论只能来自异构外部推理通道，且必须通过 MCP 工具物理发起：
-- 自由问答 / 灵感评估 / 方案权衡 / 只读诊断 → `dev_reviewer_consult`；
+- 自由问答 / 灵感评估 / 方案权衡 / 只读诊断 → 统一异步主通路 `dev_reviewer_submit` 提交并由 `dev_reviewer_poll` 轮询获取结果（`dev_reviewer_consult` 提供非阻塞引导卡）；
 - 任务规约强化 / 六字段草案打磨 → `dev_tasks_refine_spec`；
 - 执行受阻上报 → `dev_tasks_escalate`。
 
@@ -111,7 +111,7 @@ Upon developer confirmation:
 - 严禁声称已调用 Reviewer 而实际未发起任何 MCP 工具调用。
 
 ### ④ 引擎缺失时的显式降级 (Mandatory Degraded Card)
-`dev_reviewer_consult` 返回 `status="degraded"` 或 `degraded_reason="reviewer_not_configured"` 时，
+`dev_reviewer_poll` 或 `dev_reviewer_consult` 返回 `status="degraded"` 或 `degraded_reason="reviewer_not_configured"` 时，
 主模型必须原样转呈降级卡，并明确告知开发者：
 > 审查引擎未配置或当前离线。请开启新会话并切换到旗舰 Reviewer 模型后重新提问；
 > 当前会话的实现模型不会、也不得代行架构审查职责。

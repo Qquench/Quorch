@@ -529,6 +529,71 @@ def resolve_context_files(
     return slices, skipped_files, truncated
 
 
+def assert_read_only_sandbox(
+    workspace_root: str,
+    context_files: Sequence[str] | None = None,
+) -> None:
+    """Pre-flight Fail-Closed sandboxing check (INV-6):
+    Asserts workspace_root is an existing directory, and asserts every path in context_files
+    is confined strictly within workspace_root without traversal.
+    Raises PathTraversalError or ValueError upon any violation.
+    """
+    if not workspace_root or not os.path.isdir(workspace_root):
+        raise ValueError(f"Invalid workspace_root: '{workspace_root}' is not an existing directory.")
+    real_ws = os.path.realpath(workspace_root)
+    if not context_files:
+        return
+    for raw_p in context_files:
+        if not raw_p or not isinstance(raw_p, str):
+            continue
+        p_str = raw_p.strip()
+        if not p_str:
+            continue
+        range_match = CONTEXT_SPEC_PATTERN.match(p_str)
+        spec_path = range_match.group("path").strip() if range_match else p_str
+        sanitize_workspace_path(real_ws, spec_path, must_exist=False)
+
+
+def assemble_reviewer_context(
+    workspace_root: str,
+    context_files: Sequence[str],
+    *,
+    config: Optional[QuenchStackConfig] = None,
+    max_files: int = MAX_CONTEXT_FILES,
+    window_lines: Optional[int] = None,
+    max_total_injection_chars: Optional[int] = None,
+    max_lines_per_slice: Optional[int] = None,
+) -> tuple[list[CodeSlice], list[str], bool]:
+    """Assemble sandboxed code slices with strict max_total_injection_chars cap (INV-8).
+    Returns (slices, skipped_files, truncated).
+    """
+    re_cfg = getattr(config, "reviewer_engine", None) if config else None
+    cfg_window_lines = (
+        window_lines
+        if window_lines is not None
+        else (getattr(re_cfg, "default_window_lines", DEFAULT_WINDOW_LINES) if re_cfg else DEFAULT_WINDOW_LINES)
+    )
+    cfg_max_total_chars = (
+        max_total_injection_chars
+        if max_total_injection_chars is not None
+        else (getattr(re_cfg, "max_total_injection_chars", MAX_TOTAL_INJECTION_CHARS) if re_cfg else MAX_TOTAL_INJECTION_CHARS)
+    )
+    cfg_max_lines_per_slice = (
+        max_lines_per_slice
+        if max_lines_per_slice is not None
+        else (getattr(re_cfg, "max_lines_per_slice", MAX_LINES_PER_SLICE) if re_cfg else MAX_LINES_PER_SLICE)
+    )
+
+    return resolve_context_files(
+        workspace_root,
+        context_files,
+        max_files=max_files,
+        window_lines=cfg_window_lines,
+        max_total_injection_chars=cfg_max_total_chars,
+        max_lines_per_slice=cfg_max_lines_per_slice,
+    )
+
+
 _PREFIX_CACHE: dict[tuple, str] = {}
 _PREFIX_LOCK = threading.Lock()
 
@@ -676,9 +741,10 @@ async def _execute_consultation(
 
     # 3. 初始切片解析
     initial_files = list(req.context_files)
-    slices, skipped_files, truncated = resolve_context_files(
+    slices, skipped_files, truncated = assemble_reviewer_context(
         workspace_root,
         initial_files,
+        config=config,
         max_files=MAX_CONTEXT_FILES,
         window_lines=cfg_window_lines,
         max_total_injection_chars=cfg_max_total_chars,

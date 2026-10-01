@@ -144,15 +144,15 @@ Latency target: **< 50ms** per hook invocation.
 - At `dev_tasks_complete` / `dev_tasks_escalate`, the state machine runs `reconcile_workspace_against_whitelist` (pure function with dual fast-path / slow-path comparison and 50ms timeout circuit breaker);
 - Any modified or created files outside the declared `【涉及文件】` whitelist are rejected with `ScopeViolationError`, preventing external runners from bypassing file boundaries.
 
-### 3.3 Synchronous Consultation & Asynchronous Reviewer Job Pipelines
+### 3.3 Unified Asynchronous Reviewer Job Pipeline
 
-Quench supports two complementary Reviewer execution paths:
+Quench establishes a unified asynchronous Reviewer execution path, converging all heavy reasoning onto a background worker daemon:
 
-1. **Synchronous Direct Consultation (`dev_reviewer_consult`)**:
-   Thin-shell synchronous RPC wrapping quick architectural critiques, trade-off evaluations, or brainstorm sessions within active turns.
+1. **Unified Asynchronous Long-Running Jobs (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**:
+   Decouples architectural reasoning into detached background worker jobs with pre-flight fail-closed sandbox checks, context budget caps, durable `JobRecord` tracking, and strict tri-state discriminated union return contracts:
 
-2. **Asynchronous Long-Running Jobs (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**:
-   Decouples deep architectural reasoning into background worker jobs:
+2. **Non-Blocking Consultation Guidance (`dev_reviewer_consult`)**:
+   Returns an actionable, non-blocking guidance card recommending the `dev_reviewer_submit -> dev_reviewer_poll` workflow with taskless code examples, eliminating same-turn blocking.
 
 ```
 [Runner / Caller]
@@ -220,10 +220,10 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `state_machine.py` | T3 | CAS atomic state transitions backed by `filelock` | Single writer at a time; idempotent on repeated calls |
 | `schema_validator.py` | T3 | Six-field contract validation; physical feasibility lint gate (`draft_lint`) | No file writes; pure validation |
 | `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement; CAS TTL lease management (`manifest_lease`) | Single lock holder per task; lease expiration safety |
-| `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, async job state machine, 1KB non-terminal snapshot, raw_text projection, cancellation | Durable atomic writes; memory-leak-free |
+| `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, unified async job state machine, tri-state union contract, 1KB non-terminal snapshot, raw_text projection, cancellation, log pin & retention quota | Durable atomic writes; memory-leak-free |
 | `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease daemon, cross-process peer liveness detection (`probe_peer`) | FileLock-backed; POSIX & Windows liveness |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
-| `consultation.py` | T4 | `dev_reviewer_consult` logic; context assembly; sandbox | Read-only guard enforced before any context injection |
+| `consultation.py` | T4 | `dev_reviewer_consult` guidance logic; `assert_read_only_sandbox`; `assemble_reviewer_context` | Read-only guard enforced before any context injection |
 | `reaper.py` | T4 | Session log GC (`gc_by_filename_order`) | **Zero-stat contract**: only `os.listdir` + `os.remove`; no `os.stat`/`os.path.exists` |
 | `log_naming.py` | T4 | Log file naming, rotation, zero-stat GC primitives | `_guarded_stat` path-whitelist; see `ci_incident_tracker_and_compatibility_guide.md` Case 6 |
 | `path_guard.py` | T2 | Cross-platform path safety; traversal defenses | Called on every tool invocation involving file paths |
