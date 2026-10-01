@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-02] 2026-10-02_v1.10_step03_job_record_cascade_reaper.md
+
+- （无独立任务条目或全部跳过）
+
 ## [2026-10-02] 2026-09-30_v1.10_step01_pre_confirm_audit_gate.md
 
 - **Task 1.1**: 引入 Pre-Confirm 审计策略门禁（AuditGatePolicy，非不变式，Tier-1 受管路径生效）〔R11 终审闭合版〕
