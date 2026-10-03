@@ -74,5 +74,18 @@ When any conflict arises, the **plugin rules files win**. This file intentionall
 - ❌ Impersonate the Reviewer model in-context  
 - ❌ Bypass `dev_tasks_checkout` and edit code directly  
 - ❌ Hard-code any model vendor names or API endpoint strings in core modules  
-- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient
+- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient  
+- ❌ Dump verbose execution logs, large diff tables, or token recitations into chat upon task completion (strictly output the ≤5 line C3 Delivery Card)
 <!-- QUENCH-CORE-INVARIANTS:END -->
+
+---
+
+## 6. Runner Completion Delivery Card Contract (C3 极简完工交付卡)
+
+Upon calling `dev_tasks_complete`, the runner model's final response MUST strictly adhere to the compact 4-line card (≤5 lines):
+1. **Header**: `[Task ID] ✔️ Completed` / `[Task ID] ✔️ 已完成`
+2. **Affected Files**: Compact list of touched files with clickable markdown links
+3. **Verification**: Automated test results summary (`N passed, 0 failed`)
+4. **Anchor**: Git rollback tag & pointer to updated roadmap/spec
+
+*Do NOT re-recite deletion ledgers, zero-delete token counts, or markdown tables in chat.*

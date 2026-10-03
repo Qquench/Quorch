@@ -130,3 +130,15 @@ Upon developer confirmation:
 
 ### ③ 锁内重校验与 precondition_changed
 门禁在 manifest 锁外进行只读裁决。`dev_tasks_confirm` 获锁后，必须重算 `canonical_artifact_ref` 并断言任务仍处于 `⬜ 待确认` 状态；任一前置条件不满足时以 `precondition_changed` fail-closed 阻断，manifest 零写入。
+
+---
+
+## 8. Runner Completion Delivery Card Contract (C3 完工交付卡契约)
+
+- **Compact 4-Line Output / 极简 4 行卡（≤5行）**：Upon calling `dev_tasks_complete`, the runner model's final response in the chat turn MUST strictly adhere to:
+  1. `[Task ID] ✔️ Completed` / `[Task ID] ✔️ 已完成`
+  2. **Affected Files / 涉及文件**：Compact list of touched files with clickable markdown links
+  3. **Verification / 自动化验证**：Summary of passed test assertions (e.g. `N passed, 0 failed`)
+  4. **Anchor & Guidance / 锚点与指引**：Git rollback tag & pointer to updated roadmap/spec
+- **Anti-Verbose Dumping / 严禁正文倾倒大表**：Never dump raw deletion ledgers, full diff tables, or recitation of zero-delete token counts into chat turns. These details belong to task artifacts and automated gate assertions.
+- **Carve-Out & Mirroring / 异常降级与语言镜像**：Degraded/escalation states use §4 Handoff Card; card language mirrors task/user language (L3 contract).
