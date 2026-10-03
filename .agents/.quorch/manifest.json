@@ -693,6 +693,17 @@
       "git_head_sha": "b53c358872257c199345d222433c68faf98c7720",
       "git_index_mtime": 1791013817.497559,
       "released": true
+    },
+    "2026-10-03_v1.20_step06_workspace_lease_hardening::1": {
+      "task_id": "2026-10-03_v1.20_step06_workspace_lease_hardening::1",
+      "md_sha256": "8d927749701c3ab4bc10d5dc8bfcd9275056f6a12fb2a6abb408cbf907dfc855",
+      "generation": 1,
+      "holder_token": "token_1791027301084_5712",
+      "last_heartbeat_monotonic_ns": 18008828000000,
+      "last_heartbeat_wall_utc": "2026-10-03T11:58:58.155048+00:00",
+      "git_head_sha": "635c8e9ff555281b6c32d1282eaf77f151ca4a2c",
+      "git_index_mtime": 1791024462.0601432,
+      "released": true
     }
   }
 }

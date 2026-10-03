@@ -556,15 +556,61 @@ def compute_protected_logs(
     return frozenset(protected)
 
 
+def is_record_orphaned(record: JobRecord, *, now_wall_s: float, ttl_s: float) -> bool:
+    """孤儿判定 SSOT。锁定 wall-clock（绝不使用 updated_monotonic 跨进程比较）。
+
+    判定规则：
+    1. 若已处于 ORPHANED 状态，返回 True；
+    2. 若已处于其他终态（COMPLETED/FAILED/CANCELLED），返回 False；
+    3. 在途任务（QUEUED/RUNNING）：比对当前 wall-clock 与 updated_wall_utc，
+       若超时（now_wall_s - updated_s > ttl_s）返回 True，否则返回 False（时钟回拨保守判活）。
+    """
+    if record.state == JobState.ORPHANED:
+        return True
+    if record.state in (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED):
+        return False
+
+    if record.state in (JobState.QUEUED, JobState.RUNNING):
+        try:
+            val = record.updated_wall_utc
+            if isinstance(val, (int, float)):
+                updated_s = float(val)
+            else:
+                s = str(val).strip()
+                try:
+                    updated_s = float(s)
+                except ValueError:
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    updated_s = dt.timestamp()
+        except Exception:
+            try:
+                dt = datetime.fromisoformat(record.created_wall_utc)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                updated_s = dt.timestamp()
+            except Exception:
+                return False
+
+        elapsed = now_wall_s - updated_s
+        return elapsed > ttl_s
+
+    return False
+
+
 def build_peer_liveness_probe(
     jobs_dir: str | os.PathLike[str],
     workspace_root: str,
+    *,
+    ttl_s: Optional[float] = None,
 ) -> Callable[[str], bool]:
     """构建跨进程存活探测器。
     严格遵守 Zero-stat：仅遍历 durable JobRecord，绝不 stat 候选日志文件；
     无匹配 record 时默认极性 fail-safe 返回 True (alive)。
     """
     j_dir = os.path.abspath(jobs_dir)
+    effective_ttl_s = float(ttl_s) if ttl_s is not None else WorkspaceLeaseGuard(workspace_root).lease_ttl_s
 
     def _is_alive_probe(log_path: str) -> bool:
         if not os.path.isdir(j_dir):
@@ -598,34 +644,35 @@ def build_peer_liveness_probe(
             # 零 record 对应项：fail-safe 默认存活
             return True
 
-        state_str = matching_record.get("state")
-        if state_str in (
-            JobState.COMPLETED.value,
-            JobState.FAILED.value,
-            JobState.CANCELLED.value,
-            JobState.ORPHANED.value,
+        try:
+            rec = _record_from_dict(matching_record)
+        except Exception:
+            state_str = matching_record.get("state")
+            if state_str in (
+                JobState.COMPLETED.value,
+                JobState.FAILED.value,
+                JobState.CANCELLED.value,
+                JobState.ORPHANED.value,
+            ):
+                return False
+            return True
+
+        if rec.state in (
+            JobState.COMPLETED,
+            JobState.FAILED,
+            JobState.CANCELLED,
+            JobState.ORPHANED,
         ):
             return False
 
-        owner_pid = matching_record.get("owner_pid")
-        owner_boot_nonce = matching_record.get("owner_boot_nonce")
-
-        if not isinstance(owner_pid, int) or owner_pid <= 0:
+        if rec.owner_pid == os.getpid():
             return True
 
-        try:
-            peer = WorkspaceLeaseGuard.probe_peer(
-                owner_pid, owner_boot_nonce or "", workspace_root
-            )
-            return peer.is_alive
-        except Exception:
-            try:
-                os.kill(owner_pid, 0)
-                return True
-            except OSError as err:
-                import errno
+        now_wall_s = time.time()
+        if is_record_orphaned(rec, now_wall_s=now_wall_s, ttl_s=effective_ttl_s):
+            return False
 
-                return err.errno == errno.EPERM
+        return True
 
     return _is_alive_probe
 
@@ -1284,7 +1331,7 @@ class ReviewerJobSupervisor:
     def reconcile_on_load(self) -> list[str]:
         """启动载入对账：
         1. 幂等自愈：对账盘上已落盘的终态 JobRecord，若 verdicts.jsonl 缺失对应记录则执行自动补写 (C-3)；
-        2. 异代接管：通过 Task 4.0 probe_peer 验证异代进程真实存活；仅当异代且确认 PID 死亡才迁 ORPHANED 并 unpin (I3)；
+        2. 异代接管：通过单一 SSOT is_record_orphaned 判定异代任务是否超时孤儿；仅当超时孤儿才迁 ORPHANED 并 unpin (I3)；
         3. 单一 SSOT：verdicts.jsonl 缺行绝不构成孤儿判据。
         """
         orphaned: list[str] = []
@@ -1292,6 +1339,8 @@ class ReviewerJobSupervisor:
             return orphaned
 
         existing_verdict_ids = self._read_existing_verdict_job_ids()
+        now_wall = time.time()
+        ttl_s = self._lease_guard.lease_ttl_s
 
         for s_dir in self._jobs_base.iterdir():
             if not s_dir.is_dir():
@@ -1318,17 +1367,14 @@ class ReviewerJobSupervisor:
                         existing_verdict_ids.add(rec.job_id)
                     continue
 
-                # 2. 非终态在途任务：缺行绝不判定孤儿；严格基于进程探针
+                # 2. 非终态在途任务：缺行绝不判定孤儿；严格基于 is_record_orphaned
                 if rec.state in (JobState.QUEUED, JobState.RUNNING):
                     # 同进程自身启动时不抢自己
                     if rec.owner_pid == os.getpid() and rec.owner_boot_nonce == self._boot_nonce:
                         continue
 
-                    peer = WorkspaceLeaseGuard.probe_peer(
-                        rec.owner_pid, rec.owner_boot_nonce, self.workspace_root
-                    )
-                    if not peer.is_alive and peer.takeover_allowed:
-                        # 异代且已死亡，安全标记 ORPHANED 并释放 unpin
+                    if is_record_orphaned(rec, now_wall_s=now_wall, ttl_s=ttl_s):
+                        # 异代且已超时孤儿，安全标记 ORPHANED 并释放 unpin
                         if self._cas_transition(
                             rec.session_id,
                             rec.job_id,

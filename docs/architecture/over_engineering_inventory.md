@@ -194,15 +194,15 @@
 | `plugins/quench-dev-tasks/server/project_config.py` | 54 | 18 | 17 |
 | `plugins/quench-dev-tasks/server/reaper.py` | 6 | 15 | 20 |
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 49 | 28 | 33 |
-| `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 33 | 23 | 41 |
+| `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 34 | 22 | 41 |
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
 | `plugins/quench-dev-tasks/server/server.py` | 43 | 32 | 77 |
 | `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
-| `plugins/quench-dev-tasks/server/workspace_lease.py` | 7 | 13 | 12 |
+| `plugins/quench-dev-tasks/server/workspace_lease.py` | 5 | 9 | 10 |
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 427 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 426 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -541,11 +541,12 @@
 | `_record_from_dict` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `_record_to_dict` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
 | `assert_poll_authorized` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
-| `build_peer_liveness_probe` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py` | NONE |
+| `build_peer_liveness_probe` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py` | `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `canonical_snapshot_bytes` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `compute_elapsed_s` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `compute_protected_logs` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py` | NONE |
 | `format_progress` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md` |
+| `is_record_orphaned` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `project_nonterminal` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `project_poll_result` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py` | NONE |
 | `project_terminal` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
@@ -626,12 +627,10 @@
 | `get_status_summary` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `parse_task_file` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/reaper.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `transition_task` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/reaper.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | `docs/roadmap/archive/v1.01_personal_seamless_multiproject.md` |
-| `LeaseGenerationLostError` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py` | NONE |
-| `LeaseHeartbeatThread` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md` |
-| `LeaseTouchOutcome` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | NONE |
-| `PeerLiveness` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | NONE |
-| `WorkspaceLeaseGuard` | `plugins/quench-dev-tasks/server/workspace_lease.py` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md` |
-| `WorkspaceLeaseNotHeldError` | `plugins/quench-dev-tasks/server/workspace_lease.py` | `plugins/quench-dev-tasks/server/log_naming.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md` |
+| `LeaseGenerationLostError` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py` | NONE |
+| `LeaseTouchOutcome` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | NONE |
+| `WorkspaceLeaseGuard` | `plugins/quench-dev-tasks/server/workspace_lease.py` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `WorkspaceLeaseNotHeldError` | `plugins/quench-dev-tasks/server/workspace_lease.py` | `plugins/quench-dev-tasks/server/log_naming.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md` |
 | `_atomic_write_json` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | NONE | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 
 ---
@@ -686,9 +685,9 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 185
+- 样本总量: 189
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 185
+- `unknown`: 189
 <!-- END TELEMETRY -->

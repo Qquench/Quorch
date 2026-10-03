@@ -28,7 +28,7 @@ from reviewer_jobs import (
     _durable_write_json,
     project_terminal,
 )
-from workspace_lease import PeerLiveness, WorkspaceLeaseGuard
+from workspace_lease import WorkspaceLeaseGuard
 
 
 def test_dual_source_single_ssot_and_reconcile_backfill(tmp_path):
@@ -118,15 +118,7 @@ def test_running_job_missing_in_jsonl_never_orphaned_if_peer_alive(tmp_path, mon
     supervisor._save_job_record(running_rec)
     supervisor.registry.pin(running_rec.log_path)
 
-    # 模拟探针：异代但进程仍然存活
-    monkeypatch.setattr(
-        WorkspaceLeaseGuard,
-        "probe_peer",
-        lambda pid, nonce, ws: PeerLiveness(
-            is_alive=True, pid=pid, boot_nonce=nonce, takeover_allowed=False, probe_confident=True
-        ),
-    )
-
+    # 异代在途且未超时（更新时间新鲜），严格不判孤儿
     orphaned = supervisor.reconcile_on_load()
     assert "job_foreign_running_1" not in orphaned
     assert supervisor.registry.is_pinned(running_rec.log_path)

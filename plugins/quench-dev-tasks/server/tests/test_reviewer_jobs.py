@@ -42,7 +42,7 @@ from reviewer_jobs import (
     TERMINAL_STATES,
     TERMINAL_RESULT_ALLOWED_FIELDS,
 )
-from workspace_lease import PeerLiveness, WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
+from workspace_lease import WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
 
 
 def test_i1_terminal_cas_single_writer_wins(tmp_path):
@@ -101,11 +101,13 @@ async def test_i2_supervisor_task_survives_handler_scope(tmp_path):
     supervisor.shutdown()
 
 
-def test_i3_reconcile_marks_foreign_jobs_orphaned(tmp_path, monkeypatch):
-    """I3: 启动载入对账：通过 Task 4.0 的 probe_peer 验证异代进程真实存活；仅当异代且确认 PID 死亡才迁 ORPHANED 并 unpin。"""
+def test_i3_reconcile_marks_foreign_jobs_orphaned(tmp_path):
+    """I3: 启动载入对账：通过 is_record_orphaned 判定异代任务是否超时孤儿；仅当超时孤儿才迁 ORPHANED 并 unpin。"""
+    from datetime import timedelta
     supervisor = ReviewerJobSupervisor(tmp_path)
     now_mono = time.monotonic()
-    now_wall = datetime.now(timezone.utc).isoformat()
+    # 构造过期 updated_wall_utc (远超 lease_ttl_s 300s)
+    old_wall = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
     dead_rec = JobRecord(
         job_id="dead_job_1",
         session_id="dead_sess_1",
@@ -115,10 +117,10 @@ def test_i3_reconcile_marks_foreign_jobs_orphaned(tmp_path, monkeypatch):
         owner_boot_nonce="nonce_foreign_dead",
         generation=1,
         state=JobState.RUNNING,
-        created_monotonic=now_mono - 100,
-        updated_monotonic=now_mono - 50,
-        created_wall_utc=now_wall,
-        updated_wall_utc=now_wall,
+        created_monotonic=now_mono - 700,
+        updated_monotonic=now_mono - 600,
+        created_wall_utc=old_wall,
+        updated_wall_utc=old_wall,
         log_path=str(tmp_path / "test.log"),
         progress=JobProgress(50.0, 10, ReviewerPhase.STREAMING, 2.0),
         result_ref=None,
@@ -126,15 +128,6 @@ def test_i3_reconcile_marks_foreign_jobs_orphaned(tmp_path, monkeypatch):
     supervisor._save_job_record(dead_rec)
     supervisor.registry.pin(dead_rec.log_path)
     assert supervisor.registry.is_pinned(dead_rec.log_path)
-
-    # 1. 模拟死进程且允许接管
-    monkeypatch.setattr(
-        WorkspaceLeaseGuard,
-        "probe_peer",
-        lambda pid, nonce, ws: PeerLiveness(
-            is_alive=False, pid=pid, boot_nonce=nonce, takeover_allowed=True
-        ),
-    )
 
     orphaned = supervisor.reconcile_on_load()
     assert "dead_job_1" in orphaned

@@ -38,22 +38,17 @@ def test_touch_outcome_enum_contract():
     assert bool(LeaseTouchOutcome.LOST) is True
 
 
-def test_heartbeat_thread_exits_on_lost(temp_workspace):
-    """验证心跳守护线程在 touch() 返回 LOST 时能够确定性退出，而不是死循环。"""
-    guard = WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=10.0, heartbeat_interval_s=0.1)
+def test_touch_returns_lost_when_lease_file_deleted(temp_workspace):
+    """验证租约文件被外部删除时，touch() 确凿返回 LOST。"""
+    guard = WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=10.0, heartbeat_interval_s=1.0)
     guard.acquire_or_probe("nonce_truth")
-    guard.start_heartbeat_thread()
-
-    assert guard._heartbeat_thread is not None
-    assert guard._heartbeat_thread.is_alive()
 
     # 外部删除租约，使下一次 touch 确凿返回 LOST
     guard.lease_file.unlink()
 
-    # 等待心跳线程感知并主动退出
-    guard._heartbeat_thread.join(timeout=1.5)
-    assert not guard._heartbeat_thread.is_alive()
-    guard.release()
+    outcome = guard.touch()
+    assert outcome == LeaseTouchOutcome.LOST
+    assert guard.is_held() is False
 
 
 def test_no_implicit_truthiness_on_touch_in_server_ast():

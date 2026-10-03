@@ -225,7 +225,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `schema_validator.py` | T3 | Six-field contract validation; physical feasibility lint gate (`draft_lint`) | No file writes; pure validation |
 | `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement; CAS TTL lease management (`manifest_lease`) | Single lock holder per task; lease expiration safety |
 | `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, unified async job state machine, tri-state union contract, 1KB non-terminal snapshot, raw_text projection, cancellation, log pin & retention quota | Durable atomic writes; memory-leak-free |
-| `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease daemon, cross-process peer liveness detection (`probe_peer`) | FileLock-backed; POSIX & Windows liveness |
+| `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease guard, TTL + generation CAS takeover, touch checkpoint contract | FileLock-backed; pure TTL timeout & generation CAS |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
 | `consultation.py` | T4 | `dev_reviewer_consult` guidance logic; `assert_read_only_sandbox`; `assemble_reviewer_context` | Read-only guard enforced before any context injection |
 | `reaper.py` | T4 | Session log GC (`gc_by_filename_order`) | **Zero-stat contract**: only `os.listdir` + `os.remove`; no `os.stat`/`os.path.exists` |
