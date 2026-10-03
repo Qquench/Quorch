@@ -382,7 +382,7 @@ def test_enforce_unified_log_quota_purges_legacy_first(tmp_path: Path):
 
     # Total counted logs = 5 legacy + 3 new = 8 logs.
     # Set keep=5 -> excess = 3. Oldest 3 legacy logs (1, 2, 3) must be purged.
-    pruned = enforce_unified_log_quota(tmp_path, keep=5)
+    pruned = enforce_unified_log_quota(tmp_path, keep=5, purge_legacy=True)
 
     assert len(pruned) == 3
     assert "latest-session_1.log" in pruned
@@ -416,7 +416,7 @@ def test_enforce_unified_log_quota_purges_new_format_when_legacy_exhausted(tmp_p
 
     # Total = 2 + 4 = 6. keep = 3 -> excess = 3.
     # Must purge 2 legacy logs, then 1 oldest new log (001).
-    pruned = enforce_unified_log_quota(tmp_path, keep=3)
+    pruned = enforce_unified_log_quota(tmp_path, keep=3, purge_legacy=True)
 
     assert len(pruned) == 3
     assert "latest-old_1.log" in pruned

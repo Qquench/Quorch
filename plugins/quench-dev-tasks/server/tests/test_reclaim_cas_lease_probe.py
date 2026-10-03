@@ -20,7 +20,7 @@ from project_config import (
     QuenchStackConfig,
     ReaperPolicyConfig,
 )
-from reaper import (
+from manifest_lease import (
     HealthVerdict,
     ProbeEvidence,
     probe_lease_health,

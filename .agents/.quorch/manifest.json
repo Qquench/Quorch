@@ -704,6 +704,17 @@
       "git_head_sha": "635c8e9ff555281b6c32d1282eaf77f151ca4a2c",
       "git_index_mtime": 1791024462.0601432,
       "released": true
+    },
+    "2026-10-03_v1.20_step07_session_log_single_domain_and_reaper_dismantle::1": {
+      "task_id": "2026-10-03_v1.20_step07_session_log_single_domain_and_reaper_dismantle::1",
+      "md_sha256": "efba2345cd56abf073ee950d064d3d627a474490b353a65237698879842f6924",
+      "generation": 1,
+      "holder_token": "token_1791033052826_5712",
+      "last_heartbeat_monotonic_ns": 23181750000000,
+      "last_heartbeat_wall_utc": "2026-10-03T13:25:11.084957+00:00",
+      "git_head_sha": "ad12d6b14b17640ed7e6313a7423e31590db62f6",
+      "git_index_mtime": 1791033449.7290902,
+      "released": true
     }
   }
 }

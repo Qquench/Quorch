@@ -17,7 +17,7 @@ from manifest import (
     MANIFEST_REL_PATH,
     atomic_replace_manifest,
 )
-from reaper import reclaim_stale_task
+from manifest_lease import reclaim_stale_task
 from server import dev_tasks_confirm, dev_tasks_reclaim
 from state_machine import (
     STATUS_CONFIRMED,

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -428,7 +427,7 @@ def enforce_unified_log_quota(
     protected_paths: frozenset[str] = frozenset(),
     max_deletions: int = 8,
     timeout_s: float = 0.05,
-    purge_legacy: bool | None = None,
+    purge_legacy: bool = False,
 ) -> QuotaResult:
     """Retain at most `keep` total log files across reviewer logs.
     Zero-stat GC invariant: candidate enumeration exclusively matches *.log (explicitly
@@ -449,17 +448,6 @@ def enforce_unified_log_quota(
         target_dir = os.path.abspath(log_dir)
         if not os.path.isdir(target_dir):
             return QuotaResult()
-
-        # Legacy test compatibility: test_log_naming specifically verifies legacy latest-*.log purging
-        if purge_legacy is None:
-            try:
-                frame = sys._getframe(1)
-                if "test_log_naming" in frame.f_code.co_filename:
-                    purge_legacy = True
-                else:
-                    purge_legacy = False
-            except Exception:
-                purge_legacy = False
 
         if purge_legacy:
             new_files = list_log_files(target_dir)

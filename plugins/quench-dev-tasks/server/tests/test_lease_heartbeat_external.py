@@ -22,8 +22,9 @@ from manifest_lease import (
     is_workspace_actively_modifying,
     touch_lease_heartbeat,
     extract_session_id_from_holder_token,
+    probe_lease_health,
+    HealthVerdict,
 )
-from reaper import probe_lease_health, HealthVerdict
 
 
 @pytest.fixture

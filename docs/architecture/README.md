@@ -228,8 +228,8 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease guard, TTL + generation CAS takeover, touch checkpoint contract | FileLock-backed; pure TTL timeout & generation CAS |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
 | `consultation.py` | T4 | `dev_reviewer_consult` guidance logic; `assert_read_only_sandbox`; `assemble_reviewer_context` | Read-only guard enforced before any context injection |
-| `reaper.py` | T4 | Session log GC (`gc_by_filename_order`) | **Zero-stat contract**: only `os.listdir` + `os.remove`; no `os.stat`/`os.path.exists` |
-| `log_naming.py` | T4 | Log file naming, rotation, zero-stat GC primitives | `_guarded_stat` path-whitelist; see `ci_incident_tracker_and_compatibility_guide.md` Case 6 |
+| `manifest_lease.py` | T3 | Lease management, liveness probing (`probe_lease_health`), and CAS stale task reclamation (`reclaim_stale_task`) | Strict lock ordering (Markdown -> Manifest); generation CAS |
+| `log_naming.py` | T4 | Reviewer log naming, rotation, and zero-stat GC primitives (`gc_by_filename_order`, `enforce_unified_log_quota`) | Zero-stat contract; strict slug sanitization; deterministic quota |
 | `path_guard.py` | T2 | Cross-platform path safety; traversal defenses | Called on every tool invocation involving file paths |
 | `project_config.py` | T2/T3 | `quench_stack.yaml` loading, validation, migration | Single parse per session; cached after first load |
 | `observability_policy.py` | T4 | Verdict sink policy; log rotation policy | Append-only verdicts; policy-driven, not hard-coded |

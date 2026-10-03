@@ -118,9 +118,9 @@ from manifest import (
 )
 
 try:
-    from .reaper import reclaim_stale_task
+    from .manifest_lease import reclaim_stale_task
 except (ImportError, ValueError):
-    from reaper import reclaim_stale_task
+    from manifest_lease import reclaim_stale_task
 
 mcp = FastMCP("quench-dev-tasks")
 
