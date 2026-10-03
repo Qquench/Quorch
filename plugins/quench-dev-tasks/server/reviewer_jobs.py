@@ -851,7 +851,7 @@ class ReviewerJobSupervisor:
         from consultation import sanitize_session_id
 
         session_id = sanitize_session_id(raw_session_id, max_len=128)
-        mode = req.get("mode", "critique")
+        mode = req.get("mode", "evaluate")
 
         if idempotency_key:
             job_id = validate_job_id(idempotency_key)
@@ -1166,7 +1166,20 @@ class ReviewerJobSupervisor:
                         res_dict = json.load(f)
                 except Exception:
                     pass
-            return project_terminal(record, res_dict)
+            term = project_terminal(record, res_dict)
+            if raw_text:
+                if term["state"] == JobState.COMPLETED.value:
+                    findings = (term.get("result") or {}).get("findings", "")
+                    return findings if findings is not None else ""
+                deg_reason = term.get("degraded_reason") or "unknown"
+                log_p = term.get("log_path") or ""
+                return (
+                    f"### [Reviewer Consultation Degraded]\n"
+                    f"- State: {term['state']}\n"
+                    f"- Degraded Reason: {deg_reason}\n"
+                    f"- Log: `{log_p}`\n"
+                )
+            return term
 
         # 非终态白名单投影
         elapsed = compute_elapsed_s(record)
@@ -1205,7 +1218,7 @@ class ReviewerJobSupervisor:
 
         if record.state in TERMINAL_STATES:
             # 终态幂等
-            return self.poll(job_id, session_id=session_id)
+            return self.poll(job_id, session_id=session_id, raw_text=False)
 
         with self._running_jobs_lock:
             handles = self._abort_handles.get(val_id)
@@ -1266,7 +1279,7 @@ class ReviewerJobSupervisor:
             except Exception:
                 pass
 
-        return self.poll(job_id, session_id=session_id)
+        return self.poll(job_id, session_id=session_id, raw_text=False)
 
     def reconcile_on_load(self) -> list[str]:
         """启动载入对账：

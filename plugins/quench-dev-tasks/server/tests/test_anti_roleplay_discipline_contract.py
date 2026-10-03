@@ -146,3 +146,31 @@ def test_degraded_card_literal_matches_implementation():
         degraded_reason=expected_literal,
     )
     assert sample_result.degraded_reason == expected_literal
+
+
+def test_inv3_degraded_poll_projection_enforces_anti_roleplay(tmp_path):
+    """断言 INV-3 协议铁律：degraded 终态投影不论 raw_text 如何，绝对严禁产出伪造审查 findings。"""
+    from reviewer_jobs import ReviewerJobSupervisor, JobState
+
+    ws = str(tmp_path)
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "anti_roleplay_sess"})
+
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.QUEUED,
+        JobState.FAILED,
+        updates={"degraded_reason": "reviewer_not_configured"},
+    )
+
+    # 1. raw_text=False: findings 必为空字符串
+    dict_res = supervisor.poll(rec.job_id, session_id="anti_roleplay_sess", raw_text=False)
+    assert dict_res["result"]["status"] == "degraded"
+    assert dict_res["result"]["findings"] == ""
+    assert dict_res["degraded_reason"] == "reviewer_not_configured"
+
+    # 2. raw_text=True: 必为降级卡片，绝非审查分析正文
+    text_res = supervisor.poll(rec.job_id, session_id="anti_roleplay_sess", raw_text=True)
+    assert "### [Reviewer Consultation Degraded]" in text_res
+    assert "reviewer_not_configured" in text_res

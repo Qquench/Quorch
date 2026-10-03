@@ -37,6 +37,10 @@ from reviewer_jobs import (
     project_poll_result,
     POLL_TERMINAL_FIELDS,
     POLL_NONTERMINAL_FIELDS,
+    POLL_TERMINAL_STATES,
+    PIN_RELEASABLE_STATES,
+    TERMINAL_STATES,
+    TERMINAL_RESULT_ALLOWED_FIELDS,
 )
 from workspace_lease import PeerLiveness, WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
 
@@ -280,7 +284,7 @@ def test_auth_cross_session_poll_rejected(tmp_path):
     rec = supervisor.submit({"query": "q", "session_id": "session_alpha"})
 
     # 同会话合法访问
-    res = supervisor.poll(rec.job_id, session_id="session_alpha")
+    res = supervisor.poll(rec.job_id, session_id="session_alpha", raw_text=False)
     assert res["job_id"] == rec.job_id
 
     # 跨会话越权访问被拒
@@ -328,8 +332,8 @@ def test_poll_raw_text_nonterminal_projection(tmp_path):
     assert "\n" not in res_str
 
 
-def test_poll_raw_text_terminal_projection_always_dict(tmp_path):
-    """RAW-TEXT: 终态不论 raw_text 取值，恒定返回完整结构化字典，保障机器审计与结果提取。"""
+def test_poll_raw_text_terminal_projection(tmp_path):
+    """RAW-TEXT: 终态 raw_text=True 直出 Markdown findings；raw_text=False 返回完整结构化字典。"""
     supervisor = ReviewerJobSupervisor(tmp_path)
     rec = supervisor.submit({"query": "q", "session_id": "term_raw_sess"})
 
@@ -346,12 +350,51 @@ def test_poll_raw_text_terminal_projection_always_dict(tmp_path):
         updates={"result_ref": str(res_path)},
     )
 
-    # 终态即使指定 raw_text=True 亦必须返回字典
-    res_terminal = supervisor.poll(rec.job_id, session_id="term_raw_sess", raw_text=True)
+    # 1. 终态 raw_text=True 直出 findings Markdown 纯文本
+    res_text = supervisor.poll(rec.job_id, session_id="term_raw_sess", raw_text=True)
+    assert res_text == "All clear"
+
+    # 2. supervisor 默认 raw_text=False 返回结构化字典以兼容内部调用
+    assert isinstance(supervisor.poll(rec.job_id, session_id="term_raw_sess"), dict)
+
+    # 3. raw_text=False 严格返回完整结构化字典
+    res_terminal = supervisor.poll(rec.job_id, session_id="term_raw_sess", raw_text=False)
     assert isinstance(res_terminal, dict)
     assert set(res_terminal.keys()) == POLL_TERMINAL_FIELDS
     assert res_terminal["state"] == "COMPLETED"
     assert res_terminal["result"]["verdict"] == "PASS"
+
+
+def test_poll_raw_text_degraded_terminal_projection(tmp_path):
+    """RAW-TEXT: 失败/取消/孤儿终态在 raw_text=True 时返回标准化降级卡（纯文本 Markdown，受 INV-3 约束）。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    rec = supervisor.submit({"query": "q", "session_id": "term_fail_sess"})
+
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.QUEUED,
+        JobState.FAILED,
+        updates={"degraded_reason": "network"},
+    )
+
+    res_text = supervisor.poll(rec.job_id, session_id="term_fail_sess", raw_text=True)
+    assert isinstance(res_text, str)
+    assert "### [Reviewer Consultation Degraded]" in res_text
+    assert "FAILED" in res_text
+    assert "network" in res_text
+
+
+def test_terminal_states_and_result_allowed_fields_convergence():
+    """RC-R2-01 / RC-REV-06: 状态集合收敛关系与终态结果白名单绝对边界。"""
+    assert TERMINAL_STATES <= {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED, JobState.ORPHANED}
+    assert POLL_TERMINAL_STATES == TERMINAL_STATES
+    assert PIN_RELEASABLE_STATES >= TERMINAL_STATES
+
+    # 反思维链泄露白名单
+    assert "reasoning" not in TERMINAL_RESULT_ALLOWED_FIELDS
+    assert "raw_reasoning" not in TERMINAL_RESULT_ALLOWED_FIELDS
+    assert "chain_of_thought" not in TERMINAL_RESULT_ALLOWED_FIELDS
 
 
 def test_dead_code_purged_no_mcp_push_no_tty():
@@ -382,7 +425,7 @@ def test_dead_code_purged_no_mcp_push_no_tty():
 
     # 3. 仅向 file_emit 通道写入持久化行
     assert len(emitted) == 1
-    assert "[progress] [Reviewer thinking: 10 tokens | 0.2s]" in emitted[0]
+    assert "[progress] [Reviewer thinking: 0.2s | 10 tokens]" in emitted[0]
 
 
 def test_heartbeat_single_line_projection_format():
@@ -401,7 +444,7 @@ def test_heartbeat_single_line_projection_format():
         ),
     )
     raw = project_poll_result(snapshot, raw_text=True)
-    assert raw == "[Reviewer thinking: 120 tokens | 12.4s]"
+    assert raw == "[Reviewer thinking: 12.4s | 120 tokens]"
 
     structured = project_poll_result(snapshot, raw_text=False)
     assert isinstance(structured, dict)

@@ -2819,7 +2819,7 @@ async def dev_reviewer_submit(
     workspace_root: str,
     query: str,
     context_files: list[str] | None = None,
-    mode: str = "critique",
+    mode: str = "evaluate",
     max_hops: int = 1,
     session_id: str | None = None,
     idempotency_key: str | None = None,
@@ -2891,13 +2891,13 @@ async def dev_reviewer_poll(
     job_id: str,
     session_id: str,
     wait_max_s: int = 0,
-    raw_text: bool = False,
+    raw_text: bool = True,
 ) -> Union[str, dict[str, Any]]:
     """Poll status or result of a background Reviewer task.
     Enforces 1KB non-terminal snapshot contract.
 
     轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。
-    支持 raw_text=True 纯文本单行无卡片极简输出与 wait_max_s 服务端长轮询。
+    支持 raw_text=True 纯文本单行心跳输出与终态直出 Markdown，支持 wait_max_s 服务端长轮询。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2919,9 +2919,12 @@ async def dev_reviewer_poll(
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-        is_terminal = isinstance(res, dict) and res.get("state") in {
-            s.value if hasattr(s, "value") else str(s) for s in TERMINAL_STATES
-        }
+        is_terminal = (
+            (isinstance(res, str) and not res.startswith("[Reviewer thinking:"))
+            or (isinstance(res, dict) and res.get("state") in {
+                s.value if hasattr(s, "value") else str(s) for s in TERMINAL_STATES
+            })
+        )
         if is_terminal or timeout_s == 0:
             return res
 
@@ -3099,7 +3102,7 @@ async def dev_reviewer_consult(
     max_wait_s = 175.0
     start_t = time.monotonic()
     while time.monotonic() - start_t < max_wait_s:
-        poll_res = supervisor.poll(record.job_id, session_id=clean_sid)
+        poll_res = supervisor.poll(record.job_id, session_id=clean_sid, raw_text=False)
         state = poll_res.get("state")
         if state in ("COMPLETED", "FAILED", "CANCELLED", "ORPHANED"):
             res_dict = poll_res.get("result")

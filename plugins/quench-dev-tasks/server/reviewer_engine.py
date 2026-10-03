@@ -846,9 +846,16 @@ class CoalescingTextSink:
 
 def format_heartbeat_line(tokens: int, elapsed_s: float) -> str:
     r"""Canonical heartbeat display line (SSOT).
-    Contract: MUST match r'^\[Reviewer thinking: \d+ tokens \| \d+\.\d+s\]$'
+    Contract regex (exact, escaped):
+        r'^\\[Reviewer thinking: \\d+\\.\\d+s \\| [\\d,]+ tokens\\]$'
     """
-    return f"[Reviewer thinking: {tokens} tokens | {elapsed_s:.1f}s]"
+    return f"[Reviewer thinking: {elapsed_s:.1f}s | {tokens:,} tokens]"
+
+
+def heartbeat_template_expect(tokens: int, elapsed_s: float) -> str:
+    """Canonical heartbeat string builder for round-trip testing."""
+    return f"[Reviewer thinking: {elapsed_s:.1f}s | {tokens:,} tokens]"
+
 
 
 class AdaptiveHeartbeatSink:
@@ -1068,39 +1075,67 @@ class CodeSlice:
     text: str                       # 头部含 "# file: <rel_path>:<start>-<end>" 锚点
 
 
+if sys.version_info < (3, 10):
+    raise RuntimeError("Quench Reviewer Engine requires Python 3.10+ for dataclass slots support")
+
+
+def mode_anchor_token_budget_proxy(anchor: str) -> tuple[int, int]:
+    """返回 (whitespace_token_count, utf8_byte_len)；双上限 200 / 1200。"""
+    tokens = len(anchor.split())
+    bytes_len = len(anchor.encode("utf-8"))
+    return tokens, bytes_len
+
+
 @dataclass(frozen=True, slots=True)
 class AssembledPrompt:
-    stable_prefix: str    # 段① (系统基准) + 段② (模式协议)
-    context_block: str    # 段③ (代码切片，纯相对路径无mtime)
-    dynamic_tail: str     # 段④ (提问与动态参数)
-    prefix_hash: str      # sha256(stable_prefix + "\x00" + context_block)[:16] (索引/断言用途)
+    static_system_prefix: str  # 段① (系统基准与输出协议，模式无关)
+    code_context_block: str    # 段② (规范化 POSIX 最大共享代码切片块)
+    mode_anchor: str           # 段③ (≤5行 / ≤200tok 尾置模式执行锚点)
+    dynamic_query: str         # 段④ (提问与动态参数)
+    prefix_hash: str           # sha256(static_system_prefix + "\x00" + code_context_block)[:16]
+
+    @property
+    def stable_prefix(self) -> str:
+        """向后兼容属性：返回静态系统前缀（段①）。"""
+        return self.static_system_prefix
+
+    @property
+    def context_block(self) -> str:
+        """向后兼容属性：返回代码切片块（段②）。"""
+        return self.code_context_block
+
+    @property
+    def dynamic_tail(self) -> str:
+        """向后兼容属性：返回模式锚点与提问（段③ + 段④）。"""
+        if self.mode_anchor:
+            return f"{self.mode_anchor}\n\n{self.dynamic_query}".strip()
+        return self.dynamic_query.strip()
 
 
 CONSULT_MODE_INSTRUCTIONS: dict[str, str] = {
+    "evaluate": (
+        "### Mode: Technical Trade-off Evaluation (A/B Matrix)\n"
+        "Assess architectural alternatives with objective cost-benefit trade-offs.\n"
+        "Weigh theoretical gains against operational complexity and failure modes.\n"
+        "Explicitly justify which design is preferred under given constraints."
+    ),
     "critique": (
         "### Mode: Architectural Critique (Red-Team Threat Modeling)\n"
-        "Your duty is to relentlessly challenge assumptions, uncover race conditions, identify single points of failure, "
-        "and scrutinize concurrency, persistence, and state invariants.\n"
-        "- Explicitly categorize each risk by severity (Critical / High / Medium / Low) with concrete trigger scenarios;\n"
-        "- FORBIDDEN: Stylistic or aesthetic preferences. Focus strictly on system correctness, reliability, and invariants."
-    ),
-    "evaluate": (
-        "### Mode: Technical Trade-off Evaluation (A/B Comparative Matrix)\n"
-        "Your duty is to provide an objective, multi-dimensional trade-off matrix for the architectural alternatives.\n"
-        "- Structure your assessment across: Theoretical Benefits / Operational & Engineering Costs / Latent Failure Modes / Rollback & Migration Path;\n"
-        "- Explicitly declare which design is favored under which operational conditions."
+        "Challenge assumptions, detect race conditions, and identify single points of failure.\n"
+        "Focus strictly on system correctness, reliability, and state invariants.\n"
+        "Pinpoint concrete defect locations and trigger scenarios; avoid stylistic opinions."
     ),
     "brainstorm": (
         "### Mode: Architectural Exploration & Brainstorming\n"
-        "Your duty is to explore divergent architectural approaches and innovative patterns to address the problem statement.\n"
-        "- For each proposed direction, annotate technical feasibility, key trade-offs, and a minimal proof-of-concept verification experiment;\n"
-        "- Keep solutions grounded in realistic constraints."
+        "Explore divergent approaches and novel architectural patterns for the problem.\n"
+        "Annotate technical feasibility, key trade-offs, and minimal proof-of-concept steps.\n"
+        "Keep proposed directions actionable and grounded in operational constraints."
     ),
     "audit": (
         "### Mode: Contract & Implementation Conformance Audit\n"
-        "Your duty is to conduct a strict, read-only audit between architectural specifications/contracts and current implementations.\n"
-        "- Enumerate explicit drift points, undocumented side effects, unhandled error conditions, and lifecycle violations;\n"
-        "- Provide line-anchored citations where deviations occur."
+        "Audit implementations against architectural specifications and contracts (read-only).\n"
+        "Enumerate concrete drift points, unhandled errors, and lifecycle violations.\n"
+        "Provide line-anchored citations where deviations occur."
     ),
 }
 
@@ -1211,19 +1246,23 @@ class PromptAssembler:
         mode: str,
         slices: Sequence[CodeSlice],
         query: str,
+        static_system_prefix: Optional[str] = None,
     ) -> AssembledPrompt:
         """组装四段式稳定性梯度咨询提示词。
         
-        拓扑顺序：
-        ①/②: 模式指引与格式协议 (会话稳定前缀)
-        ③: 按相对路径字典序排序的代码切片 (纯相对路径无 mtime)
+        拓扑顺序（§1.4.1 段序判定律）：
+        ①: 静态系统基准与通用输出协议 (模式无关系统级公共前缀)
+        ②: 规范化 POSIX 代码切片 (纯相对路径无 mtime，字典序稳定排序，跨模式最大共享块)
+        ③: 【尾置模式锚点】≤5行 / ≤200tok 纯英文证伪/权衡指引
         ④: 【绝对尾置】用户问题与动态参数
         """
-        # 段②: 模式指引与格式协议
-        instruction = CONSULT_MODE_INSTRUCTIONS.get(mode, CONSULT_MODE_INSTRUCTIONS["critique"])
-        stable_prefix = f"{instruction}\n\n{OUTPUT_PROTOCOLS}".strip()
+        # 段①: 静态系统基准与通用输出协议（跨模式恒定）
+        if static_system_prefix is None:
+            sys_prefix = OUTPUT_PROTOCOLS.strip()
+        else:
+            sys_prefix = static_system_prefix.strip()
 
-        # 段③: 代码切片按相对路径字典序与行号稳定排序，去绝对路径与 mtime，确保 Posix 相对路径
+        # 段②: 代码切片按 POSIX 相对路径字典序与行号稳定排序，去绝对路径与 mtime
         if slices:
             sorted_slices = sorted(
                 slices,
@@ -1233,20 +1272,25 @@ class PromptAssembler:
             for s in sorted_slices:
                 norm_text = s.text.strip().replace("\\", "/")
                 slice_blocks.append(f"```\n{norm_text}\n```")
-            context_block = "### Injected Code Context Slices\n" + "\n\n".join(slice_blocks)
+            code_context_block = "### Injected Code Context Slices\n" + "\n\n".join(slice_blocks)
         else:
-            context_block = ""
+            code_context_block = ""
+
+        # 段③: 尾置模式执行锚点（≤5行 / ≤200tok 纯英文）
+        instruction = CONSULT_MODE_INSTRUCTIONS.get(mode, CONSULT_MODE_INSTRUCTIONS["evaluate"])
+        mode_anchor = instruction.strip()
 
         # 段④: 绝对尾置动态 Query
-        dynamic_tail = f"### Consultation Query\n{query.strip()}"
+        dynamic_query = f"### Consultation Query\n{query.strip()}"
 
-        # 前缀哈希：索引与断言用途
-        prefix_hash = hashlib.sha256((stable_prefix + "\x00" + context_block).encode("utf-8")).hexdigest()[:16]
+        # 前缀哈希：仅计算 ①+②，保证跨模式前缀字节恒等，消除小段毒化大段
+        prefix_hash = hashlib.sha256((sys_prefix + "\x00" + code_context_block).encode("utf-8")).hexdigest()[:16]
 
         return AssembledPrompt(
-            stable_prefix=stable_prefix,
-            context_block=context_block,
-            dynamic_tail=dynamic_tail,
+            static_system_prefix=sys_prefix,
+            code_context_block=code_context_block,
+            mode_anchor=mode_anchor,
+            dynamic_query=dynamic_query,
             prefix_hash=prefix_hash,
         )
 
@@ -2027,6 +2071,8 @@ __all__ = [
     "ProgressSink",
     "RotatingFileSink",
     "format_heartbeat_line",
+    "heartbeat_template_expect",
+    "mode_anchor_token_budget_proxy",
     "AdaptiveHeartbeatSink",
     "CoalescingStats",
     "CoalescingTextSink",

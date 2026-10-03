@@ -60,17 +60,24 @@ def test_code_slice_backward_compatibility():
 
 
 def test_assembled_prompt_slots_structure():
-    """断言 AssembledPrompt 结构满足 frozen=True 且 slots=True。"""
+    """断言 AssembledPrompt 结构满足 frozen=True 且 slots=True，并支持向后兼容属性。"""
     ap = AssembledPrompt(
-        stable_prefix="prefix",
-        context_block="context",
-        dynamic_tail="tail",
+        static_system_prefix="prefix",
+        code_context_block="context",
+        mode_anchor="mode",
+        dynamic_query="query",
         prefix_hash="1234567890abcdef",
     )
+    assert ap.static_system_prefix == "prefix"
+    assert ap.code_context_block == "context"
+    assert ap.mode_anchor == "mode"
+    assert ap.dynamic_query == "query"
+    assert ap.prefix_hash == "1234567890abcdef"
+
+    # 向后兼容属性断言
     assert ap.stable_prefix == "prefix"
     assert ap.context_block == "context"
-    assert ap.dynamic_tail == "tail"
-    assert ap.prefix_hash == "1234567890abcdef"
+    assert ap.dynamic_tail == "mode\n\nquery"
 
     # AssembledPrompt 启用了 slots=True，因此默认无 __dict__
     assert not hasattr(ap, "__dict__")

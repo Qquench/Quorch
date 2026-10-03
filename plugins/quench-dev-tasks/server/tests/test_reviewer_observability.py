@@ -110,7 +110,7 @@ def test_adaptive_heartbeat_throttling():
     # First pulse at t=0
     heartbeat.on_heartbeat(tokens_so_far=100, elapsed_s=1.0)
     assert len(emitted_files) == 1
-    assert "[progress] [Reviewer thinking: 100 tokens | 1.0s]" in emitted_files[0]
+    assert "[progress] [Reviewer thinking: 1.0s | 100 tokens]" in emitted_files[0]
 
     # Second pulse immediately after (no time elapsed) -> throttled
     heartbeat.on_heartbeat(tokens_so_far=200, elapsed_s=1.1)
@@ -120,7 +120,7 @@ def test_adaptive_heartbeat_throttling():
     with patch("time.monotonic", return_value=time.monotonic() + 2.0):
         heartbeat.on_heartbeat(tokens_so_far=300, elapsed_s=3.0)
         assert len(emitted_files) == 2
-        assert "[progress] [Reviewer thinking: 300 tokens | 3.0s]" in emitted_files[1]
+        assert "[progress] [Reviewer thinking: 3.0s | 300 tokens]" in emitted_files[1]
 
 
 def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
@@ -142,7 +142,7 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
     )
     hb_mcp.on_heartbeat(tokens_so_far=50, elapsed_s=0.5)
     assert len(file_emitted1) == 1
-    assert "[progress] [Reviewer thinking: 50 tokens | 0.5s]" in file_emitted1[0]
+    assert "[progress] [Reviewer thinking: 0.5s | 50 tokens]" in file_emitted1[0]
     assert fake_stderr1.getvalue() == ""
 
     # 2. State: interactive terminal -> 遵循纯拉模型，stderr 零字符污染
@@ -158,7 +158,7 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
     hb_tty.on_heartbeat(tokens_so_far=60, elapsed_s=0.6)
     assert fake_stderr2.getvalue() == ""
     assert len(file_emitted2) == 1
-    assert "[progress] [Reviewer thinking: 60 tokens | 0.6s]" in file_emitted2[0]
+    assert "[progress] [Reviewer thinking: 0.6s | 60 tokens]" in file_emitted2[0]
 
     # 3. State: no_ctx_no_tty (后台非 TTY 管道，无 MCP 上下文) -> FILE 常驻兜底，永不静默
     fake_stderr3 = io.StringIO()
@@ -173,7 +173,7 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
     hb_silent_stderr.on_heartbeat(tokens_so_far=70, elapsed_s=0.7)
     assert fake_stderr3.getvalue() == ""
     assert len(file_emitted3) == 1
-    assert "[progress] [Reviewer thinking: 70 tokens | 0.7s]" in file_emitted3[0]
+    assert "[progress] [Reviewer thinking: 0.7s | 70 tokens]" in file_emitted3[0]
 
     # 4. 全局零 stdout 污染核验
     captured = capfd.readouterr()

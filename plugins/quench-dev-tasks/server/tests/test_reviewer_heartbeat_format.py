@@ -20,24 +20,25 @@ SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
-from reviewer_engine import AdaptiveHeartbeatSink, format_heartbeat_line
+from reviewer_engine import AdaptiveHeartbeatSink, format_heartbeat_line, heartbeat_template_expect
 
-CANONICAL_HEARTBEAT_PATTERN = re.compile(r"^\[Reviewer thinking: \d+ tokens \| \d+\.\d+s\]$")
+CANONICAL_HEARTBEAT_PATTERN = re.compile(r"^\[Reviewer thinking: \d+\.\d+s \| [\d,]+ tokens\]$")
 CJK_CHAR_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 
 
 def test_canonical_heartbeat_format_regex_contract():
-    """format_heartbeat_line MUST strictly match the canonical regex contract."""
+    """format_heartbeat_line MUST strictly match the canonical regex contract and template expect."""
     test_cases = [
-        (0, 0.0, "[Reviewer thinking: 0 tokens | 0.0s]"),
-        (42, 1.23, "[Reviewer thinking: 42 tokens | 1.2s]"),
-        (250, 5.0, "[Reviewer thinking: 250 tokens | 5.0s]"),
-        (1048576, 3600.49, "[Reviewer thinking: 1048576 tokens | 3600.5s]"),
+        (0, 0.0, "[Reviewer thinking: 0.0s | 0 tokens]"),
+        (42, 1.23, "[Reviewer thinking: 1.2s | 42 tokens]"),
+        (250, 5.0, "[Reviewer thinking: 5.0s | 250 tokens]"),
+        (1048576, 3600.49, "[Reviewer thinking: 3600.5s | 1,048,576 tokens]"),
     ]
 
     for tokens, elapsed_s, expected in test_cases:
         actual = format_heartbeat_line(tokens, elapsed_s)
         assert actual == expected, f"Expected {expected!r}, got {actual!r}"
+        assert actual == heartbeat_template_expect(tokens, elapsed_s)
         assert CANONICAL_HEARTBEAT_PATTERN.match(actual), (
             f"Heartbeat line {actual!r} does not match canonical pattern {CANONICAL_HEARTBEAT_PATTERN.pattern}"
         )

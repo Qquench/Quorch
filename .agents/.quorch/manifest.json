@@ -685,14 +685,14 @@
     },
     "2026-10-03_v1.20_step05_reviewer_jobs_convergence::5.0": {
       "task_id": "2026-10-03_v1.20_step05_reviewer_jobs_convergence::5.0",
-      "md_sha256": "25e963ef288dd93ce7303cc6503c3fc3a468f73309ba3900130d6f5672e4e2cd",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 2188062000000,
-      "last_heartbeat_wall_utc": "2026-10-03T07:35:17.395582+00:00",
-      "git_head_sha": "2b0cb09ae45659467063bd737b9b9d5616261a25",
-      "git_index_mtime": 1791011953.5488384,
-      "released": false
+      "md_sha256": "f236cdd68fcf6271fad8937b4d08b18fb54d677e98c3267c03367e062bf42566",
+      "generation": 1,
+      "holder_token": "token_1791013888301_5712",
+      "last_heartbeat_monotonic_ns": 13549968000000,
+      "last_heartbeat_wall_utc": "2026-10-03T10:44:39.302693+00:00",
+      "git_head_sha": "b53c358872257c199345d222433c68faf98c7720",
+      "git_index_mtime": 1791013817.497559,
+      "released": true
     }
   }
 }

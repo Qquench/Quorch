@@ -179,12 +179,12 @@ Quench establishes a unified asynchronous Reviewer execution path, converging al
                            │
        ┌───────────────────┴───────────────────┐
        ▼ (in-flight)                           ▼ (terminal)
-dev_reviewer_poll(raw_text=True)        dev_reviewer_poll()
-[Reviewer thinking: 1,234 tokens|12.3s]  Full structured verdict
-(Zero JSON popup, 1KB bounded snapshot) (40k char budget cap)
+dev_reviewer_poll()                     dev_reviewer_poll(raw_text=False)
+[Reviewer thinking: 12.3s | 1,234 tokens] Full structured verdict
+(Direct Markdown or 1KB snapshot)        (40k char budget cap dict)
 ```
 
-- **Clean Raw-Text Projection**: Non-terminal poll calls with `raw_text=True` return a canonical single-line string (`[Reviewer thinking: ... tokens | ...s]`), eliminating JSON code-card clutter in IDE chat windows.
+- **Clean Raw-Text Projection**: `dev_reviewer_poll` defaults to `raw_text=True`, returning a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returning findings Markdown (or standardized degradation card) upon completion, eliminating JSON code-card clutter in IDE chat windows. Setting `raw_text=False` returns the full structured verdict dictionary.
 - **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
 - **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops.
 

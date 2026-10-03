@@ -38,7 +38,7 @@ def test_heartbeat_first_pulse_immediate_or_low_latency():
     assert len(emitted) == 1
     assert len(progress_calls) == 1
     assert progress_calls[0] == (10, 0.2)
-    assert "[Reviewer thinking: 10 tokens | 0.2s]" in emitted[0]
+    assert "[Reviewer thinking: 0.2s | 10 tokens]" in emitted[0]
 
 
 def test_heartbeat_event_gating_suppresses_redundancy():
@@ -70,13 +70,13 @@ def test_heartbeat_event_gating_suppresses_redundancy():
     curr_time = 1003.5
     sink.on_heartbeat(tokens_so_far=150, elapsed_s=3.6)
     assert len(emitted) == 2  # 有进展立即发射！
-    assert "[Reviewer thinking: 150 tokens | 3.6s]" in emitted[1]
+    assert "[Reviewer thinking: 3.6s | 150 tokens]" in emitted[1]
 
     # 5. 再次停滞 5.1 秒（超过保活底线 5.0s），即使 token 没变也必须触发保活心跳
     curr_time = 1008.7
     sink.on_heartbeat(tokens_so_far=150, elapsed_s=8.8)
     assert len(emitted) == 3  # keepalive 触发
-    assert "[Reviewer thinking: 150 tokens | 8.8s]" in emitted[2]
+    assert "[Reviewer thinking: 8.8s | 150 tokens]" in emitted[2]
 
 
 @pytest.mark.anyio
@@ -96,7 +96,7 @@ async def test_heartbeat_async_progress_emit_and_exception_swallow():
     # 抛出异常不应中断 apulse
     await sink.apulse(tokens_so_far=42, elapsed_s=0.5)
     assert len(emitted) == 1
-    assert "[Reviewer thinking: 42 tokens | 0.5s]" in emitted[0]
+    assert "[Reviewer thinking: 0.5s | 42 tokens]" in emitted[0]
 
 
 @pytest.mark.anyio
@@ -119,7 +119,7 @@ async def test_heartbeat_fastmcp_ctx_integration():
     mock_ctx.report_progress.assert_awaited_once_with(
         progress=200.0,
         total=None,
-        message="[Reviewer thinking: 200 tokens | 1.2s]",
+        message="[Reviewer thinking: 1.2s | 200 tokens]",
     )
 
 

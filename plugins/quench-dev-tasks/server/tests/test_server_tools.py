@@ -5,6 +5,7 @@ import tempfile
 import pytest
 import yaml
 
+import server
 from server import (
     dev_tasks_status,
     dev_tasks_propose,
@@ -15,6 +16,9 @@ from server import (
     dev_tasks_archive,
     dev_tasks_set_bypass,
     dev_tasks_export_handoff_card,
+    dev_reviewer_submit,
+    dev_reviewer_poll,
+    dev_reviewer_cancel,
 )
 
 @pytest.fixture
@@ -376,6 +380,9 @@ def test_registered_tools_count_and_list():
         "dev_tasks_set_bypass",
         "dev_tasks_export_handoff_card",
         "dev_reviewer_consult",
+        "dev_reviewer_submit",
+        "dev_reviewer_poll",
+        "dev_reviewer_cancel",
     ]
     for exp in expected_tools:
         assert exp in tool_names, f"Missing registered tool: {exp}"
@@ -383,7 +390,77 @@ def test_registered_tools_count_and_list():
     # 核心 dev_tasks_* 前缀工具总数
     dev_task_tools = [t for t in tool_names if t.startswith("dev_tasks_")]
     assert len(dev_task_tools) >= 12
-    assert len(tools) >= 12
+    assert len(tools) >= 15
+
+
+def test_reviewer_tools_signature_defaults_and_contracts():
+    """断言 dev_reviewer_submit 默认 mode='evaluate'，dev_reviewer_poll 默认 raw_text=True。"""
+    import inspect
+    sig_submit = inspect.signature(server.dev_reviewer_submit)
+    assert sig_submit.parameters["mode"].default == "evaluate"
+
+    sig_poll = inspect.signature(server.dev_reviewer_poll)
+    assert sig_poll.parameters["raw_text"].default is True
+
+
+@pytest.mark.anyio
+async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
+    """断言 dev_reviewer_poll 在终态时 raw_text=True 直出 Markdown，raw_text=False 返回契约 dict。"""
+    from reviewer_jobs import ReviewerJobSupervisor, JobState, _durable_write_json, POLL_TERMINAL_FIELDS
+
+    ws = str(tmp_path)
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "poll_tool_test"})
+
+    # 1. 非终态默认 raw_text=True 返回心跳字符串
+    non_term_res = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="poll_tool_test",
+    )
+    assert isinstance(non_term_res, str)
+    assert non_term_res.startswith("[Reviewer thinking:")
+
+    # 2. 非终态显式 raw_text=False 返回 6 字段字典
+    non_term_dict = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="poll_tool_test",
+        raw_text=False,
+    )
+    assert isinstance(non_term_dict, dict)
+    assert non_term_dict["state"] == "QUEUED"
+
+    # 3. 终态 COMPLETED: 默认 raw_text=True 直接返回 Markdown findings
+    res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
+    _durable_write_json(res_path, {"verdict": "PASS", "findings": "### Strategic Finding\n- All good.", "usage": {"total_tokens": 120}})
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.QUEUED,
+        JobState.COMPLETED,
+        updates={"result_ref": str(res_path)},
+    )
+
+    term_res_text = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="poll_tool_test",
+    )
+    assert term_res_text == "### Strategic Finding\n- All good."
+
+    # 4. 终态 COMPLETED: raw_text=False 严格返回完整结构化字典，且绝无 reasoning 泄露
+    term_res_dict = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="poll_tool_test",
+        raw_text=False,
+    )
+    assert isinstance(term_res_dict, dict)
+    assert set(term_res_dict.keys()) == POLL_TERMINAL_FIELDS
+    assert term_res_dict["state"] == "COMPLETED"
+    assert "reasoning" not in term_res_dict["result"]
+    assert "raw_reasoning" not in term_res_dict["result"]
 
 
 
