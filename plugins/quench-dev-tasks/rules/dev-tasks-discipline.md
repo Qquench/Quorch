@@ -1,28 +1,22 @@
 # Quench Dev-Tasks Resident Discipline (开发任务常驻执行纪律)
 
-As an AI coding assistant operating within the Quench governance framework, you MUST strictly adhere to the following resident discipline tiers:  
-（作为在 Quench 架构体系下工作的 AI 编程助手，你必须严格遵循以下三层纪律约束：）
+As an AI coding assistant operating within the Quench governance framework, you MUST strictly adhere to the following resident discipline tiers:
 
 ---
 
 ## 1. State Machine Progression Discipline (状态机推进纪律)
 
-- **Strictly Advance via MCP Tools / 严禁手动编辑状态 Emoji**：Task state transitions (e.g., from `[Pending] / ⬜ 待确认` to `[Confirmed] / ✅ 已确认`, or `[Confirmed]` to `[In Progress] / 🔨 执行中` and `[Completed] / ✔️ 已完成`) **MUST strictly be driven via quench-dev-tasks MCP Tools** (`dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_escalate`). Direct manual text replacement of task markdown status icons is prohibited.  
-  （任务状态的流转必须严格调用 MCP Tools，不得通过 `replace_file_content` 或 `write_to_file` 手动篡改任务 Markdown 文件的状态图标。）
-- **Single Active Task Serial Execution / 单核串行施工原则**：Globally, **only ONE task is permitted to be in `[In Progress] / 🔨 执行中` state at any given moment**. Before starting a new task, the active task must first be marked as `[Completed] / ✔️ 已完成` (with full DoD tests passing) or transitioned to `[Rework] / 🔄 需返工` / `[Confirmed] / ✅ 已确认`.  
-  （同一时间内，只能有一个任务处于 `🔨 执行中` 状态。未领单严禁动源码 / 在未检出任务前不得修改代码。）
-- **Session Startup Self-Check / 会话启动自检**：At the start of every new conversation or development session, the immediate mandatory action is to invoke `dev_tasks_status` to inspect the project task landscape.  
-  （在新会话或新一轮开发启动时，首要动作是调用 `dev_tasks_status` 了解当前项目任务全景。）
+- **Strictly Advance via MCP Tools / 严禁手动编辑状态 Emoji**：Task state transitions (e.g., from `[Pending] / ⬜ 待确认` to `[Confirmed] / ✅ 已确认`, or `[Confirmed]` to `[In Progress] / 🔨 执行中` and `[Completed] / ✔️ 已完成`) **MUST strictly be driven via quench-dev-tasks MCP Tools** (`dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_escalate`). Direct manual text replacement of task markdown status icons is prohibited.
+- **Single Active Task Serial Execution / 单核串行施工原则**：Globally, **only ONE task is permitted to be in `[In Progress] / 🔨 执行中` state at any given moment**. Before starting a new task, the active task must first be marked as `[Completed] / ✔️ 已完成` (with full DoD tests passing) or transitioned to `[Rework] / 🔄 需返工` / `[Confirmed] / ✅ 已确认`.
+- **Session Startup Self-Check / 会话启动自检**：At the start of every new conversation or development session, the immediate mandatory action is to invoke `dev_tasks_status` to inspect the project task landscape.
 
 ---
 
 ## 2. Implementation Scope Discipline (执行阶段纪律)
 
-- **Strict Adherence to Whitelist / 严格遵循【涉及文件】清单**：When making code modifications, you may only touch files explicitly listed under `[Affected Files] / 【涉及文件】` of the currently active `[In Progress] / 🔨 执行中` task.  
-  （进行代码修改时，只能触碰当前 `🔨 执行中` 任务中【涉及文件】清单内列出的文件。）
+- **Strict Adherence to Whitelist / 严格遵循【涉及文件】清单**：When making code modifications, you may only touch files explicitly listed under `[Affected Files] / 【涉及文件】` of the currently active `[In Progress] / 🔨 执行中` task (governed whitelist: `【涉及文件】`).
 - **Physical Interception & Explicit Approval / 物理拦截与例外确认**：Any tool call attempting to modify an out-of-scope file triggers a PreToolUse physical hook intercept. If modifications outside the whitelist are genuinely required, detail the rationale in the tool call `Description` and wait for explicit human authorization.
-- **Mandatory Test Assertions / 改逻辑必加单测断言**：Any task modifying core business logic, algorithms, or API contracts MUST include or update accompanying unit test assertions in the test directory, validated via `[DoD Verification Commands] / 【DoD 验证命令】`.  
-  （凡是修改核心业务逻辑、算法或接口行为，必须在测试目录追加单测断言，杜绝功能回归。）
+- **Mandatory Test Assertions / 改逻辑必加单测断言**：Any task modifying core business logic, algorithms, or API contracts MUST include or update accompanying unit test assertions in the test directory, validated via `[DoD Verification Commands] / 【DoD 验证命令】`.
 - **Preserve Architecture & Comments / 保持代码风格与注释完整**：Preserve existing architectural explanations, design rationale, and docstrings. Strictly respect engineering constraints defined in the workspace `.agents/quench_stack.yaml`.
 
 ---

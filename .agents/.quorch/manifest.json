@@ -638,6 +638,17 @@
       "git_head_sha": "60bfffeaa4455c3190b9254c953c4e20c2c9a6ba",
       "git_index_mtime": 1790995402.469012,
       "released": true
+    },
+    "2026-10-03_v1.20_step03_rule_doc_dedup::3.0": {
+      "task_id": "2026-10-03_v1.20_step03_rule_doc_dedup::3.0",
+      "md_sha256": "0e2df8adccf7658abcb200206ac85803e459a8ea428fe6f6f1cf6556bee9374a",
+      "generation": 1,
+      "holder_token": "token_1790998539853_23576",
+      "last_heartbeat_monotonic_ns": 1223448000000000,
+      "last_heartbeat_wall_utc": "2026-10-03T04:07:52.303685+00:00",
+      "git_head_sha": "4b5149d5ba068fa0a20b44aef23cbcf214257288",
+      "git_index_mtime": 1791000376.5422378,
+      "released": true
     }
   }
 }
