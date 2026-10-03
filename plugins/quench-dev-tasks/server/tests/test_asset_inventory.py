@@ -30,6 +30,9 @@ from asset_inventory import (  # noqa: E402
     MAX_SCANNED_FILE_BYTES,
     MUST_NOT_REMOVE_SYMBOLS,
     OUTPUT_MD_REL,
+    DOC_NON_CONSUMER_PREFIXES,
+    DOC_ROOT_RELS,
+    _is_non_consumer_doc,
     ConsumerEdge,
     InventoryReport,
     ModuleNode,
@@ -296,3 +299,80 @@ def test_14_time_drift_telemetry_decoupling(tmp_path: Path):
             v_path.write_bytes(original_verdicts)
         elif v_path.is_file():
             v_path.unlink()
+
+
+def test_doc_non_consumer_prefixes_subset_of_doc_roots():
+    """R2 SSOT 不变量断言：DOC_NON_CONSUMER_PREFIXES 的每一项必须从属于 DOC_ROOT_RELS 中某一项。"""
+    from pathlib import PurePosixPath
+
+    assert len(DOC_NON_CONSUMER_PREFIXES) > 0, "DOC_NON_CONSUMER_PREFIXES must not be empty"
+    for prefix_str in DOC_NON_CONSUMER_PREFIXES:
+        p = PurePosixPath(prefix_str)
+        matched = False
+        for root_str in DOC_ROOT_RELS:
+            r = PurePosixPath(root_str)
+            if p == r or r in p.parents:
+                matched = True
+                break
+        assert matched, f"Prefix '{prefix_str}' does not belong to any DOC_ROOT_RELS: {DOC_ROOT_RELS}"
+
+
+def test_asset_inventory_ignores_dev_tasks(tmp_path: Path):
+    """R1/R3 Hermetic 单测：tmp_path 合成仓库，断言 docs/dev_tasks 彻底排除且不误伤正常 docs/ 文档。"""
+    from pathlib import PurePosixPath
+
+    # 1. 验证 _is_non_consumer_doc 的目录分量隔离语义（R1：防误吞 docs/dev_tasks_* 兄弟路径）
+    assert _is_non_consumer_doc("docs/dev_tasks/test_task.md") is True
+    assert _is_non_consumer_doc("docs/dev_tasks/archive/old_task.md") is True
+    assert _is_non_consumer_doc("docs/dev_tasks_archive/other.md") is False
+    assert _is_non_consumer_doc("docs/architecture/README.md") is False
+    assert _is_non_consumer_doc("README.md") is False
+
+    # 2. 合成最小 hermetic 仓库
+    fake_repo = tmp_path / "fake_repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").mkdir()
+    agents_dir = fake_repo / ".agents"
+    agents_dir.mkdir()
+    (agents_dir / "quench_stack.yaml").write_text("config_version: 1\n", encoding="utf-8")
+
+    server_dir = fake_repo / "plugins/quench-dev-tasks/server"
+    server_dir.mkdir(parents=True)
+    foo_py = server_dir / "foo.py"
+    foo_py.write_text(
+        "SYMBOL_DEV_TASK_TARGET = 100\n"
+        "SYMBOL_ARCH_DOC_TARGET = 200\n",
+        encoding="utf-8",
+    )
+
+    dev_tasks_dir = fake_repo / "docs/dev_tasks"
+    dev_tasks_dir.mkdir(parents=True)
+    task_file = dev_tasks_dir / "2026-10-03_test_task.md"
+    task_file.write_text(
+        "# Task\nMentions SYMBOL_DEV_TASK_TARGET here in task spec.\n",
+        encoding="utf-8",
+    )
+
+    arch_dir = fake_repo / "docs/architecture"
+    arch_dir.mkdir(parents=True)
+    arch_file = arch_dir / "system_arch.md"
+    arch_file.write_text(
+        "# Arch\nMentions SYMBOL_ARCH_DOC_TARGET in architecture design.\n",
+        encoding="utf-8",
+    )
+
+    # 3. 扫描并构建消费者图谱
+    nodes = scan_modules(server_dir, repo_root=fake_repo)
+    edges = build_consumer_graph(nodes, repo_root=fake_repo)
+
+    edge_map = {e.symbol: e for e in edges}
+    assert "SYMBOL_DEV_TASK_TARGET" in edge_map
+    assert "SYMBOL_ARCH_DOC_TARGET" in edge_map
+
+    # 断言 SYMBOL_DEV_TASK_TARGET 的 doc_refs 为空（docs/dev_tasks 被彻底忽略）
+    assert edge_map["SYMBOL_DEV_TASK_TARGET"].doc_refs == (), (
+        f"docs/dev_tasks was not ignored: {edge_map['SYMBOL_DEV_TASK_TARGET'].doc_refs}"
+    )
+
+    # 断言 SYMBOL_ARCH_DOC_TARGET 的 doc_refs 正常捕获（docs/architecture 未被误伤）
+    assert "docs/architecture/system_arch.md" in edge_map["SYMBOL_ARCH_DOC_TARGET"].doc_refs

@@ -14,7 +14,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Final, Mapping, Sequence
 
@@ -45,6 +45,20 @@ DOC_ROOT_RELS: Final[tuple[str, ...]] = (
     "CHANGELOG.md",
     "dev_tasks_mcp_specification.md",
 )
+DOC_NON_CONSUMER_PREFIXES: Final[tuple[str, ...]] = ("docs/dev_tasks",)
+
+
+def _is_non_consumer_doc(rel_posix: str) -> bool:
+    """判定文档相对路径是否属于非消费者文档（目录分量语义，PurePosixPath）。
+
+    严禁使用裸字符串 startswith，防止误吞 docs/dev_tasks_* 等兄弟路径。
+    """
+    p = PurePosixPath(rel_posix)
+    for prefix_str in DOC_NON_CONSUMER_PREFIXES:
+        prefix = PurePosixPath(prefix_str)
+        if p == prefix or prefix in p.parents:
+            return True
+    return False
 
 MAX_SCANNED_FILE_BYTES: Final[int] = 1_000_000
 SKIP_DIR_NAMES: Final[frozenset[str]] = frozenset(
@@ -385,6 +399,8 @@ def build_consumer_graph(
             elif any(
                 rel_posix == dr or rel_posix.startswith(dr + "/") for dr in DOC_ROOT_RELS
             ):
+                if _is_non_consumer_doc(rel_posix):
+                    continue
                 try:
                     doc_texts[rel_posix] = target.read_text(encoding="utf-8")
                 except Exception:
