@@ -36,6 +36,8 @@ governance_scope:
     - "*.md"
 
 schema_version: "1.0"
+# 配置规范版本（整数，用于调度编排内核版本门禁与向前兼容迁移；与元数据清单的 schema_version 相互解耦）
+config_version: 1
 
 reviewer_engine:
   provider: "deepseek"

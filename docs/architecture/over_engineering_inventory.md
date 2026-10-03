@@ -24,7 +24,7 @@
 
 ---
 
-## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 95 项)
+## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 100 项)
 
 | 符号 | 定义模块 |
 | :--- | :--- |
@@ -95,12 +95,17 @@
 | `DEFAULT_MAX_TOTAL_INJECTION_CHARS` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `DEFAULT_UNMANAGED_DIRS` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `DEFAULT_WINDOW_LINES` | `plugins/quench-dev-tasks/server/project_config.py` |
+| `KNOWN_TOP_LEVEL_KEYS` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `MAX_LINES_PER_SLICE` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `MAX_TOTAL_INJECTION_CHARS_UPPER` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `MIN_TOTAL_INJECTION_CHARS` | `plugins/quench-dev-tasks/server/project_config.py` |
+| `PROTECTED_CONFIG_NAMES` | `plugins/quench-dev-tasks/server/project_config.py` |
+| `_DEFAULT_CONFIG_VERSION_PATCH` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `_SEEN_DEPRECATED_PROVIDERS` | `plugins/quench-dev-tasks/server/project_config.py` |
+| `_build_quench_stack_config` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `_calculate_shannon_entropy` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `_deep_merge_dict` | `plugins/quench-dev-tasks/server/project_config.py` |
+| `_derive_safety_key_domains` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `_match_glob` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `_evaluate_affected_files_mtime` | `plugins/quench-dev-tasks/server/reaper.py` |
 | `_extract_affected_files_from_task` | `plugins/quench-dev-tasks/server/reaper.py` |
@@ -147,7 +152,7 @@
 | `plugins/quench-dev-tasks/server/manifest_lease.py` | 5 | 7 | 9 |
 | `plugins/quench-dev-tasks/server/observability_policy.py` | 7 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/path_guard.py` | 13 | 9 | 5 |
-| `plugins/quench-dev-tasks/server/project_config.py` | 44 | 16 | 15 |
+| `plugins/quench-dev-tasks/server/project_config.py` | 54 | 18 | 17 |
 | `plugins/quench-dev-tasks/server/reaper.py` | 6 | 15 | 20 |
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 47 | 28 | 33 |
 | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 33 | 23 | 41 |
@@ -158,7 +163,7 @@
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 414 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 424 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -364,13 +369,15 @@
 | `is_within_whitelist` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/manifest.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md`, `docs/dev_tasks/archive/2026-09-24_v1.08_step01_probe_and_scope_reconciliation.md` |
 | `sanitize_workspace_path` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/schema_validator.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_path_guard.py` | `docs/ci_incident_tracker_and_compatibility_guide.md`, `docs/dev_tasks/archive/2026-09-23_cross_platform_path_guard.md` |
 | `to_workspace_relative_path` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_path_guard.py` | `docs/dev_tasks/archive/2026-09-23_cross_platform_path_guard.md` |
-| `AuditGatePolicy` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `CHANGELOG.md`, `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md` |
+| `AuditGatePolicy` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `CHANGELOG.md`, `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `AuditGateReason` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md` |
 | `AuditGateResult` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md` |
 | `CRITICAL_CODE_MANIFESTS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | `docs/dev_tasks/archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md` |
 | `CRITICAL_CODE_MANIFEST_PATTERNS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config.py` | `docs/dev_tasks/archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md` |
+| `CURRENT_CONFIG_VERSION` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md` |
 | `CURRENT_SCHEMA_VERSION` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_config_migration.py` | `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md` |
-| `ConfigError` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config.py` | `CHANGELOG.md`, `docs/dev_tasks/archive/2026-09-24_v1.07_step02_decoupling_and_handoff.md`, `docs/dev_tasks/archive/2026-09-30_bilingual_error_messages.md` |
+| `ConfigError` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config.py`, `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `CHANGELOG.md`, `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md`, `docs/dev_tasks/archive/2026-09-24_v1.07_step02_decoupling_and_handoff.md`, `docs/dev_tasks/archive/2026-09-30_bilingual_error_messages.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `ConfigFault` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md` |
 | `DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `DEFAULT_MAX_TOTAL_INJECTION_CHARS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
@@ -378,23 +385,29 @@
 | `DEFAULT_UNMANAGED_EXTENSIONS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config.py` | `docs/dev_tasks/archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md` |
 | `DEFAULT_WINDOW_LINES` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `DispatchStrategy` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md` |
+| `KNOWN_TOP_LEVEL_KEYS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `MAX_LINES_PER_SLICE` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `MAX_TOTAL_INJECTION_CHARS_UPPER` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `MIN_TOTAL_INJECTION_CHARS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `ObservabilityConfig` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
+| `PROTECTED_CONFIG_NAMES` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `PROVIDER_ALIASES` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py` | `docs/dev_tasks/archive/2026-09-21_stage5_vendor_neutrality_and_consultation.md`, `docs/dev_tasks/archive/2026-09-30_remove_vendor_presets.md` |
 | `PROVIDER_PRESETS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/dev_tasks/archive/2026-09-21_stage5_vendor_neutrality_and_consultation.md`, `docs/dev_tasks/archive/2026-09-30_remove_vendor_presets.md`, `docs/dev_tasks/archive/2026-10-01_ci_fix_reviewer_client_available.md`, `docs/roadmap/README.md`, `docs/roadmap/archive/v1.05_vendor_neutral_reviewer_and_adhoc_consultation.md`, `docs/roadmap/plan_cost_efficiency_and_governance_hardening.md` |
 | `ProviderPreset` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py` | `docs/dev_tasks/archive/2026-09-21_stage5_vendor_neutrality_and_consultation.md`, `docs/dev_tasks/archive/2026-09-30_remove_vendor_presets.md` |
-| `QuenchStackConfig` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/reviewer_engine.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_multihop.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_project_config.py`, `plugins/quench-dev-tasks/server/tests/test_reaper.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_consult.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_engine.py`, `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `docs/dev_tasks/archive/2026-09-11_plugin_development.md`, `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`, `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md`, `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md` |
+| `QuenchStackConfig` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/reviewer_engine.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_multihop.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_project_config.py`, `plugins/quench-dev-tasks/server/tests/test_reaper.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_consult.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_engine.py`, `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md`, `docs/dev_tasks/archive/2026-09-11_plugin_development.md`, `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`, `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md`, `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md` |
 | `ReaperPolicyConfig` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reaper.py` | `docs/dev_tasks/archive/2026-09-23_v1.06_step02_smart_reaper_and_lease_governance.md` |
 | `ReviewerEngineConfig` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/reviewer_engine.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_multihop.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_consult.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_engine.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py`, `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `CHANGELOG.md`, `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md`, `docs/dev_tasks/archive/2026-09-21_stage5_vendor_neutrality_and_consultation.md`, `docs/dev_tasks/archive/2026-10-01_ci_fix_reviewer_client_available.md`, `docs/dev_tasks/archive/2026-10-01_fix_reviewer_observability_mock_url.md`, `docs/roadmap/archive/v1.05_vendor_neutral_reviewer_and_adhoc_consultation.md` |
 | `RunnerProfile` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/consultation.py` | `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py` | `docs/dev_tasks/archive/2026-09-24_v1.07_step02_decoupling_and_handoff.md`, `docs/roadmap/archive/v1.07_architecture_doc_integrity_and_neutrality_decoupling.md` |
+| `SAFETY_KEY_DOMAINS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `_DEFAULT_CONFIG_VERSION_PATCH` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `_DEFAULT_FAST_TRACK_PATCH` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md` |
 | `_DEFAULT_SCHEMA_VERSION_PATCH` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md` |
 | `_SEEN_DEPRECATED_PROVIDERS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
+| `_build_quench_stack_config` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `_calculate_shannon_entropy` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `_coerce_positive_int` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | `CHANGELOG.md`, `docs/dev_tasks/archive/2026-09-23_v1.06_step02_smart_reaper_and_lease_governance.md` |
 | `_deep_merge_dict` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
+| `_derive_safety_key_domains` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `_looks_like_plaintext_secret` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config.py` | `docs/dev_tasks/archive/2026-09-24_v1.07_step02_decoupling_and_handoff.md`, `docs/roadmap/README.md` |
 | `_match_glob` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `_reject_inline_credentials` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config.py` | `docs/dev_tasks/archive/2026-09-24_v1.07_step02_decoupling_and_handoff.md`, `docs/dev_tasks/archive/2026-09-30_bilingual_error_messages.md`, `docs/roadmap/README.md` |
@@ -402,7 +415,9 @@
 | `canonical_artifact_ref` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `docs/architecture/README.md`, `docs/dev_tasks/2026-10-02_v1.20_step01_architecture_asset_inventory.md`, `docs/dev_tasks/archive/2026-09-30_v1.10_step01_pre_confirm_audit_gate.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md` |
 | `check_self_verification_warning` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/consultation.py` | `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py` | `docs/dev_tasks/archive/2026-09-24_v1.08_step03_capability_tokens_and_onboarding.md`, `docs/dev_tasks/archive/2026-09-30_remove_vendor_presets.md` |
 | `create_reviewer_client` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/cli.py`, `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py` | `docs/dev_tasks/archive/2026-09-21_stage5_vendor_neutrality_and_consultation.md`, `docs/dev_tasks/archive/2026-09-30_bilingual_error_messages.md`, `docs/dev_tasks/archive/2026-09-30_remove_vendor_presets.md` |
-| `load_project_config` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/cli.py`, `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/reaper.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py`, `plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_project_config.py`, `plugins/quench-dev-tasks/server/tests/test_prompt_cache_stability.py`, `plugins/quench-dev-tasks/server/tests/test_reaper.py` | `docs/dev_tasks/archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md`, `docs/dev_tasks/archive/2026-09-11_plugin_development.md`, `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`, `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md`, `docs/dev_tasks/archive/2026-09-30_bilingual_error_messages.md`, `docs/roadmap/archive/v1.01_personal_seamless_multiproject.md`, `docs/roadmap/archive/v1.02_antigravity_community_ready.md` |
+| `is_protected_config_path` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md` |
+| `load_project_config` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/cli.py`, `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/reaper.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py`, `plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_project_config.py`, `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_prompt_cache_stability.py`, `plugins/quench-dev-tasks/server/tests/test_reaper.py` | `docs/dev_tasks/archive/2026-09-11_governance_engine_and_cross_tool_adaptation.md`, `docs/dev_tasks/archive/2026-09-11_plugin_development.md`, `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md`, `docs/dev_tasks/archive/2026-09-21_model_switching_optimization.md`, `docs/dev_tasks/archive/2026-09-30_bilingual_error_messages.md`, `docs/roadmap/archive/v1.01_personal_seamless_multiproject.md`, `docs/roadmap/archive/v1.02_antigravity_community_ready.md` |
+| `migrate_and_validate` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `docs/dev_tasks/2026-10-03_v1.20_step02_config_tolerance_and_versioning.md` |
 | `migrate_config_if_needed` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_config_migration.py` | `docs/dev_tasks/archive/2026-09-13_stage1_scaffolding_observability_and_migration.md` |
 | `normalize_model_identity` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py` | `docs/dev_tasks/archive/2026-09-30_remove_vendor_presets.md` |
 | `resolve_path` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | `docs/dev_tasks/archive/2026-09-11_plugin_development.md` |
@@ -629,9 +644,9 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 104
+- 样本总量: 164
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 104
+- `unknown`: 164
 <!-- END TELEMETRY -->

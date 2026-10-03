@@ -630,14 +630,14 @@
     },
     "2026-10-03_v1.20_step02_config_tolerance_and_versioning::2.0": {
       "task_id": "2026-10-03_v1.20_step02_config_tolerance_and_versioning::2.0",
-      "md_sha256": "4e5bc79554026fda755c4a2b5451e87f31fc682dc169022298df6b2e53cc17c9",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 1210462640000000,
-      "last_heartbeat_wall_utc": "2026-10-03T00:31:26.940435+00:00",
-      "git_head_sha": "b9f62bfc4ec1f799eec33d02985da514e4f25c61",
-      "git_index_mtime": 1790987110.9355466,
-      "released": false
+      "md_sha256": "86331d0f3ef8877c0dd97db12d2e789708725617062fe685ca662cf1b071f53d",
+      "generation": 1,
+      "holder_token": "token_1790995418710_23576",
+      "last_heartbeat_monotonic_ns": 1219659906000000,
+      "last_heartbeat_wall_utc": "2026-10-03T03:04:44.200852+00:00",
+      "git_head_sha": "60bfffeaa4455c3190b9254c953c4e20c2c9a6ba",
+      "git_index_mtime": 1790995402.469012,
+      "released": true
     }
   }
 }
