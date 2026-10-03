@@ -815,6 +815,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Missing inventory file: {out_file}", file=sys.stderr)
             return EXIT_USAGE
 
+        raw_bytes = out_file.read_bytes()
+        if b"\r\n" in raw_bytes:
+            print("CRLF line endings detected in inventory file!", file=sys.stderr)
+            return EXIT_DRIFT
+
         existing_text = out_file.read_text(encoding="utf-8")
         report = build_inventory_report(repo_root)
         new_text = render_markdown(report)
@@ -832,6 +837,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.write:
         report = build_inventory_report(repo_root)
         rendered = render_markdown(report)
+        rendered = rendered.replace("\r\n", "\n").replace("\r", "\n")
         out_file.parent.mkdir(parents=True, exist_ok=True)
         with open(out_file, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(rendered)

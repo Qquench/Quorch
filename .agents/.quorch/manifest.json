@@ -726,6 +726,17 @@
       "git_head_sha": "deb2b387f5c0bed4be066922af6550e188575070",
       "git_index_mtime": 1791037992.9753027,
       "released": false
+    },
+    "2026-10-04_hotfix_crlf_and_gitattributes::1": {
+      "task_id": "2026-10-04_hotfix_crlf_and_gitattributes::1",
+      "md_sha256": "f5f6bcf176b0236f20fe69668b8ccef7fb7ffa7bf00f1404fec33f722ed63984",
+      "generation": 1,
+      "holder_token": "token_1791043668498_13104",
+      "last_heartbeat_monotonic_ns": 33119317268400,
+      "last_heartbeat_wall_utc": "2026-10-03T16:10:46.233657+00:00",
+      "git_head_sha": "7d24d1add4068a3dfbe205a71c2e440c052fc8fb",
+      "git_index_mtime": 1791042832.5420766,
+      "released": true
     }
   }
 }

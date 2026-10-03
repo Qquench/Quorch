@@ -376,3 +376,14 @@ def test_asset_inventory_ignores_dev_tasks(tmp_path: Path):
 
     # 断言 SYMBOL_ARCH_DOC_TARGET 的 doc_refs 正常捕获（docs/architecture 未被误伤）
     assert "docs/architecture/system_arch.md" in edge_map["SYMBOL_ARCH_DOC_TARGET"].doc_refs
+
+
+def test_gitattributes_contract():
+    """断言仓库根目录存在 .gitattributes 并声明了严格的 LF 换行契约。"""
+    gitattributes_path = REPO_ROOT / ".gitattributes"
+    assert gitattributes_path.is_file(), ".gitattributes file is missing from repository root!"
+    text = gitattributes_path.read_text(encoding="utf-8")
+    assert "* text=auto eol=lf" in text
+    assert "*.md text eol=lf" in text
+    assert b"\r\n" not in gitattributes_path.read_bytes(), ".gitattributes must have LF line endings!"
+

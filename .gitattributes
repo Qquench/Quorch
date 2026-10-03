@@ -1,0 +1,28 @@
+# Default: enforce LF line endings on checkout and normalize on commit
+* text=auto eol=lf
+
+# Explicitly enforce LF for text assets
+*.md text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.txt text eol=lf
+
+# Windows-specific scripts keep CRLF if needed
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files - never normalize line endings
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.tgz binary
+*.woff binary
+*.woff2 binary
