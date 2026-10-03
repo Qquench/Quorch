@@ -605,6 +605,28 @@
       "git_head_sha": "83d3e76dba777d10c418643a9c29b5d19f1b0547",
       "git_index_mtime": 1790848454.825619,
       "released": false
+    },
+    "2026-10-02_v1.20_step01_architecture_asset_inventory::2026-10-02_v1.20_step01_architecture_asset_inventory": {
+      "task_id": "2026-10-02_v1.20_step01_architecture_asset_inventory::2026-10-02_v1.20_step01_architecture_asset_inventory",
+      "md_sha256": "f7421d75793655a6801cb7fa105d36028dfe20df64775bac2507be48386d343e",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1208959062000000,
+      "last_heartbeat_wall_utc": "2026-10-03T00:06:23.360702+00:00",
+      "git_head_sha": "9b0fd3884ca79d45d22311ededafc0cad3c5c680",
+      "git_index_mtime": 1790875781.9316454,
+      "released": false
+    },
+    "2026-10-02_v1.20_step01_architecture_asset_inventory::1.0": {
+      "task_id": "2026-10-02_v1.20_step01_architecture_asset_inventory::1.0",
+      "md_sha256": "f7421d75793655a6801cb7fa105d36028dfe20df64775bac2507be48386d343e",
+      "generation": 1,
+      "holder_token": "token_1790986019827_8180",
+      "last_heartbeat_monotonic_ns": 1209872593000000,
+      "last_heartbeat_wall_utc": "2026-10-03T00:21:36.889362+00:00",
+      "git_head_sha": "9b0fd3884ca79d45d22311ededafc0cad3c5c680",
+      "git_index_mtime": 1790875781.9316454,
+      "released": true
     }
   }
 }
