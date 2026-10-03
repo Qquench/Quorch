@@ -39,6 +39,7 @@ from state_machine import (
     STATUS_CONFIRMED,
     STATUS_COMPLETED,
     STATUS_IN_PROGRESS,
+    SLOW_PATH_HASH_QUOTA_DEFAULT,
     ScopeViolationError,
     extract_task_whitelist,
     transition_task,
@@ -185,20 +186,27 @@ def test_reconciliation_fast_path_hits(workspace_with_baseline):
 
 
 def test_reconciliation_budget_timeout_degrades(workspace_with_baseline):
-    """Test that exceeding time budget triggers verdict='degraded'."""
+    """Test that exceeding slow path hash quota triggers deterministic verdict='degraded'."""
     ws, _, snapshot = workspace_with_baseline
 
-    # Pass an impossible budget of 0.000001 ms to force degraded verdict
+    # Modify whitelisted file to trigger slow path hashing
+    (ws / "src" / "app.py").write_text("print('needs slow path')", encoding="utf-8")
+
+    # Pass max_slow_path_hashes=0 to force degraded verdict
     report = reconcile_workspace_against_whitelist(
         workspace_root=str(ws),
         snapshot=snapshot,
         whitelist_paths=["src/app.py"],
         unmanaged_patterns=["docs/**", "*.md"],
-        budget_ms=0.000001,
+        max_slow_path_hashes=0,
     )
 
     assert report.verdict == "degraded"
     assert report.degraded_reason is not None
+    assert "Slow path hash quota exceeded" in report.degraded_reason
+    assert report.violating_files == ()
+    assert isinstance(report.elapsed_ms, float)
+    assert report.elapsed_ms >= 0.0
 
 
 def test_state_machine_transition_blocks_on_scope_violation(workspace_with_baseline):
@@ -229,6 +237,142 @@ def test_state_machine_transition_blocks_on_scope_violation(workspace_with_basel
         workspace_root=str(ws),
     )
     assert updated.status == STATUS_COMPLETED
+
+
+def test_quota_pass_through_and_override(workspace_with_baseline):
+    """Verify SLOW_PATH_HASH_QUOTA_DEFAULT pass-through and explicit override behavior."""
+    ws, task_file, snapshot = workspace_with_baseline
+    assert SLOW_PATH_HASH_QUOTA_DEFAULT == 100
+
+    # Modify whitelisted file
+    (ws / "src" / "app.py").write_text("print('quota override test')", encoding="utf-8")
+
+    # With quota=0, transition_task should fail-closed with ScopeViolationError due to degraded
+    with pytest.raises(ScopeViolationError) as exc_info:
+        transition_task(
+            filepath=str(task_file),
+            task_id="1.1",
+            new_status=STATUS_COMPLETED,
+            workspace_root=str(ws),
+            max_slow_path_hashes=0,
+        )
+    assert "物理对账降级阻断" in str(exc_info.value) or "degraded" in str(exc_info.value)
+
+    # With default quota (100) or explicit override (e.g. 50), it passes
+    updated = transition_task(
+        filepath=str(task_file),
+        task_id="1.1",
+        new_status=STATUS_COMPLETED,
+        workspace_root=str(ws),
+        max_slow_path_hashes=SLOW_PATH_HASH_QUOTA_DEFAULT,
+    )
+    assert updated.status == STATUS_COMPLETED
+
+
+def test_reconciliation_mtime_spoofing_tampering_caught(workspace_with_baseline):
+    """Test adversarial mtime spoofing (content tampered, mtime restored, size changed).
+
+    Asserts fast path is bypassed due to size mismatch, and slow path sha256 catches the rogue change.
+    """
+    ws, _, snapshot = workspace_with_baseline
+
+    rogue_file = ws / "src" / "helper.py"
+    orig_stat = os.stat(rogue_file)
+    orig_mtime_ns = getattr(orig_stat, "st_mtime_ns", int(orig_stat.st_mtime * 1e9))
+
+    # Tamper with content (changing size from 17 bytes to larger)
+    rogue_file.write_text("def help(): pass  # rogue injected payload", encoding="utf-8")
+
+    # Spoof mtime back to original mtime
+    os.utime(rogue_file, ns=(orig_mtime_ns, orig_mtime_ns))
+    spoofed_stat = os.stat(rogue_file)
+    spoofed_mtime_ns = getattr(spoofed_stat, "st_mtime_ns", int(spoofed_stat.st_mtime * 1e9))
+    assert spoofed_mtime_ns == orig_mtime_ns
+    assert spoofed_stat.st_size != orig_stat.st_size
+
+    report = reconcile_workspace_against_whitelist(
+        workspace_root=str(ws),
+        snapshot=snapshot,
+        whitelist_paths=["src/app.py"],
+        unmanaged_patterns=["docs/**", "*.md"],
+    )
+
+    # Fast path misses because size differs; slow path catches hash change and rejects helper.py
+    assert report.verdict == "deny"
+    assert "src/helper.py" in report.violating_files
+    assert isinstance(report.elapsed_ms, float)
+    assert report.elapsed_ms >= 0.0
+
+
+def test_reconciliation_windows_network_inode_zero_fallback(workspace_with_baseline):
+    """Verify that when st_ino is 0 (Windows FAT/exFAT/network shares), fast path correctly falls back without false drift."""
+    ws, _, snapshot = workspace_with_baseline
+
+    # Create a synthetic snapshot where inode == 0
+    zero_inode_fingerprints = {
+        k: FileFingerprint(
+            rel_path=fp.rel_path,
+            size=fp.size,
+            mtime_ns=fp.mtime_ns,
+            digest=fp.digest,
+            inode=0,
+        )
+        for k, fp in snapshot.fingerprints.items()
+    }
+    zero_inode_snapshot = BaselineSnapshot(
+        schema_version=snapshot.schema_version,
+        task_id=snapshot.task_id,
+        session_id=snapshot.session_id,
+        head_commit=snapshot.head_commit,
+        fingerprints=zero_inode_fingerprints,
+        created_at_utc=snapshot.created_at_utc,
+        snapshot_digest=snapshot.snapshot_digest,
+    )
+
+    report = reconcile_workspace_against_whitelist(
+        workspace_root=str(ws),
+        snapshot=zero_inode_snapshot,
+        whitelist_paths=["src/app.py"],
+        unmanaged_patterns=["docs/**", "*.md"],
+    )
+
+    assert report.verdict == "allow"
+    assert report.fast_path_hits > 0
+    assert report.violating_files == ()
+    assert isinstance(report.elapsed_ms, float)
+    assert report.elapsed_ms >= 0.0
+
+
+def test_reconciliation_budget_ms_deprecation_warning(workspace_with_baseline):
+    """Verify that passing budget_ms triggers DeprecationWarning."""
+    ws, _, snapshot = workspace_with_baseline
+
+    with pytest.deprecated_call():
+        report = reconcile_workspace_against_whitelist(
+            workspace_root=str(ws),
+            snapshot=snapshot,
+            whitelist_paths=["src/app.py"],
+            unmanaged_patterns=["docs/**", "*.md"],
+            budget_ms=500.0,
+        )
+    assert report.verdict == "allow"
+    assert isinstance(report.elapsed_ms, float)
+    assert report.elapsed_ms >= 0.0
+
+
+def test_reconciliation_elapsed_ms_telemetry_only(workspace_with_baseline):
+    """Verify elapsed_ms is purely telemetry and never affects verdict."""
+    ws, _, snapshot = workspace_with_baseline
+
+    report = reconcile_workspace_against_whitelist(
+        workspace_root=str(ws),
+        snapshot=snapshot,
+        whitelist_paths=["src/app.py"],
+        unmanaged_patterns=["docs/**", "*.md"],
+    )
+    assert report.verdict == "allow"
+    assert isinstance(report.elapsed_ms, float)
+    assert report.elapsed_ms >= 0.0
 
 
 # ---------------------------------------------------------------------------

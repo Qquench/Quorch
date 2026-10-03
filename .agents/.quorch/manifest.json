@@ -671,6 +671,17 @@
       "git_head_sha": "6574edc0755cac99a9d417c2b672a393ef27e40e",
       "git_index_mtime": 1791000501.106278,
       "released": true
+    },
+    "2026-10-03_v1.20_step04_reconcile_perf_rework::4.0": {
+      "task_id": "2026-10-03_v1.20_step04_reconcile_perf_rework::4.0",
+      "md_sha256": "9c436628474ffe5561e05489a0470060ea4cb89f37ec04daa443f2974ee4185c",
+      "generation": 1,
+      "holder_token": "token_1791011011820_8840",
+      "last_heartbeat_monotonic_ns": 1192421000000,
+      "last_heartbeat_wall_utc": "2026-10-03T07:18:41.748293+00:00",
+      "git_head_sha": "38ddf403f510c22ea43dd5fe33a3063e0503880b",
+      "git_index_mtime": 1791003019.648597,
+      "released": true
     }
   }
 }

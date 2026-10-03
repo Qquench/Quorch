@@ -32,6 +32,8 @@ STATUS_COMPLETED = "✔️ 已完成"
 STATUS_SKIPPED = "⏭️ 跳过"
 STATUS_REWORK = "🔄 需返工"
 
+SLOW_PATH_HASH_QUOTA_DEFAULT: int = 100  # 合法大范围 refactor 在此上调；配置化旋钮延后 step08
+
 ALL_STATUSES = [
     STATUS_PENDING,
     STATUS_CONFIRMED,
@@ -195,6 +197,7 @@ def _verify_scope_reconciliation(
     filepath: str,
     task_id: str,
     workspace_root: Optional[str] = None,
+    max_slow_path_hashes: int = SLOW_PATH_HASH_QUOTA_DEFAULT,
 ) -> None:
     """Pre-transition check: verify that all physical workspace edits adhere to whitelist."""
     if workspace_root is None:
@@ -245,7 +248,7 @@ def _verify_scope_reconciliation(
         snapshot=snapshot,
         whitelist_paths=whitelist,
         unmanaged_patterns=unmanaged,
-        budget_ms=2000.0,
+        max_slow_path_hashes=max_slow_path_hashes,
     )
 
     if report.verdict == "deny":
@@ -257,7 +260,7 @@ def _verify_scope_reconciliation(
     elif report.verdict == "degraded":
         raise ScopeViolationError(
             f"Physical scope reconciliation degraded for task {task_id} ({report.degraded_reason}). Fail-closed. / "
-            f"任务 {task_id} 物理对账超时降级阻断：{report.degraded_reason}。根据安全规则严格闭环阻断。"
+            f"任务 {task_id} 物理对账降级阻断：{report.degraded_reason}。根据安全规则严格闭环阻断。"
         )
 
 
@@ -267,6 +270,7 @@ def transition_task(
     new_status: str,
     timeout: float = 5.0,
     workspace_root: Optional[str] = None,
+    max_slow_path_hashes: Optional[int] = None,
 ) -> TaskItem:
     """Atomically transition task status with filelock: read -> validate -> replace -> write back. / 原子化状态转换：读取→校验合法性→替换写回。带 filelock 排他锁。"""
     norm_new = _normalize_status(new_status)
@@ -318,7 +322,14 @@ def transition_task(
 
         # Physical scope reconciliation gate before completing or reworking
         if norm_new in (STATUS_COMPLETED, STATUS_REWORK):
-            _verify_scope_reconciliation(filepath, target_item.id, workspace_root)
+            quota = (
+                max_slow_path_hashes
+                if max_slow_path_hashes is not None
+                else SLOW_PATH_HASH_QUOTA_DEFAULT
+            )
+            _verify_scope_reconciliation(
+                filepath, target_item.id, workspace_root, max_slow_path_hashes=quota
+            )
 
         old_line = lines[target_idx]
         new_line = old_line

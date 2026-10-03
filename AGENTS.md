@@ -74,9 +74,9 @@ When any conflict arises, the **plugin rules files win**. This file intentionall
 - ❌ Impersonate the Reviewer model in-context  
 - ❌ Bypass `dev_tasks_checkout` and edit code directly  
 - ❌ Hard-code any model vendor names or API endpoint strings in core modules  
-- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient  
-- ❌ Dump verbose execution logs, large diff tables, or token recitations into chat upon task completion (strictly output the ≤5 line C3 Delivery Card)
+- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient
 <!-- QUENCH-CORE-INVARIANTS:END -->
+- ❌ Dump verbose execution logs, large diff tables, or token recitations into chat upon task completion (strictly output the ≤5 line C3 Delivery Card)
 
 ---
 

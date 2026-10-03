@@ -141,7 +141,7 @@ Latency target: **< 50ms** per hook invocation.
 
 2. **Workspace Baseline Snapshot & Scope Reconciliation (Server-Side Gate)**:
 - At `dev_tasks_checkout`, the server captures a physical snapshot (`BaselineSnapshot`) with file fingerprints (`size`, `mtime_ns`, `inode`, `sha256`);
-- At `dev_tasks_complete` / `dev_tasks_escalate`, the state machine runs `reconcile_workspace_against_whitelist` (pure function with dual fast-path / slow-path comparison and 50ms timeout circuit breaker);
+- At `dev_tasks_complete` / `dev_tasks_escalate`, the state machine runs `reconcile_workspace_against_whitelist` (pure function with dual fast-path / slow-path comparison and deterministic slow-path hash quota);
 - Any modified or created files outside the declared `【涉及文件】` whitelist are rejected with `ScopeViolationError`, preventing external runners from bypassing file boundaries.
 
 3. **Pre-Confirm Audit Gate (Server-Side Discipline Function)**:

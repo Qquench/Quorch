@@ -187,7 +187,7 @@
 | `plugins/quench-dev-tasks/server/hooks/context_injector.py` | 3 | 7 | 5 |
 | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` | 24 | 15 | 14 |
 | `plugins/quench-dev-tasks/server/log_naming.py` | 25 | 10 | 9 |
-| `plugins/quench-dev-tasks/server/manifest.py` | 39 | 19 | 20 |
+| `plugins/quench-dev-tasks/server/manifest.py` | 39 | 20 | 20 |
 | `plugins/quench-dev-tasks/server/manifest_lease.py` | 5 | 7 | 9 |
 | `plugins/quench-dev-tasks/server/observability_policy.py` | 7 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/path_guard.py` | 13 | 9 | 5 |
@@ -197,12 +197,12 @@
 | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 33 | 23 | 41 |
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
 | `plugins/quench-dev-tasks/server/server.py` | 43 | 32 | 77 |
-| `plugins/quench-dev-tasks/server/state_machine.py` | 23 | 9 | 10 |
+| `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/workspace_lease.py` | 7 | 13 | 12 |
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 424 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 425 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -603,6 +603,7 @@
 | `ALL_STATUSES` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
 | `EMOJI_STATUS_OPTIONS` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | NONE | NONE |
 | `InvalidTransitionError` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
+| `SLOW_PATH_HASH_QUOTA_DEFAULT` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `STATUS_COMPLETED` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `STATUS_CONFIRMED` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/reaper.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `STATUS_IN_PROGRESS` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
@@ -683,9 +684,9 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 171
+- 样本总量: 179
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 171
+- `unknown`: 179
 <!-- END TELEMETRY -->

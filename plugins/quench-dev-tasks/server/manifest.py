@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -919,41 +920,33 @@ def reconcile_workspace_against_whitelist(
     snapshot: BaselineSnapshot,
     whitelist_paths: Sequence[str],
     unmanaged_patterns: Sequence[str],
-    budget_ms: float = 500.0,
+    max_slow_path_hashes: int = 100,
+    budget_ms: Optional[float] = None,  # TODO(step08 shim cleanup): 兼容垫片，传入非 None 时触发 DeprecationWarning
 ) -> ReconciliationReport:
     """Pure-function workspace reconciliation against baseline and whitelist. Zero write syscalls."""
+    if budget_ms is not None:
+        warnings.warn(
+            "budget_ms is deprecated and replaced by max_slow_path_hashes; will be removed in step08.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     start_time = time.perf_counter()
-    budget_sec = budget_ms / 1000.0
     real_ws = os.path.realpath(os.path.abspath(workspace_root))
 
     fast_path_hits = 0
     checked_count = 0
+    slow_path_hash_count = 0
     modified_files: set[str] = set()
 
-    # Fast check: if budget is 0 or negative, degrade immediately
-    if budget_ms <= 0:
-        return ReconciliationReport(
-            verdict="degraded",
-            violating_files=(),
-            checked_count=0,
-            fast_path_hits=0,
-            elapsed_ms=0.0,
-            degraded_reason="Zero or negative reconciliation budget",
-        )
+    cs = (sys.platform != "win32")
+    effective_unmanaged = list(unmanaged_patterns) + [
+        ".agents/.quorch/**",
+        ".agents/.quorch/baselines/**",
+    ]
 
     # 1. Quick + Slow path comparison against baseline fingerprints
     for rel_path, fp in snapshot.fingerprints.items():
-        if (time.perf_counter() - start_time) > budget_sec:
-            elapsed = (time.perf_counter() - start_time) * 1000
-            return ReconciliationReport(
-                verdict="degraded",
-                violating_files=(),
-                checked_count=checked_count,
-                fast_path_hits=fast_path_hits,
-                elapsed_ms=elapsed,
-                degraded_reason="Reconciliation timeout budget exceeded during baseline comparison",
-            )
-
         checked_count += 1
         abs_path = os.path.join(real_ws, rel_path)
         if not os.path.exists(abs_path):
@@ -967,38 +960,45 @@ def reconcile_workspace_against_whitelist(
             st_size = st.st_size
             st_ino = getattr(st, "st_ino", 0)
 
-            # Fast path hit: size, mtime_ns, and inode match exactly
+            # Fast path hit: size, mtime_ns, and inode match exactly.
+            # Windows / network share fallback: if fp.inode == 0 or st_ino == 0, safely ignore inode
+            inode_match = (fp.inode == 0 or st_ino == 0 or st_ino == fp.inode)
             if (
                 st_size == fp.size
                 and st_mtime_ns == fp.mtime_ns
-                and (fp.inode == 0 or st_ino == fp.inode)
+                and inode_match
             ):
                 fast_path_hits += 1
             else:
-                # Slow path: re-hash
-                h = hashlib.sha256()
-                with open(abs_path, "rb") as f:
-                    while chunk := f.read(65536):
-                        h.update(chunk)
-                cur_digest = f"sha256:{h.hexdigest()}"
-                if cur_digest != fp.digest:
+                # File potentially changed.
+                # If unmanaged, allowed to change freely; zero slow-path quota consumption.
+                if is_within_whitelist(rel_path, effective_unmanaged, case_sensitive=cs):
                     modified_files.add(rel_path)
+                else:
+                    # Slow path: consume hash quota
+                    if slow_path_hash_count >= max_slow_path_hashes:
+                        elapsed = (time.perf_counter() - start_time) * 1000
+                        return ReconciliationReport(
+                            verdict="degraded",
+                            violating_files=(),
+                            checked_count=checked_count,
+                            fast_path_hits=fast_path_hits,
+                            elapsed_ms=elapsed,
+                            degraded_reason=f"Slow path hash quota exceeded ({max_slow_path_hashes})",
+                        )
+                    slow_path_hash_count += 1
+                    h = hashlib.sha256()
+                    with open(abs_path, "rb") as f:
+                        while chunk := f.read(65536):
+                            h.update(chunk)
+                    cur_digest = f"sha256:{h.hexdigest()}"
+                    if cur_digest != fp.digest:
+                        modified_files.add(rel_path)
         except (OSError, PermissionError):
             modified_files.add(rel_path)
 
     # 2. Check for newly introduced files in workspace
     for root, dirs, files in os.walk(real_ws):
-        if (time.perf_counter() - start_time) > budget_sec:
-            elapsed = (time.perf_counter() - start_time) * 1000
-            return ReconciliationReport(
-                verdict="degraded",
-                violating_files=(),
-                checked_count=checked_count,
-                fast_path_hits=fast_path_hits,
-                elapsed_ms=elapsed,
-                degraded_reason="Reconciliation timeout budget exceeded during workspace scan",
-            )
-
         dirs[:] = [
             d for d in dirs if d not in EXCLUDED_WORKSPACE_DIRS and not d.startswith(".tmp_")
         ]
@@ -1012,16 +1012,12 @@ def reconcile_workspace_against_whitelist(
             abs_p = os.path.join(root, fname)
             rel_p = os.path.relpath(abs_p, real_ws).replace("\\", "/")
             if rel_p not in snapshot.fingerprints:
+                if is_within_whitelist(rel_p, effective_unmanaged, case_sensitive=cs):
+                    continue
                 modified_files.add(rel_p)
 
     # 3. Filter modified files against unmanaged patterns and whitelist
-    cs = (sys.platform != "win32")
     violating: list[str] = []
-
-    effective_unmanaged = list(unmanaged_patterns) + [
-        ".agents/.quorch/**",
-        ".agents/.quorch/baselines/**",
-    ]
 
     for f_rel in modified_files:
         if is_within_whitelist(f_rel, effective_unmanaged, case_sensitive=cs):
