@@ -463,5 +463,59 @@ async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
     assert "raw_reasoning" not in term_res_dict["result"]
 
 
+@pytest.mark.anyio
+async def test_reviewer_poll_schema_unchanged():
+    """断言 dev_reviewer_poll 参数 schema 逐字节相等，ctx 绝不出现在 properties 中 (K1 / B4)。"""
+    tool = await server.mcp.get_tool("dev_reviewer_poll")
+    params = tool.parameters
+    assert params["type"] == "object"
+    assert params["additionalProperties"] is False
+    assert "ctx" not in params["properties"]
+    assert set(params["properties"].keys()) == {
+        "workspace_root",
+        "job_id",
+        "session_id",
+        "wait_max_s",
+        "raw_text",
+    }
+    assert params["properties"]["wait_max_s"]["default"] == 0
+    assert params["properties"]["raw_text"]["default"] is True
+    assert params["required"] == ["workspace_root", "job_id", "session_id"]
+
+
+@pytest.mark.anyio
+async def test_reviewer_poll_positional_compat(tmp_path):
+    """断言位置参数调用 (ws, jid, sid, 25, False) 正确绑定 wait_max_s 与 raw_text，不被 ctx 劫持 (B1)。"""
+    from reviewer_jobs import ReviewerJobSupervisor
+    ws = str(tmp_path)
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "pos_test"})
+
+    # wait_max_s=0, raw_text=False 作为位置参数
+    res = await server.dev_reviewer_poll(ws, rec.job_id, "pos_test", 0, False)
+    assert isinstance(res, dict)
+    assert res["state"] == "QUEUED"
+
+
+@pytest.mark.anyio
+async def test_reviewer_poll_dirty_wait_max_s(tmp_path):
+    """断言非法 wait_max_s 安全规整或返回结构化 error dict，绝无未捕获异常 (E9)。"""
+    ws = str(tmp_path)
+    # 1. 非法字符串
+    res_bad = await server.dev_reviewer_poll(ws, "job_123", "sid", wait_max_s="not_a_number")
+    assert isinstance(res_bad, dict)
+    assert res_bad["status"] == "error"
+    assert "must be an integer" in res_bad["error"]
+
+    # 2. None 安全规整为 0
+    from reviewer_jobs import ReviewerJobSupervisor
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "none_test"})
+    res_none = await server.dev_reviewer_poll(ws, rec.job_id, "none_test", wait_max_s=None)
+    assert isinstance(res_none, str)
+    assert res_none.startswith("[Reviewer thinking:")
+
+
+
 
 

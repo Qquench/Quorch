@@ -133,6 +133,11 @@ class JobProgress:
     approx_reasoning_tokens: int
     phase: ReviewerPhase
     idle_s: float  # time.monotonic() 相对静默秒数，消除 NTP 时钟偏斜
+    state: str = ""
+
+    @property
+    def tokens(self) -> int:
+        return self.approx_reasoning_tokens
 
 
 @dataclass(frozen=True)
@@ -1246,6 +1251,60 @@ class ReviewerJobSupervisor:
             progress=record.progress,
         )
         return self.project_poll_result(snapshot, raw_text=raw_text)
+
+    def is_terminal_state(self, job_id: str, *, session_id: str) -> bool:
+        """非投影终态访问器；纯读、无副作用、不抛异常。
+        禁止通过解析 raw_text 字符串判定终态。
+        若作业不存在、鉴权失败或在 TERMINAL_STATES 中，返回 True。
+        """
+        try:
+            val_id = validate_job_id(job_id)
+            from consultation import sanitize_session_id
+            val_sid = sanitize_session_id(session_id, max_len=128)
+            target_sid = self._find_job_session(val_id) or val_sid
+            record = self._load_job_record(target_sid, val_id)
+            if record is None:
+                return True
+            assert_poll_authorized(record, val_sid)
+            return record.state in TERMINAL_STATES
+        except Exception:
+            return True
+
+    def progress_snapshot(self, job_id: str, *, session_id: str) -> Optional[JobProgress]:
+        """纯读、无副作用、不跨 await 持锁。
+        None = 作业不可见（不存在 / session 不匹配 / 已终态 / 异常降级）。
+        """
+        try:
+            val_id = validate_job_id(job_id)
+            from consultation import sanitize_session_id
+            val_sid = sanitize_session_id(session_id, max_len=128)
+            target_sid = self._find_job_session(val_id) or val_sid
+            record = self._load_job_record(target_sid, val_id)
+            if record is None:
+                return None
+            assert_poll_authorized(record, val_sid)
+            if record.state in TERMINAL_STATES:
+                return None
+            if record.progress is None:
+                tokens = 0
+                phase = ReviewerPhase.ASSEMBLING
+                idle_s = 0.0
+            else:
+                tokens = int(record.progress.approx_reasoning_tokens)
+                phase = record.progress.phase
+                idle_s = float(record.progress.idle_s)
+            elapsed_s = compute_elapsed_s(record)
+            state_val = record.state.value if isinstance(record.state, JobState) else str(record.state)
+            return JobProgress(
+                elapsed_s=max(0.0, float(elapsed_s)),
+                approx_reasoning_tokens=max(0, tokens),
+                phase=phase,
+                idle_s=max(0.0, idle_s),
+                state=state_val,
+            )
+        except Exception:
+            return None
+
 
     def cancel(self, job_id: str, *, session_id: str) -> dict[str, Any]:
         """确定性真实取消 (I4, H-7, AUTH)。

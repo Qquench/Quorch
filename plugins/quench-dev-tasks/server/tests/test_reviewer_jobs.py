@@ -443,3 +443,53 @@ def test_heartbeat_single_line_projection_format():
     assert isinstance(structured, dict)
     assert structured["state"] == "RUNNING"
 
+
+def test_progress_snapshot_and_is_terminal_state(tmp_path):
+    """断言 progress_snapshot 与 is_terminal_state 纯读 SSOT 契约 (B2 / D3)。"""
+    ws = str(tmp_path)
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "snap_sess"})
+
+    # 1. 运行中/排队中状态
+    assert supervisor.is_terminal_state(rec.job_id, session_id="snap_sess") is False
+    snap = supervisor.progress_snapshot(rec.job_id, session_id="snap_sess")
+    assert snap is not None
+    assert snap.tokens >= 0
+    assert snap.elapsed_s >= 0.0
+    assert snap.state == "QUEUED"
+
+    # 2. 会话不匹配或作业不存在 -> None / True
+    assert supervisor.progress_snapshot("non_existent", session_id="snap_sess") is None
+    assert supervisor.is_terminal_state("non_existent", session_id="snap_sess") is True
+    assert supervisor.progress_snapshot(rec.job_id, session_id="wrong_sess") is None
+    assert supervisor.is_terminal_state(rec.job_id, session_id="wrong_sess") is True
+
+    # 3. 终态 COMPLETED -> progress_snapshot 为 None, is_terminal_state 为 True
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.QUEUED,
+        JobState.COMPLETED,
+    )
+    assert supervisor.is_terminal_state(rec.job_id, session_id="snap_sess") is True
+    assert supervisor.progress_snapshot(rec.job_id, session_id="snap_sess") is None
+
+
+def test_no_ctx_leak_into_reviewer_jobs():
+    """静态断言 ctx 绝不泄露入 reviewer_jobs 标识符，且 JobRecord asdict 键集合纯净 (E1 / R2)。"""
+    import inspect, dataclasses
+    from reviewer_jobs import JobRecord, ReviewerJobSupervisor
+    import reviewer_jobs
+
+    source = inspect.getsource(reviewer_jobs)
+    # 确保没有 ctx 标识符作为变量或参数
+    assert "ctx:" not in source
+    assert "ctx." not in source
+    assert "ctx =" not in source
+
+    # 验证 JobRecord 字段不含 ctx 或 tokens（tokens 为 JobProgress property，不污染序列化）
+    fields = {f.name for f in dataclasses.fields(JobRecord)}
+    assert "ctx" not in fields
+    assert "tokens" not in fields
+
+

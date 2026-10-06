@@ -174,3 +174,43 @@ def test_inv3_degraded_poll_projection_enforces_anti_roleplay(tmp_path):
     text_res = supervisor.poll(rec.job_id, session_id="anti_roleplay_sess", raw_text=True)
     assert "### [Reviewer Consultation Degraded]" in text_res
     assert "reviewer_not_configured" in text_res
+
+
+@pytest.mark.anyio
+async def test_inv3_inv4_progress_message_format_and_stdout_purity():
+    """断言 INV-3 进度通道消息单一规范且无 findings 泄露，及 INV-4 服务端代码零 print() (D4)。"""
+    from reviewer_engine import format_heartbeat_line
+    import server
+
+    # 1. 验证心跳消息逐字节等于 format_heartbeat_line，且无 findings/日志泄露
+    emitted = []
+
+    class MockContext:
+        def report_progress(self, progress, total=None, message=None):
+            emitted.append({"progress": progress, "total": total, "message": message})
+
+    await server._emit_poll_progress(
+        ctx=MockContext(),
+        tokens=150,
+        elapsed_s=12.5,
+        timeout_s=25.0,
+        consumed_s=1.0,
+    )
+    assert len(emitted) == 1
+    msg = emitted[0]["message"]
+    assert msg == format_heartbeat_line(150, 12.5)
+    assert len(msg) <= 128
+    assert "findings" not in msg
+    assert "#" not in msg
+
+    # 2. 验证 INV-4 零 stdout 写入：server.py 与 reviewer_jobs.py 零 print(
+    server_path = SERVER_DIR / "server.py"
+    reviewer_jobs_path = SERVER_DIR / "reviewer_jobs.py"
+    for p in (server_path, reviewer_jobs_path):
+        lines = p.read_text(encoding="utf-8").splitlines()
+        for idx, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert not re.search(r"\bprint\s*\(", stripped), f"INV-4 violation: print() found at {p.name}:{idx}: {stripped}"
+

@@ -24,7 +24,7 @@
 
 ---
 
-## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 139 项)
+## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 143 项)
 
 | 符号 | 定义模块 |
 | :--- | :--- |
@@ -155,9 +155,13 @@
 | `ReadStatus` | `plugins/quench-dev-tasks/server/server.py` |
 | `ReviewerHandoff` | `plugins/quench-dev-tasks/server/server.py` |
 | `_ASSERTION_MARKERS` | `plugins/quench-dev-tasks/server/server.py` |
+| `_MAX_PROGRESS_MESSAGE_CHARS` | `plugins/quench-dev-tasks/server/server.py` |
+| `_POLL_SLEEP_INTERVAL_S` | `plugins/quench-dev-tasks/server/server.py` |
+| `_PROGRESS_EMIT_INTERVAL_S` | `plugins/quench-dev-tasks/server/server.py` |
 | `__getattr__` | `plugins/quench-dev-tasks/server/server.py` |
 | `_append_hook_log` | `plugins/quench-dev-tasks/server/server.py` |
 | `_degraded_card` | `plugins/quench-dev-tasks/server/server.py` |
+| `_emit_poll_progress` | `plugins/quench-dev-tasks/server/server.py` |
 | `_extract_task_detail` | `plugins/quench-dev-tasks/server/server.py` |
 | `_issue_checkout_lease` | `plugins/quench-dev-tasks/server/server.py` |
 | `_render_task_markdown` | `plugins/quench-dev-tasks/server/server.py` |
@@ -194,13 +198,13 @@
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 49 | 28 | 33 |
 | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 34 | 22 | 41 |
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
-| `plugins/quench-dev-tasks/server/server.py` | 43 | 31 | 78 |
+| `plugins/quench-dev-tasks/server/server.py` | 47 | 32 | 78 |
 | `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/workspace_lease.py` | 5 | 9 | 10 |
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 427 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 431 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -512,7 +516,7 @@
 | `extract_cached_tokens` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_engine_probe.py` | NONE |
 | `extract_reasoning_text` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/consultation.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_engine_probe.py` | NONE |
 | `extract_usage` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/consultation.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_engine_probe.py` | NONE |
-| `format_heartbeat_line` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_heartbeat.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_heartbeat_format.py` | `CHANGELOG.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `format_heartbeat_line` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_anti_roleplay_discipline_contract.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_heartbeat.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_heartbeat_format.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_poll_progress.py` | `CHANGELOG.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `heartbeat_template_expect` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_heartbeat_format.py` | NONE |
 | `log_telemetry_event` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_observability.py` | NONE |
 | `mode_anchor_token_budget_proxy` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_prompt_layout_criterion.py` | NONE |
@@ -520,23 +524,23 @@
 | `CapacityExceeded` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py` | NONE |
 | `DegradedReason` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `JOB_ID_PATTERN` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
-| `JobProgress` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
-| `JobRecord` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md` |
-| `JobState` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_anti_roleplay_discipline_contract.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
+| `JobProgress` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `JobRecord` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `JobState` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_anti_roleplay_discipline_contract.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_poll_progress.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `MAX_NONTERMINAL_SNAPSHOT_BYTES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `PIN_RELEASABLE_STATES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | NONE |
 | `POLL_NONTERMINAL_FIELDS` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md` |
 | `POLL_TERMINAL_FIELDS` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md` |
 | `POLL_TERMINAL_STATES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | NONE |
 | `PollSnapshot` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
-| `ReviewerJobSupervisor` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_anti_roleplay_discipline_contract.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md`, `docs/architecture/README.md`, `docs/roadmap/plan_cost_efficiency_and_governance_hardening.md` |
+| `ReviewerJobSupervisor` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_anti_roleplay_discipline_contract.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_poll_progress.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md`, `docs/architecture/README.md`, `docs/roadmap/plan_cost_efficiency_and_governance_hardening.md` |
 | `ReviewerPhase` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `SnapshotContractViolation` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md` |
 | `TERMINAL_RESULT_ALLOWED_FIELDS` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py` | `CHANGELOG.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
-| `TERMINAL_STATES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | NONE |
+| `TERMINAL_STATES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | NONE |
 | `_WINDOWS_RESERVED_NAMES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `_atomic_replace_json` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py` | NONE |
-| `_durable_write_json` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md` |
+| `_durable_write_json` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_poll_progress.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md` |
 | `_record_from_dict` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `_record_to_dict` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
 | `assert_poll_authorized` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
@@ -565,6 +569,9 @@
 | `ReviewerHandoff` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_ASSERTION_MARKERS` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_EXEMPTION_PATTERN` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py` | NONE |
+| `_MAX_PROGRESS_MESSAGE_CHARS` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
+| `_POLL_SLEEP_INTERVAL_S` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
+| `_PROGRESS_EMIT_INTERVAL_S` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_TEST_FILE_PATTERN` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py` | NONE |
 | `__getattr__` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_append_hook_log` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
@@ -572,6 +579,7 @@
 | `_audit_test_changes` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py` | NONE |
 | `_check_audit_gate` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `_degraded_card` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
+| `_emit_poll_progress` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_extract_task_detail` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_extract_task_scoped_files` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `_freshness_ok` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
@@ -640,7 +648,7 @@
 | :--- | :--- | :--- | :--- |
 | `dev_reviewer_cancel` | `dev_reviewer_cancel` | `workspace_root, job_id, session_id` | `dict[str, Any]` |
 | `dev_reviewer_consult` | `dev_reviewer_consult` | `workspace_root, query, context_files=None, mode='critique', max_hops=1, session_id=None, ctx=None` | `dict[str, Any]` |
-| `dev_reviewer_poll` | `dev_reviewer_poll` | `workspace_root, job_id, session_id, wait_max_s=0, raw_text=True` | `Union[str, dict[str, Any]]` |
+| `dev_reviewer_poll` | `dev_reviewer_poll` | `workspace_root, job_id, session_id, wait_max_s=0, raw_text=True, ctx=None` | `Union[str, dict[str, Any]]` |
 | `dev_reviewer_submit` | `dev_reviewer_submit` | `workspace_root, query, context_files=None, mode='evaluate', max_hops=1, session_id=None, idempotency_key=None` | `dict[str, Any]` |
 | `dev_tasks_archive` | `dev_tasks_archive` | `workspace_root, task_file` | `Dict[str, Any]` |
 | `dev_tasks_checkout` | `dev_tasks_checkout` | `workspace_root, task_file=None, task_id=None, session_id=None` | `Dict[str, Any]` |
@@ -684,9 +692,9 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 17
-- 评估结论: INSUFFICIENT SAMPLE (n=17)
+- 样本总量: 31
+- 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 17
+- `unknown`: 31
 <!-- END TELEMETRY -->
