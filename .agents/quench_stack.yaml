@@ -40,10 +40,10 @@ schema_version: "1.0"
 config_version: 1
 
 reviewer_engine:
-  provider: "deepseek"
-  model: "deepseek-flash"
-  api_key_env: "DEEPSEEK_API_KEY_Quench"
-  base_url: "https://api.deepseek.com"
+  provider: "none"
+  model: "default"
+  api_key_env: null
+  base_url: ""
   thinking: true
   reasoning_effort: "high"
   timeout_seconds: 180
