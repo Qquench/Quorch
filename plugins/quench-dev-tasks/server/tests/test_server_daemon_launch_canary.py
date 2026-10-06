@@ -15,22 +15,54 @@ import filelock
 import pytest
 
 
+def _safe_close_pipes(proc: subprocess.Popen) -> None:
+    """Safely close open pipe handles on proc."""
+    for pipe in (proc.stdin, proc.stdout, proc.stderr):
+        if pipe is not None and not getattr(pipe, "closed", True):
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+
 def _terminate_process_tree(proc: subprocess.Popen) -> None:
     """Platform-forked hard process tree killer (Windows taskkill /T /F / POSIX killpg/kill)."""
     if proc.poll() is not None:
+        _safe_close_pipes(proc)
         return
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
     else:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            pgid = os.getpgid(proc.pid)
+            # Self-kill protection: ensure pgid is not our own process group!
+            if pgid == os.getpgrp():
+                proc.kill()
+            else:
+                os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         except Exception:
-            proc.kill()
+            try:
+                proc.kill()
+            except Exception:
+                pass
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=2)
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+    finally:
+        _safe_close_pipes(proc)
 
 
 def test_server_daemon_launch_canary_and_lock_isolation() -> None:
@@ -47,9 +79,14 @@ def test_server_daemon_launch_canary_and_lock_isolation() -> None:
         cwd=str(repo_root),
         text=True,
         encoding="utf-8",
+        start_new_session=True,
     )
 
     try:
+        if sys.platform != "win32":
+            # Positive assertion: child must have its own process group distinct from caller
+            assert os.getpgid(proc.pid) != os.getpgrp(), "Child process must have distinct process group"
+
         init_req = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -92,7 +129,7 @@ def test_grandchild_pipe_fd_isolation_timeout_recovery() -> None:
     helper_code = (
         "import sys, time, subprocess\n"
         "sub = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)\n"
-        "sys.stdout.write('READY\\n')\n"
+        "sys.stdout.write(f'{sub.pid}\\n')\n"
         "sys.stdout.flush()\n"
         "time.sleep(30)\n"
     )
@@ -103,14 +140,49 @@ def test_grandchild_pipe_fd_isolation_timeout_recovery() -> None:
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        start_new_session=True,
     )
 
+    grandchild_pid: int | None = None
     try:
         assert proc.stdout is not None
         line = proc.stdout.readline()
-        assert line.strip() == "READY"
+        assert line.strip(), "Expected grandchild pid output"
+        grandchild_pid = int(line.strip())
     finally:
         _terminate_process_tree(proc)
 
     # After _terminate_process_tree, proc must be terminated and not hung
     assert proc.poll() is not None
+    if grandchild_pid is not None:
+        if sys.platform == "win32":
+            res = subprocess.run(["tasklist", "/FI", f"PID eq {grandchild_pid}"], capture_output=True, text=True)
+            assert str(grandchild_pid) not in res.stdout or "No tasks are running" in res.stdout
+        else:
+            try:
+                os.kill(grandchild_pid, 0)
+                is_dead = False
+            except ProcessLookupError:
+                is_dead = True
+            assert is_dead, f"Grandchild process {grandchild_pid} should be terminated"
+
+
+def test_terminate_process_tree_self_kill_protection() -> None:
+    """Verify that _terminate_process_tree degrades gracefully and does NOT kill caller process group."""
+    # Spawn short-lived dummy child WITHOUT start_new_session (shares PGID on POSIX)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(10)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        if sys.platform != "win32":
+            # Confirm that without start_new_session, PGID collides with caller
+            assert os.getpgid(proc.pid) == os.getpgrp()
+        _terminate_process_tree(proc)
+        assert proc.poll() is not None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
