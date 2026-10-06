@@ -740,14 +740,14 @@
     },
     "2026-10-06_v1.20_step09_audit_gate_matrix_convergence::1": {
       "task_id": "2026-10-06_v1.20_step09_audit_gate_matrix_convergence::1",
-      "md_sha256": "1e5d3a5c7ba26a8a7094a842c67d74bd3de6b36c78040d32dd3c308b8500ed8a",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 1015213890000000,
-      "last_heartbeat_wall_utc": "2026-10-06T11:09:08.090217+00:00",
-      "git_head_sha": "32d37d97070a7f1feceda8aebbfaa1c146972523",
-      "git_index_mtime": 1791283581.558397,
-      "released": false
+      "md_sha256": "cc2f813932f8ffe8966011e747eb4ee358b329eb358685dc79c402bbda07a770",
+      "generation": 1,
+      "holder_token": "token_1791289341903_3636",
+      "last_heartbeat_monotonic_ns": 1021506296000000,
+      "last_heartbeat_wall_utc": "2026-10-06T12:54:00.500903+00:00",
+      "git_head_sha": "2d837b8a87596fb7095f0dd9e01201fdd1a88166",
+      "git_index_mtime": 1791289039.6536088,
+      "released": true
     }
   }
 }

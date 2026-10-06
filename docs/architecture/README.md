@@ -146,7 +146,8 @@ Latency target: **< 50ms** per hook invocation.
 
 3. **Pre-Confirm Audit Gate (Server-Side Discipline Function)**:
 - At `dev_tasks_confirm`, when transitioning tasks from `⬜ 待确认` to `✅ 已确认` for Tier-1 managed files, the server validates against the audit ledger (`verdicts.jsonl`) that a genuine, fresh, undegraded review record exists for the task (`canonical_artifact_ref`);
-- Evaluated strictly outside the manifest lock; re-validated under lock with `precondition_changed` fail-closed protection.
+- Evaluated strictly outside the manifest lock; re-validated under lock with `precondition_changed` fail-closed protection;
+- Controlled by converged `AuditGatePolicy`: degraded reading family (`log_missing`, `log_unparsable`, `record_timestamp_invalid`, `record_degraded`, `tail_window_exhausted`) unified under single-point `effective_on_degraded` with `most_restrictive_policy` (block > warn > allow); missing/stale records strictly guarded by `on_missing_record: block`.
 
 ### 3.3 Unified Asynchronous Reviewer Job Pipeline
 

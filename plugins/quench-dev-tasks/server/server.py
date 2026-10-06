@@ -69,6 +69,7 @@ from project_config import (
     AuditGatePolicy,
     AuditGateReason,
     AuditGateResult,
+    most_restrictive_policy,
 )
 from reviewer_engine import (
     PromptAssembler,
@@ -910,6 +911,7 @@ def _check_audit_gate(
     """manifest 锁外只读决策。audit_ref := f"{posix_relpath(audit_log_path)}#{line_no}"。"""
     try:
         policy = config.audit_gate if hasattr(config, "audit_gate") and config.audit_gate else AuditGatePolicy()
+        effective_on_degraded = most_restrictive_policy(policy.on_degraded, policy.tail_window_exhausted_policy)
         target_ref = canonical_artifact_ref(workspace_root, task_file, str(getattr(task, "id", "")).strip())
 
         # step 0: enabled is False → disabled (allow)
@@ -996,10 +998,10 @@ def _check_audit_gate(
         except Exception:
             rel_log_path = raw_log_path.replace("\\", "/")
 
-        # step 3: log 不存在 → log_missing [on_degraded]
+        # step 3: log 不存在 → log_missing [effective_on_degraded]
         if not os.path.isfile(abs_log_path):
             return {
-                "allowed": policy.on_degraded != "block",
+                "allowed": effective_on_degraded != "block",
                 "reason": "log_missing",
                 "artifact_ref": target_ref,
                 "audit_ref": None,
@@ -1011,10 +1013,10 @@ def _check_audit_gate(
             abs_log_path, max_tail_bytes=policy.max_tail_bytes
         )
 
-        # step 4: log I/O 读取/解码失败（非截断所致） → log_unparsable [on_degraded]
+        # step 4: log I/O 读取/解码失败（非截断所致） → log_unparsable [effective_on_degraded]
         if read_status == "unparsable":
             return {
-                "allowed": policy.on_degraded != "block",
+                "allowed": effective_on_degraded != "block",
                 "reason": "log_unparsable",
                 "artifact_ref": target_ref,
                 "audit_ref": None,
@@ -1058,7 +1060,7 @@ def _check_audit_gate(
             # step 8 前置：ts 不可解析 ∨ 未完成 tz 归一化 (naive TS 直入 step 8，严禁进入 timedelta 运算)
             if parsed_ts is None or parsed_ts.tzinfo is None or parsed_ts.tzinfo.utcoffset(parsed_ts) is None:
                 return {
-                    "allowed": policy.on_degraded != "block",
+                    "allowed": effective_on_degraded != "block",
                     "reason": "record_timestamp_invalid",
                     "artifact_ref": target_ref,
                     "audit_ref": audit_ref_val,
@@ -1073,7 +1075,7 @@ def _check_audit_gate(
             # 超容差未来时间戳归入 step 8
             if record_ts_utc > skew_limit:
                 return {
-                    "allowed": policy.on_degraded != "block",
+                    "allowed": effective_on_degraded != "block",
                     "reason": "record_timestamp_invalid",
                     "artifact_ref": target_ref,
                     "audit_ref": audit_ref_val,
@@ -1096,10 +1098,10 @@ def _check_audit_gate(
             # 降级判断
             is_degraded = bool(matching_rec.get("degraded_reason")) or matching_rec.get("status") == "degraded" or matching_rec.get("state") == "degraded"
 
-            # step 7: 命中 ∧ require_undegraded ∧ 有 degraded_reason ∧ ts 可解析 ∧ record_ts ≤ now + tolerance ∧ _freshness_ok is True → record_degraded [on_degraded]
+            # step 7: 命中 ∧ require_undegraded ∧ 有 degraded_reason ∧ ts 可解析 ∧ record_ts ≤ now + tolerance ∧ _freshness_ok is True → record_degraded [effective_on_degraded]
             if policy.require_undegraded_record and is_degraded:
                 return {
-                    "allowed": policy.on_degraded != "block",
+                    "allowed": effective_on_degraded != "block",
                     "reason": "record_degraded",
                     "artifact_ref": target_ref,
                     "audit_ref": audit_ref_val,
@@ -1115,10 +1117,10 @@ def _check_audit_gate(
                 "parse_skipped_lines": parse_skipped_lines,
             }
 
-        # step 9: truncated（size > max_tail_bytes）且可读尾部无匹配 → tail_window_exhausted [tail_window_exhausted_policy]
+        # step 9: truncated（size > max_tail_bytes）且可读尾部无匹配 → tail_window_exhausted [effective_on_degraded]
         if read_status == "truncated":
             return {
-                "allowed": policy.tail_window_exhausted_policy != "block",
+                "allowed": effective_on_degraded != "block",
                 "reason": "tail_window_exhausted",
                 "artifact_ref": target_ref,
                 "audit_ref": None,

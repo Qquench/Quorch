@@ -63,6 +63,6 @@ governance:
 audit_gate:
   enabled: true
   on_missing_record: "block"
+  # tail_window_exhausted_policy 已弃用并收敛为 on_degraded 的别名（生效值遵循最严优先：block > warn > allow）
   on_degraded: "warn"
-  tail_window_exhausted_policy: "warn"
   on_internal_error: "allow"

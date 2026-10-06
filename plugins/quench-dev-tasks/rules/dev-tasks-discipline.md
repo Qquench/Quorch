@@ -122,11 +122,10 @@ Upon developer confirmation:
 2. **非受管资产放行** (`not_managed_scope`): 任务涉及文件均未命中 `managed_paths` 时天然豁免放行。
 3. **会话旁路放行** (`session_bypass_active`): 当前会话在有效时间内具备 Tier-2 旁路时放行（`session_id=None` 绝不放行）。
 4. **日志完整性与记录匹配**:
-   - 日志缺失 (`log_missing`)、日志不可解析 (`log_unparsable`)、降级记录 (`record_degraded`)、时间戳异常 (`record_timestamp_invalid`) 受 `on_degraded` 策略控制；
-   - 记录过期 (`record_stale`)、无匹配记录 (`no_matching_record`) 受 `on_missing_record` 策略控制；
-   - 尾读窗口耗尽 (`tail_window_exhausted`) 受 `tail_window_exhausted_policy` 策略控制；
+   - 降级族分支：日志缺失 (`log_missing`)、日志不可解析 (`log_unparsable`)、降级记录 (`record_degraded`)、时间戳异常 (`record_timestamp_invalid`) 及尾读窗口耗尽 (`tail_window_exhausted`)，统一受全局单点 `effective_on_degraded` 策略控制（`tail_window_exhausted_policy` 弃用为兼容别名，遵循 `block > warn > allow` 最严优先合并）；
+   - 缺失族分支：记录过期 (`record_stale`)、无匹配记录 (`no_matching_record`) 恒受 `on_missing_record` 策略控制（默认 `block`）；
    - 内部错误 (`internal_error`) 遵循结构性 fail-open (永远放行)。
-5. **最新有效审计匹配** (`matched`): 命中 canonical artifact_ref 且时间戳在容差内新鲜且未降级时允许流转。
+5. **最新有效审计匹配** (`matched`): 逆序扫描尾部记录，优先命中 canonical artifact_ref 且时间戳在容差内新鲜且未降级时允许流转（未命中且日志截断时，才落入 `tail_window_exhausted`，且排在 `no_matching_record` 之前判定）。
 
 ### ③ 锁内重校验与 precondition_changed
 门禁在 manifest 锁外进行只读裁决。`dev_tasks_confirm` 获锁后，必须重算 `canonical_artifact_ref` 并断言任务仍处于 `⬜ 待确认` 状态；任一前置条件不满足时以 `precondition_changed` fail-closed 阻断，manifest 零写入。

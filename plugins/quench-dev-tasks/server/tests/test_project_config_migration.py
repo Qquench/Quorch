@@ -6,11 +6,13 @@ import time
 import unicodedata
 from pathlib import Path
 from unittest.mock import patch
+import warnings
 import pytest
 import yaml
 
 from project_config import (
     CURRENT_CONFIG_VERSION,
+    AuditGatePolicy,
     ConfigError,
     ConfigFault,
     SAFETY_KEY_DOMAINS,
@@ -136,7 +138,7 @@ def test_real_stack_config_clean_load():
     # 验证现网实值
     ag = data.get("audit_gate", {})
     assert ag.get("on_degraded") == "warn", "现网配置应包含 on_degraded: warn"
-    assert ag.get("tail_window_exhausted_policy") == "warn"
+    assert ag.get("tail_window_exhausted_policy") is None
     assert ag.get("on_missing_record") == "block"
     assert ag.get("on_internal_error") == "allow"
 
@@ -145,7 +147,7 @@ def test_real_stack_config_clean_load():
     assert faults == [], f"现行配置必须零 fault 清爽加载，实际收到: {faults}"
     assert cfg.config_version == 1
     assert cfg.audit_gate.on_degraded == "warn"
-    assert cfg.audit_gate.tail_window_exhausted_policy == "warn"
+    assert cfg.audit_gate.tail_window_exhausted_policy is None
 
     # 执行完整的 load_project_config
     loaded = load_project_config(str(repo_root))
@@ -225,7 +227,6 @@ def test_hook_latency_budget():
         "audit_gate": {
             "on_missing_record": "block",
             "on_degraded": "warn",
-            "tail_window_exhausted_policy": "warn",
             "on_internal_error": "allow",
         }
     }
@@ -243,3 +244,34 @@ def test_hook_latency_budget():
 
     # 100 次调用的总耗时必须远低于 50ms（平均每次 < 0.5ms）
     assert elapsed_ms < 50.0, f"100 次聚合防护耗时 {elapsed_ms:.2f}ms 超过 50ms 预算"
+
+
+def test_retired_dead_fields_safely_ignored():
+    """断言：退役死字段 (freshness_anchor, future_skew_policy) 安全忽略，不影响加载，亦不挂载于对象上。"""
+    raw = {
+        "project_name": "test_retired",
+        "config_version": 1,
+        "audit_gate": {
+            "freshness_anchor": "recency_only",
+            "future_skew_policy": "timestamp_invalid",
+            "on_degraded": "warn",
+        },
+    }
+    cfg, faults = migrate_and_validate(raw)
+    assert faults == []
+    assert not hasattr(cfg.audit_gate, "freshness_anchor")
+    assert not hasattr(cfg.audit_gate, "future_skew_policy")
+    assert cfg.audit_gate.on_degraded == "warn"
+
+
+def test_alias_deprecation_warning():
+    """断言：声明 tail_window_exhausted_policy 别名时，在解析期发出包含迁移指引的 DeprecationWarning。"""
+    with pytest.deprecated_call(match="tail_window_exhausted_policy"):
+        p = AuditGatePolicy(tail_window_exhausted_policy="warn")
+    assert p.tail_window_exhausted_policy == "warn"
+
+    # 未声明别名时不发警告
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        p_clean = AuditGatePolicy()
+        assert p_clean.tail_window_exhausted_policy is None

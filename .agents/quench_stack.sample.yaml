@@ -33,3 +33,11 @@
 #   model: "internal-reviewer"
 #   base_url: "https://llm-gateway.corp.internal/v1"
 #   api_key_env: "CORP_GATEWAY_TOKEN"
+
+# Example 5: Audit gate configuration override
+# audit_gate:
+#   enabled: true
+#   on_missing_record: "block"
+#   # tail_window_exhausted_policy 已弃用并收敛为 on_degraded 的别名（生效值遵循最严优先：block > warn > allow）
+#   on_degraded: "warn"
+#   on_internal_error: "allow"

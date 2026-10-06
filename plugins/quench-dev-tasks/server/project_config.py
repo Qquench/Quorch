@@ -510,26 +510,59 @@ class AuditGatePolicy(BaseModel):
     scope: Literal["managed_paths"] = "managed_paths"
     audit_log_path: Optional[str] = None
     bind_artifact: bool = True
-    freshness_anchor: Literal["recency_only"] = "recency_only"
-    future_skew_policy: Literal["timestamp_invalid"] = "timestamp_invalid"
     max_age_minutes: int = 1440
     max_tail_bytes: int = 1048576
     on_missing_record: Literal["block", "warn", "allow"] = "block"
     on_degraded: Literal["block", "warn", "allow"] = "block"
-    tail_window_exhausted_policy: Literal["block", "warn", "allow"] = "warn"
     on_internal_error: Literal["allow", "warn"] = "allow"
     require_undegraded_record: bool = True
     clock_skew_tolerance_seconds: int = 2
+    tail_window_exhausted_policy: Optional[Literal["block", "warn", "allow"]] = None  # DEPRECATED alias
 
     @model_validator(mode="after")
-    def validate_bind_artifact_when_enabled(self) -> "AuditGatePolicy":
+    def validate_audit_gate_policy(self) -> "AuditGatePolicy":
         if self.enabled and not self.bind_artifact:
             raise ValueError("bind_artifact must be True when audit gate is enabled")
+        if "tail_window_exhausted_policy" in self.model_fields_set:
+            warnings.warn(
+                "'tail_window_exhausted_policy' is deprecated and aliased to 'on_degraded' (most-restrictive-wins). "
+                "Please migrate to 'on_degraded' in .agents/quench_stack.yaml / "
+                "'tail_window_exhausted_policy' 已弃用并别名化至 'on_degraded'（最严优先），请在配置中直接使用 'on_degraded'。",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return self
+
+
+def most_restrictive_policy(
+    primary: Literal["block", "warn", "allow"],
+    secondary: Optional[Literal["block", "warn", "allow"]] = None,
+) -> Literal["block", "warn", "allow"]:
+    """最严优先纯函数 (most-restrictive-wins):
+    优先级: block > warn > allow; secondary is None 时返回 primary。
+    """
+    if secondary is None:
+        return primary
+    if primary == "block" or secondary == "block":
+        return "block"
+    if primary == "warn" or secondary == "warn":
+        return "warn"
+    return "allow"
 
 
 def _derive_safety_key_domains() -> Mapping[str, frozenset[str]]:
     import typing
+
+    def _extract_literals(tp: Any) -> list[str]:
+        origin = typing.get_origin(tp)
+        if origin is Literal:
+            return [str(arg) for arg in typing.get_args(tp)]
+        res: list[str] = []
+        for arg in typing.get_args(tp):
+            if arg is not type(None) and arg is not None:
+                res.extend(_extract_literals(arg))
+        return res
+
     domains: dict[str, frozenset[str]] = {}
     for key in (
         "on_missing_record",
@@ -539,8 +572,7 @@ def _derive_safety_key_domains() -> Mapping[str, frozenset[str]]:
     ):
         field_info = AuditGatePolicy.model_fields.get(key)
         if field_info is not None:
-            args = typing.get_args(field_info.annotation)
-            domains[f"audit_gate.{key}"] = frozenset(args)
+            domains[f"audit_gate.{key}"] = frozenset(_extract_literals(field_info.annotation))
     return MappingProxyType(domains)
 
 

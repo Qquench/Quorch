@@ -19,6 +19,7 @@ from project_config import (
     QuenchStackConfig,
     ObservabilityConfig,
     load_project_config,
+    most_restrictive_policy,
 )
 from path_guard import PathTraversalError
 from state_machine import TaskItem, STATUS_PENDING, STATUS_CONFIRMED, STATUS_COMPLETED
@@ -94,7 +95,6 @@ def _make_ws(tmp_path: Any, gate_kwargs: Optional[dict] = None) -> tuple[str, st
         "enabled": True,
         "on_missing_record": "block",
         "on_degraded": "block",
-        "tail_window_exhausted_policy": "warn",
         "on_internal_error": "allow",
     }
     if gate_kwargs:
@@ -161,13 +161,26 @@ def test_batch_two_tasks_single_doc_both_confirmed(tmp_path):
 
 
 def test_tail_window_exhausted_warns_and_allows(tmp_path):
-    ws, log_path, cfg = _make_ws(tmp_path, {"max_tail_bytes": 64, "tail_window_exhausted_policy": "warn"})
+    ws, log_path, cfg = _make_ws(
+        tmp_path,
+        {"max_tail_bytes": 64, "on_degraded": "warn", "tail_window_exhausted_policy": "warn"},
+    )
     _write_verdict(log_path, {"created_wall_utc": "2026-01-01T00:00:00+00:00", "padding": "x" * 200, "context_files": ["other#1"]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
     task.affected_files = ["[MODIFY] src/app.py"]
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "tail_window_exhausted"
+
+    # 姊妹断言：on_degraded=block ∧ tail_window=warn → most-restrictive-wins block
+    ws2, log_path2, cfg2 = _make_ws(
+        tmp_path / "sister",
+        {"max_tail_bytes": 64, "on_degraded": "block", "tail_window_exhausted_policy": "warn"},
+    )
+    _write_verdict(log_path2, {"created_wall_utc": "2026-01-01T00:00:00+00:00", "padding": "x" * 200, "context_files": ["other#1"]})
+    res2 = _check_audit_gate(ws2, "task.md", task, cfg2)
+    assert res2["allowed"] is False
+    assert res2["reason"] == "tail_window_exhausted"
 
 
 def test_torn_last_line_skipped_previous_matched(tmp_path):
@@ -360,7 +373,7 @@ def test_truncated_with_matching_record_in_tail_returns_matched(tmp_path):
 
 
 def test_truncated_zero_parseable_tail_reports_tail_window_exhausted_not_unparsable(tmp_path):
-    ws, log_path, cfg = _make_ws(tmp_path, {"max_tail_bytes": 50, "tail_window_exhausted_policy": "warn"})
+    ws, log_path, cfg = _make_ws(tmp_path, {"max_tail_bytes": 50})
     # 写入长于 50 字节且尾部全为非换行或残缺行
     with open(log_path, "wb") as f:
         f.write(b"x" * 150)
@@ -368,6 +381,7 @@ def test_truncated_zero_parseable_tail_reports_tail_window_exhausted_not_unparsa
     task.affected_files = ["[MODIFY] src/app.py"]
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "tail_window_exhausted"
+    assert res["allowed"] is False
 
 
 def test_confirm_revalidates_state_under_lock(tmp_path, monkeypatch):
@@ -499,6 +513,10 @@ def test_ladder_predicate_exclusivity_matrix():
     reasons = typing.get_args(AuditGateReason)
     assert len(reasons) == 13
     assert len(set(reasons)) == 13
+    # R11 读序互斥梯次防短路（优先匹配，无匹配且截断落入 tail_window_exhausted，无匹配且未截断落入 no_matching_record）
+    assert "matched" in reasons
+    assert "tail_window_exhausted" in reasons
+    assert "no_matching_record" in reasons
 
 
 def test_freshness_boundary_max_age_minus_epsilon_allows():
@@ -605,3 +623,33 @@ def test_canonical_artifact_ref_task_id_equals_state_machine_task_id():
     tid = "1.1"
     ref = canonical_artifact_ref("/workspace", "docs/dev_tasks/test.md", tid)
     assert ref.split("#")[-1] == tid
+
+
+def test_most_restrictive_policy_monotone_matrix():
+    """断言：别名最严优先 9 组合与 None 缺省单调性（block > warn > allow）。"""
+    levels = ["block", "warn", "allow"]
+    rank = {"block": 3, "warn": 2, "allow": 1}
+    for p in levels:
+        assert most_restrictive_policy(p, None) == p
+        for s in levels:
+            expected = "block" if ("block" in (p, s)) else ("warn" if ("warn" in (p, s)) else "allow")
+            res = most_restrictive_policy(p, s)
+            assert res == expected, f"Mismatch for ({p}, {s}): got {res}, expected {expected}"
+            assert rank[res] >= rank[p]
+            assert rank[res] >= rank[s]
+
+
+def test_alias_tightens_record_degraded_to_block(tmp_path):
+    """集成断言：全局单点 effective_on_degraded 驱动，on_degraded=allow ∧ tail_window=block 触发 record_degraded 时判定为 block。"""
+    ws, log_path, cfg = _make_ws(
+        tmp_path,
+        {"on_degraded": "allow", "tail_window_exhausted_policy": "block"},
+    )
+    ref = canonical_artifact_ref(ws, "task.md", "1.1")
+    now_wall = datetime.now(timezone.utc).isoformat()
+    _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": [ref], "degraded_reason": "worker_timeout"})
+    task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
+    task.affected_files = ["[MODIFY] src/app.py"]
+    res = _check_audit_gate(ws, "task.md", task, cfg)
+    assert res["reason"] == "record_degraded"
+    assert res["allowed"] is False

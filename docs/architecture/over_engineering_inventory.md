@@ -189,18 +189,18 @@
 | `plugins/quench-dev-tasks/server/manifest_lease.py` | 11 | 15 | 22 |
 | `plugins/quench-dev-tasks/server/observability_policy.py` | 7 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/path_guard.py` | 13 | 9 | 5 |
-| `plugins/quench-dev-tasks/server/project_config.py` | 54 | 18 | 17 |
+| `plugins/quench-dev-tasks/server/project_config.py` | 55 | 18 | 17 |
 | `plugins/quench-dev-tasks/server/reporting.py` | 3 | 6 | 6 |
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 49 | 28 | 33 |
 | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 34 | 22 | 41 |
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
-| `plugins/quench-dev-tasks/server/server.py` | 43 | 31 | 77 |
+| `plugins/quench-dev-tasks/server/server.py` | 43 | 31 | 78 |
 | `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/workspace_lease.py` | 5 | 9 | 10 |
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 426 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 427 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -409,7 +409,7 @@
 | `is_within_whitelist` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/manifest.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md` |
 | `sanitize_workspace_path` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/schema_validator.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_path_guard.py` | `docs/ci_incident_tracker_and_compatibility_guide.md` |
 | `to_workspace_relative_path` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_path_guard.py` | NONE |
-| `AuditGatePolicy` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `CHANGELOG.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
+| `AuditGatePolicy` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | `CHANGELOG.md`, `docs/architecture/README.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `AuditGateReason` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `AuditGateResult` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `CRITICAL_CODE_MANIFESTS` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
@@ -459,6 +459,7 @@
 | `load_project_config` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/cli.py`, `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py`, `plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_project_config.py`, `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py`, `plugins/quench-dev-tasks/server/tests/test_prompt_cache_stability.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | `docs/roadmap/archive/v1.01_personal_seamless_multiproject.md`, `docs/roadmap/archive/v1.02_antigravity_community_ready.md` |
 | `migrate_and_validate` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_project_config_migration.py` | NONE |
 | `migrate_config_if_needed` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_config_migration.py` | NONE |
+| `most_restrictive_policy` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | `docs/architecture/README.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `normalize_model_identity` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_consultation_runner_profile.py` | NONE |
 | `resolve_path` | `plugins/quench-dev-tasks/server/project_config.py` | NONE | NONE | NONE |
 | `resolve_preset` | `plugins/quench-dev-tasks/server/project_config.py` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/tests/test_reviewer_factory_neutrality.py` | NONE |
