@@ -121,3 +121,87 @@ def test_reclaim_cas_gate_coverage_consistency() -> None:
 
     assert "reclaim_cas" in test_reclaim_cas.name, "test_reclaim_cas.py must contain keyword 'reclaim_cas'"
     assert "reclaim_cas" in test_probe.name, "test_reclaim_cas_lease_probe.py must contain keyword 'reclaim_cas'"
+
+
+def _is_dual_branch_import_shim(node: ast.Try) -> bool:
+    """Detect dual-branch import shim shape: Try(Import/ImportFrom) -> except(ImportError/ValueError) -> fallback Import."""
+    if not (node.body and all(isinstance(x, (ast.ImportFrom, ast.Import)) for x in node.body)):
+        return False
+
+    caught_exceptions: set[str] = set()
+    has_fallback_import = False
+    for handler in node.handlers:
+        if handler.type is not None:
+            if isinstance(handler.type, ast.Name):
+                caught_exceptions.add(handler.type.id)
+            elif isinstance(handler.type, ast.Tuple):
+                for elt in handler.type.elts:
+                    if isinstance(elt, ast.Name):
+                        caught_exceptions.add(elt.id)
+        if handler.body and any(isinstance(x, (ast.ImportFrom, ast.Import)) for x in handler.body):
+            has_fallback_import = True
+
+    if ("ImportError" in caught_exceptions or "ValueError" in caught_exceptions) and has_fallback_import:
+        return True
+    return False
+
+
+def test_zero_import_shims_in_production_code() -> None:
+    """[D7] AST 断言：全仓生产代码中双分支导入垫片（Try->ImportFrom + except ImportError/ValueError）残留数量为 0。"""
+    repo_root = Path(__file__).resolve().parents[4]
+    target_dirs = [
+        repo_root / "plugins" / "quench-dev-tasks" / "server",
+        repo_root / "plugins" / "quench-dev-tasks" / "scripts",
+        repo_root / "scripts",
+    ]
+
+    residual_shims: list[str] = []
+    for tdir in target_dirs:
+        if not tdir.is_dir():
+            continue
+        for py_path in tdir.rglob("*.py"):
+            if "tests" in py_path.parts or any(p.startswith(".") or p == "venv" for p in py_path.parts):
+                continue
+            tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Try) and _is_dual_branch_import_shim(node):
+                    residual_shims.append(f"{py_path.relative_to(repo_root)}:{node.lineno}")
+
+    assert len(residual_shims) == 0, f"Found residual dual-branch import shims in production code: {residual_shims}"
+
+
+def test_import_shim_detector_adversarial_injection() -> None:
+    """[D7 对抗注入单测] 验证 _is_dual_branch_import_shim 准确命中垫片形状，且不误伤非垫片代码。"""
+    shim_code = """
+try:
+    from .manifest_lease import reclaim_stale_task
+except (ImportError, ValueError):
+    from manifest_lease import reclaim_stale_task
+"""
+    shim_tree = ast.parse(shim_code)
+    shim_tries = [n for n in ast.walk(shim_tree) if isinstance(n, ast.Try)]
+    assert len(shim_tries) == 1
+    assert _is_dual_branch_import_shim(shim_tries[0]) is True
+
+    # 对抗样本 1：普通业务异常处理
+    normal_code = """
+try:
+    val = int("123")
+except ValueError:
+    val = 0
+"""
+    normal_tree = ast.parse(normal_code)
+    normal_tries = [n for n in ast.walk(normal_tree) if isinstance(n, ast.Try)]
+    assert _is_dual_branch_import_shim(normal_tries[0]) is False
+
+    # 对抗样本 2：单纯的单分支可选依赖探测（无 fallback import 结构）
+    probe_code = """
+try:
+    import uvloop
+except ImportError:
+    pass
+"""
+    probe_tree = ast.parse(probe_code)
+    probe_tries = [n for n in ast.walk(probe_tree) if isinstance(n, ast.Try)]
+    assert _is_dual_branch_import_shim(probe_tries[0]) is False
+

@@ -23,15 +23,8 @@ import filelock
 
 T = TypeVar("T")  # TypeVar 兼容 Python < 3.12，非 PEP 695 [T]
 
-try:
-    from .observability_policy import MAX_RECORD_BYTES
-except (ImportError, ValueError):
-    from observability_policy import MAX_RECORD_BYTES
-
-try:
-    from .path_guard import is_within_whitelist
-except (ImportError, ValueError):
-    from path_guard import is_within_whitelist
+from observability_policy import MAX_RECORD_BYTES
+from path_guard import is_within_whitelist
 
 MANIFEST_REL_PATH = ".agents/.quorch/manifest.json"
 
@@ -921,16 +914,8 @@ def reconcile_workspace_against_whitelist(
     whitelist_paths: Sequence[str],
     unmanaged_patterns: Sequence[str],
     max_slow_path_hashes: int = 100,
-    budget_ms: Optional[float] = None,  # TODO(step08 shim cleanup): 兼容垫片，传入非 None 时触发 DeprecationWarning
 ) -> ReconciliationReport:
     """Pure-function workspace reconciliation against baseline and whitelist. Zero write syscalls."""
-    if budget_ms is not None:
-        warnings.warn(
-            "budget_ms is deprecated and replaced by max_slow_path_hashes; will be removed in step08.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
     start_time = time.perf_counter()
     real_ws = os.path.realpath(os.path.abspath(workspace_root))
 

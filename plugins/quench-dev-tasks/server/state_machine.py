@@ -10,20 +10,12 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 import filelock
 
-try:
-    from .manifest import (
-        reconcile_workspace,
-        get_baseline_path,
-        load_baseline_snapshot,
-        reconcile_workspace_against_whitelist,
-    )
-except (ImportError, ValueError):
-    from manifest import (
-        reconcile_workspace,
-        get_baseline_path,
-        load_baseline_snapshot,
-        reconcile_workspace_against_whitelist,
-    )
+from manifest import (
+    reconcile_workspace,
+    get_baseline_path,
+    load_baseline_snapshot,
+    reconcile_workspace_against_whitelist,
+)
 
 STATUS_PENDING = "⬜ 待确认"
 STATUS_CONFIRMED = "✅ 已确认"

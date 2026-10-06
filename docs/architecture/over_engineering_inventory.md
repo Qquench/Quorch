@@ -170,7 +170,7 @@
 
 ---
 
-## 3. 服务端生产模块概览 (Server Production Modules, 共 24 个模块)
+## 3. 服务端生产模块概览 (Server Production Modules, 共 23 个模块)
 
 | 模块路径 | 定义符号数 | 导入模块数 | 导入符号数 |
 | :--- | :--- | :--- | :--- |
@@ -179,11 +179,9 @@
 | `plugins/quench-dev-tasks/server/adapters/base_adapter.py` | 3 | 5 | 6 |
 | `plugins/quench-dev-tasks/server/adapters/cursor_adapter.py` | 1 | 6 | 4 |
 | `plugins/quench-dev-tasks/server/adapters/generic_cli_adapter.py` | 1 | 5 | 4 |
-| `plugins/quench-dev-tasks/server/changelog_writer.py` | 1 | 5 | 3 |
 | `plugins/quench-dev-tasks/server/cli.py` | 12 | 11 | 11 |
 | `plugins/quench-dev-tasks/server/code_explorer.py` | 17 | 8 | 9 |
 | `plugins/quench-dev-tasks/server/consultation.py` | 46 | 20 | 48 |
-| `plugins/quench-dev-tasks/server/handoff_card.py` | 2 | 3 | 4 |
 | `plugins/quench-dev-tasks/server/hooks/context_injector.py` | 3 | 7 | 5 |
 | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` | 24 | 15 | 14 |
 | `plugins/quench-dev-tasks/server/log_naming.py` | 25 | 9 | 9 |
@@ -192,10 +190,11 @@
 | `plugins/quench-dev-tasks/server/observability_policy.py` | 7 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/path_guard.py` | 13 | 9 | 5 |
 | `plugins/quench-dev-tasks/server/project_config.py` | 54 | 18 | 17 |
+| `plugins/quench-dev-tasks/server/reporting.py` | 3 | 5 | 5 |
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 49 | 28 | 33 |
 | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 34 | 22 | 41 |
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
-| `plugins/quench-dev-tasks/server/server.py` | 43 | 32 | 77 |
+| `plugins/quench-dev-tasks/server/server.py` | 43 | 31 | 77 |
 | `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/workspace_lease.py` | 5 | 9 | 10 |
 
@@ -213,7 +212,7 @@
 | `EnvironmentType` | `plugins/quench-dev-tasks/server/adapters/base_adapter.py` | `plugins/quench-dev-tasks/server/adapters/__init__.py` | `plugins/quench-dev-tasks/server/tests/test_adapters.py` | `docs/roadmap/archive/v1.03_cross_tool_cursor_adaptation.md` |
 | `CursorAdapter` | `plugins/quench-dev-tasks/server/adapters/cursor_adapter.py` | `plugins/quench-dev-tasks/server/adapters/__init__.py` | `plugins/quench-dev-tasks/server/tests/test_adapters.py` | NONE |
 | `GenericCLIAdapter` | `plugins/quench-dev-tasks/server/adapters/generic_cli_adapter.py` | `plugins/quench-dev-tasks/server/adapters/__init__.py` | `plugins/quench-dev-tasks/server/tests/test_adapters.py` | NONE |
-| `append_changelog_entry` | `plugins/quench-dev-tasks/server/changelog_writer.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
+| `append_changelog_entry` | `plugins/quench-dev-tasks/server/reporting.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
 | `Colors` | `plugins/quench-dev-tasks/server/cli.py` | NONE | NONE | NONE |
 | `SCRIPTS_DIR` | `plugins/quench-dev-tasks/server/cli.py` | NONE | NONE | NONE |
 | `SERVER_DIR` | `plugins/quench-dev-tasks/server/cli.py` | NONE | NONE | NONE |
@@ -289,8 +288,8 @@
 | `should_enable_multi_hop` | `plugins/quench-dev-tasks/server/consultation.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_multihop.py` | NONE |
 | `strip_reasoning_from_history` | `plugins/quench-dev-tasks/server/consultation.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_multihop.py` | NONE |
 | `validate_job_id` | `plugins/quench-dev-tasks/server/consultation.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
-| `_extract_spec_section` | `plugins/quench-dev-tasks/server/handoff_card.py` | NONE | NONE | NONE |
-| `render_handoff_card` | `plugins/quench-dev-tasks/server/handoff_card.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_handoff_card.py` | `CHANGELOG.md`, `docs/roadmap/README.md` |
+| `_extract_spec_section` | `plugins/quench-dev-tasks/server/reporting.py` | NONE | NONE | NONE |
+| `render_handoff_card` | `plugins/quench-dev-tasks/server/reporting.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_handoff_card.py` | `CHANGELOG.md`, `docs/roadmap/README.md` |
 | `current_dir` | `plugins/quench-dev-tasks/server/hooks/context_injector.py` | NONE | NONE | NONE |
 | `main` | `plugins/quench-dev-tasks/server/hooks/context_injector.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_asset_inventory.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_no_api_bypass.py`, `plugins/quench-dev-tasks/server/tests/test_pre_commit_guard.py`, `plugins/quench-dev-tasks/server/tests/test_probe_client_capabilities.py` | `docs/ci_incident_tracker_and_compatibility_guide.md`, `docs/roadmap/archive/v1.04_automated_subagent_delegation_and_codebase_inspection.md` |
 | `server_dir` | `plugins/quench-dev-tasks/server/hooks/context_injector.py` | NONE | NONE | NONE |
@@ -616,7 +615,7 @@
 | `ScopeViolationError` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `docs/architecture/README.md`, `docs/roadmap/v1.20_architecture_slimming_roadmap.md` |
 | `StateMachineError` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | NONE | NONE |
 | `TASK_HEADER_PATTERN` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
-| `TaskItem` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/changelog_writer.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
+| `TaskItem` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/reporting.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `TaskNotFoundError` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `VALID_TRANSITIONS` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | NONE | NONE |
 | `_normalize_status` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | NONE | NONE |

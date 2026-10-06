@@ -51,9 +51,8 @@ def _validate_session_id(session_id: Optional[str]) -> Optional[str]:
 
 import functools
 import anyio
-from changelog_writer import append_changelog_entry
 from code_explorer import explore_code_slices, ExploreResult
-from handoff_card import render_handoff_card
+from reporting import append_changelog_entry, render_handoff_card
 from path_guard import (
     to_workspace_relative_path,
     PathTraversalError,
@@ -117,10 +116,7 @@ from manifest import (
     get_baseline_path,
 )
 
-try:
-    from .manifest_lease import reclaim_stale_task
-except (ImportError, ValueError):
-    from manifest_lease import reclaim_stale_task
+from manifest_lease import reclaim_stale_task
 
 mcp = FastMCP("quench-dev-tasks")
 

@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import os
-import shutil
-import tempfile
 from pathlib import Path
+import shutil
+import sys
+import tempfile
 import pytest
 import yaml
 
-from handoff_card import render_handoff_card
+server_dir = str(Path(__file__).resolve().parent.parent)
+if server_dir not in sys.path:
+    sys.path.insert(0, server_dir)
+
+from reporting import render_handoff_card
 from server import dev_tasks_export_handoff_card
 
 

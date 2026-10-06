@@ -1,10 +1,71 @@
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+"""Reporting and delivery artifacts rendering module.
 
+Tier definition:
+- Tier 2 (Pure render): render_handoff_card is a pure deterministic render function without side-effects.
+- Tier 3 (File I/O): append_changelog_entry performs atomic append/insert into CHANGELOG.md.
+"""
 from __future__ import annotations
 
+import datetime
+import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from state_machine import TaskItem
+
+
+def append_changelog_entry(
+    changelog_path: str, task_file: str, completed_tasks: List[TaskItem]
+) -> None:
+    """在 CHANGELOG.md 中增量追加已完成任务的条目。
+
+    若文件不存在则创建标准结构；若已存在则插入到第一个 '## ' 标题前。
+    """
+    today_str = datetime.date.today().isoformat()
+    file_basename = os.path.basename(task_file)
+
+    entry_lines = [
+        f"## [{today_str}] {file_basename}\n",
+        "\n",
+    ]
+    if completed_tasks:
+        for t in completed_tasks:
+            entry_lines.append(f"- **Task {t.id}**: {t.title}\n")
+    else:
+        entry_lines.append("- （无独立任务条目或全部跳过）\n")
+    entry_lines.append("\n")
+
+    if not os.path.exists(changelog_path):
+        header = [
+            "# 变更记录 (CHANGELOG)\n",
+            "\n",
+            "> 本文件记录由 Quench DevTasks 自动同步与人工补充的项目变更日志。\n",
+            "\n",
+        ]
+        all_content = header + entry_lines
+        with open(changelog_path, "w", encoding="utf-8") as f:
+            f.writelines(all_content)
+        return
+
+    with open(changelog_path, "r", encoding="utf-8") as f:
+        existing = f.readlines()
+
+    insert_idx = -1
+    for idx, line in enumerate(existing):
+        if line.startswith("## "):
+            insert_idx = idx
+            break
+
+    if insert_idx == -1:
+        # 没有二级标题，直接追加到末尾
+        existing.extend(["\n"] + entry_lines)
+    else:
+        existing = existing[:insert_idx] + entry_lines + existing[insert_idx:]
+
+    with open(changelog_path, "w", encoding="utf-8") as f:
+        f.writelines(existing)
 
 
 def _extract_spec_section(spec_text: str, header_keyword: str) -> Optional[str]:

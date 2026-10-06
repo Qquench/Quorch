@@ -16,32 +16,18 @@ from typing import List, Optional, Sequence, Tuple
 
 import filelock
 
-try:
-    from .manifest import (
-        load_manifest,
-        touch_heartbeat,
-        Manifest,
-        TaskRecord,
-        ManifestIntegrityError,
-        MANIFEST_REL_PATH,
-        atomic_replace_manifest,
-        _get_git_metadata,
-    )
-    from .project_config import load_project_config
-    from .state_machine import parse_task_file, transition_task, STATUS_CONFIRMED
-except (ImportError, ValueError):
-    from manifest import (
-        load_manifest,
-        touch_heartbeat,
-        Manifest,
-        TaskRecord,
-        ManifestIntegrityError,
-        MANIFEST_REL_PATH,
-        atomic_replace_manifest,
-        _get_git_metadata,
-    )
-    from project_config import load_project_config
-    from state_machine import parse_task_file, transition_task, STATUS_CONFIRMED
+from manifest import (
+    load_manifest,
+    touch_heartbeat,
+    Manifest,
+    TaskRecord,
+    ManifestIntegrityError,
+    MANIFEST_REL_PATH,
+    atomic_replace_manifest,
+    _get_git_metadata,
+)
+from project_config import load_project_config
+from state_machine import parse_task_file, transition_task, STATUS_CONFIRMED
 
 
 class LeaseContractError(Exception):

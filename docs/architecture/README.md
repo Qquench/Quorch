@@ -233,10 +233,8 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `path_guard.py` | T2 | Cross-platform path safety; traversal defenses | Called on every tool invocation involving file paths |
 | `project_config.py` | T2/T3 | `quench_stack.yaml` loading, validation, migration | Single parse per session; cached after first load |
 | `observability_policy.py` | T4 | Verdict sink policy; log rotation policy | Append-only verdicts; policy-driven, not hard-coded |
-| `code_explorer.py` | T3 | AST symbol extraction for `dev_tasks_refine_spec` | Read-only; no side effects |
-| `handoff_card.py` | T2 | Single source of truth for handoff card rendering (GFM alerts, collapsible task context) | Pure function; zero side-effects; no network I/O |
+| `reporting.py` | T2/T3 | Consolidated delivery artifacts and status reporting: pure handoff card rendering (T2) & atomic CHANGELOG append (T3) | Pure rendering for handoff card; non-destructive header-preserving updates for CHANGELOG |
 | `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`, `reviewer debug`) | Interactive ANSI formatting; non-AI operator gateway |
-| `changelog_writer.py` | T3 | Atomic append of completed task deliveries to `CHANGELOG.md` | Non-destructive header-preserving updates |
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement | Must respond in < 50ms; no network calls |
 | `hooks/context_injector.py` | T1 | PostToolUse context enrichment | Read-only; non-blocking |
 | `scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |
@@ -254,11 +252,10 @@ server.py → consultation.py    (Reviewer consult path)
 server.py → reviewer_engine.py (ReviewerClient factory)
 server.py → manifest.py        (task CRUD)
 server.py → code_explorer.py   (AST slice for refine_spec)
-server.py → handoff_card.py    (pure handoff card rendering)
+server.py → reporting.py       (handoff card rendering & CHANGELOG append)
 
 reviewer_engine.py → adapters/* (vendor-specific HTTP)
 reviewer_engine.py → log_naming.py (session log paths)
-reaper.py → log_naming.py (GC primitives)
 
 hooks/* → path_guard.py  (path safety)
 hooks/* → project_config.py (stack config read)

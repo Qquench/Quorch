@@ -11,11 +11,18 @@ Covers Task 1.2 and Task 1.3:
 
 from __future__ import annotations
 
+import inspect
 import os
+from pathlib import Path
+import re
 import sys
 import time
 from typing import Mapping
 import pytest
+
+server_dir = str(Path(__file__).resolve().parent.parent)
+if server_dir not in sys.path:
+    sys.path.insert(0, server_dir)
 
 from manifest import (
     BaselineSnapshot,
@@ -343,21 +350,40 @@ def test_reconciliation_windows_network_inode_zero_fallback(workspace_with_basel
     assert report.elapsed_ms >= 0.0
 
 
-def test_reconciliation_budget_ms_deprecation_warning(workspace_with_baseline):
-    """Verify that passing budget_ms triggers DeprecationWarning."""
-    ws, _, snapshot = workspace_with_baseline
+def test_reconcile_signature_param_names_are_pinned():
+    """Verify that reconcile_workspace_against_whitelist parameter names are strictly pinned (F4/G-4)."""
+    sig = inspect.signature(reconcile_workspace_against_whitelist)
+    assert set(sig.parameters.keys()) == {
+        "workspace_root",
+        "snapshot",
+        "whitelist_paths",
+        "unmanaged_patterns",
+        "max_slow_path_hashes",
+    }, f"Signature mismatch: {set(sig.parameters.keys())}"
 
-    with pytest.deprecated_call():
-        report = reconcile_workspace_against_whitelist(
+
+def test_reconciliation_budget_ms_raises_type_error(workspace_with_baseline):
+    """Negative contract: budget_ms is completely eliminated, passing it raises TypeError."""
+    ws, _, snapshot = workspace_with_baseline
+    with pytest.raises(TypeError) as exc_info:
+        reconcile_workspace_against_whitelist(
             workspace_root=str(ws),
             snapshot=snapshot,
             whitelist_paths=["src/app.py"],
             unmanaged_patterns=["docs/**", "*.md"],
             budget_ms=500.0,
         )
-    assert report.verdict == "allow"
-    assert isinstance(report.elapsed_ms, float)
-    assert report.elapsed_ms >= 0.0
+    assert "unexpected keyword argument 'budget_ms'" in str(exc_info.value) or "budget_ms" in str(exc_info.value)
+
+
+def test_budget_ms_has_zero_callers_including_kwargs_splat():
+    """Assert across production code that budget_ms has zero callers across direct, kwargs, getattr channels."""
+    server_dir = Path(__file__).resolve().parent.parent
+    for py_file in server_dir.rglob("*.py"):
+        if "tests" in py_file.parts or any(p.startswith(".") or p == "venv" for p in py_file.parts):
+            continue
+        code = py_file.read_text(encoding="utf-8")
+        assert not re.search(r"\bbudget_ms\b", code), f"Found residual budget_ms in {py_file}"
 
 
 def test_reconciliation_elapsed_ms_telemetry_only(workspace_with_baseline):
