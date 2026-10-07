@@ -770,6 +770,17 @@
       "git_head_sha": "fcdadfbf699ebfd9c900c7c1c027ffe7b2de0dbe",
       "git_index_mtime": 1791296035.1534736,
       "released": true
+    },
+    "2026-10-07_v1.20_step09c_reviewer_poll_progress_slimming::1": {
+      "task_id": "2026-10-07_v1.20_step09c_reviewer_poll_progress_slimming::1",
+      "md_sha256": "86dd826c3a7b45681955c56a1c6e26f393dbfb411dba90356c61f7c1546a1630",
+      "generation": 1,
+      "holder_token": "token_1791344516017_1996",
+      "last_heartbeat_monotonic_ns": 1075756750000000,
+      "last_heartbeat_wall_utc": "2026-10-07T03:58:10.957943+00:00",
+      "git_head_sha": "dd689ad90a4081e2a94859758e58691ec65abd8f",
+      "git_index_mtime": 1791296191.8902364,
+      "released": true
     }
   }
 }

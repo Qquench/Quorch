@@ -178,28 +178,12 @@ def test_inv3_degraded_poll_projection_enforces_anti_roleplay(tmp_path):
 
 @pytest.mark.anyio
 async def test_inv3_inv4_progress_message_format_and_stdout_purity():
-    """断言 INV-3 进度通道消息单一规范且无 findings 泄露，及 INV-4 服务端代码零 print() (D4)。"""
+    """断言 INV-3 心跳投影单一规范且无 findings 泄露，及 INV-4 服务端代码零 print() (D4)。"""
     from reviewer_engine import format_heartbeat_line
-    import server
 
     # 1. 验证心跳消息逐字节等于 format_heartbeat_line，且无 findings/日志泄露
-    emitted = []
-
-    class MockContext:
-        def report_progress(self, progress, total=None, message=None):
-            emitted.append({"progress": progress, "total": total, "message": message})
-
-    await server._emit_poll_progress(
-        ctx=MockContext(),
-        tokens=150,
-        elapsed_s=12.5,
-        timeout_s=25.0,
-        consumed_s=1.0,
-    )
-    assert len(emitted) == 1
-    msg = emitted[0]["message"]
-    assert msg == format_heartbeat_line(150, 12.5)
-    assert len(msg) <= 128
+    msg = format_heartbeat_line(150, 12.5)
+    assert msg == "[Reviewer thinking: 12.5s | 150 tokens]"
     assert "findings" not in msg
     assert "#" not in msg
 

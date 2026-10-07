@@ -1,43 +1,28 @@
 # -*- coding: utf-8 -*-
-"""Unit and integration tests for dev_reviewer_poll MCP progress bridge.
+"""Unit and integration tests for dev_reviewer_poll streamlined polling loop (Option B).
 Locks in:
-- A1: Immediate first emission + ~1.0s throttled cadence
-- A2: ctx=None zero emission, zero exception, baseline identical
-- A3: Progress exception isolation (RuntimeError, ConnectionResetError)
-- A4: Backpressure truncation (hang report_progress capped at 0.2s)
-- A5: Terminal short-circuit (exits early upon terminal state)
-- A6: No busy waiting (sleep >= 0.05s, bounded poll count)
-- A7: Progress payload compliance (progress=consumed_s, total=timeout_s, message=format_heartbeat_line)
-- A8: Concurrent cancellation yields CANCELLED projection
-- A9: asyncio.CancelledError passthrough (never swallowed by except Exception)
+- B1: Terminal short-circuit (exits early upon terminal state <= 1.0s)
+- B2: No busy waiting (sleep >= 0.05s floor, bounded poll count, no sleep(0) tight spin)
+- B3: Concurrent cancellation yields CANCELLED projection in <= 1.0s
+- B4: asyncio.CancelledError passthrough (never swallowed by except Exception)
+- B5: Pure 5-parameter signature (no ctx parameter, inputSchema pure)
+- B6: Non-terminal wait returns format_heartbeat_line when raw_text=True
+- B7: Zero wait (wait_max_s=0) immediate return without sleep
 """
 import asyncio
+import inspect
+import os
+import sys
 import time
 import pytest
-from unittest.mock import AsyncMock
 
-from reviewer_jobs import ReviewerJobSupervisor, JobState, _durable_write_json
+SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if SERVER_DIR not in sys.path:
+    sys.path.insert(0, SERVER_DIR)
+
+from reviewer_jobs import ReviewerJobSupervisor, JobState, POLL_TERMINAL_STATES, _durable_write_json
 from reviewer_engine import format_heartbeat_line
 import server
-
-
-class TrackingContext:
-    def __init__(self, raise_exc=None, delay_s=0.0):
-        self.calls = []
-        self.raise_exc = raise_exc
-        self.delay_s = delay_s
-
-    async def report_progress(self, progress: float, total: float | None = None, message: str | None = None):
-        self.calls.append({
-            "progress": progress,
-            "total": total,
-            "message": message,
-            "time": time.monotonic(),
-        })
-        if self.delay_s > 0:
-            await asyncio.sleep(self.delay_s)
-        if self.raise_exc:
-            raise self.raise_exc
 
 
 @pytest.fixture(autouse=True)
@@ -45,106 +30,12 @@ def prevent_auto_worker_failure(monkeypatch):
     monkeypatch.setattr(ReviewerJobSupervisor, "_launch_worker", lambda self, record, req: None)
 
 
-
 @pytest.mark.anyio
-async def test_a1_and_a7_first_tick_immediate_and_payload_cadence(tmp_path):
-    """A1 / A7: 断言首拍即时发射，后续 ~1.0s 节流，载荷结构符合进度契约。"""
+async def test_b1_terminal_short_circuit(tmp_path):
+    """B1: 断言作业提前完成时，长轮询在下一个 tick (<= 0.5s) 立即短路返回，无需等满 wait_max_s。"""
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a1_test"})
-
-    ctx = TrackingContext()
-    start = time.monotonic()
-    # 等待 2.2 秒（应该触发：t=0, t=1.0, t=2.0 共 3 次）
-    res = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="a1_test",
-        wait_max_s=2,
-        ctx=ctx,
-    )
-    elapsed = time.monotonic() - start
-
-    assert isinstance(res, str)
-    assert res.startswith("[Reviewer thinking:")
-    assert len(ctx.calls) >= 2  # 首拍 + 至少 1 次后续节流
-    # 首拍即时性：第一次发射距 start <= 0.2s
-    assert ctx.calls[0]["time"] - start <= 0.2
-    assert ctx.calls[0]["total"] == 2.0
-    assert "Reviewer thinking:" in ctx.calls[0]["message"]
-
-    # 间隔在 ~1.0s 附近
-    if len(ctx.calls) >= 2:
-        interval = ctx.calls[1]["time"] - ctx.calls[0]["time"]
-        assert 0.90 <= interval <= 1.35
-
-
-@pytest.mark.anyio
-async def test_a2_ctx_none_zero_emissions(tmp_path):
-    """A2: 断言 ctx=None 或未注入时不抛异常、零通知，返回值与无 ctx 基线完全一致。"""
-    ws = str(tmp_path)
-    supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a2_test"})
-
-    res = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="a2_test",
-        wait_max_s=1,
-        ctx=None,
-    )
-    assert isinstance(res, str)
-    assert res.startswith("[Reviewer thinking:")
-
-
-@pytest.mark.anyio
-async def test_a3_exception_isolation_in_progress(tmp_path):
-    """A3: 断言 report_progress 抛错（RuntimeError / ConnectionResetError）被静默隔离，不影响轮询主结果。"""
-    ws = str(tmp_path)
-    supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a3_test"})
-
-    ctx = TrackingContext(raise_exc=ConnectionResetError("transport closed"))
-    res = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="a3_test",
-        wait_max_s=1,
-        ctx=ctx,
-    )
-    assert isinstance(res, str)
-    assert res.startswith("[Reviewer thinking:")
-    assert len(ctx.calls) >= 1
-
-
-@pytest.mark.anyio
-async def test_a4_backpressure_truncation(tmp_path):
-    """A4: 断言 report_progress 悬挂挂起时被 0.2s 截断，总耗时不超过 wait_max_s + 0.5s。"""
-    ws = str(tmp_path)
-    supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a4_test"})
-
-    ctx = TrackingContext(delay_s=5.0)  # 模拟通知端背压悬挂 5 秒
-    start = time.monotonic()
-    res = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="a4_test",
-        wait_max_s=1,
-        ctx=ctx,
-    )
-    duration = time.monotonic() - start
-
-    assert isinstance(res, str)
-    assert duration <= 1.8  # 1.0s timeout + 0.2s backpressure wait + margin
-
-
-@pytest.mark.anyio
-async def test_a5_terminal_short_circuit(tmp_path):
-    """A5: 断言作业提前完成时，长轮询在下一个 tick (<= 0.5s) 立即短路返回，无需等满 wait_max_s。"""
-    ws = str(tmp_path)
-    supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a5_test"})
+    rec = supervisor.submit({"query": "q", "session_id": "b1_test"})
 
     res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
     _durable_write_json(res_path, {"verdict": "PASS", "findings": "### Strategic Finding\n- All good.", "usage": {}})
@@ -159,15 +50,13 @@ async def test_a5_terminal_short_circuit(tmp_path):
             updates={"result_ref": str(res_path)},
         )
 
-    ctx = TrackingContext()
     start = time.monotonic()
     task = asyncio.create_task(_finish_early())
     res = await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
-        session_id="a5_test",
+        session_id="b1_test",
         wait_max_s=10,  # 配置 10 秒超时
-        ctx=ctx,
     )
     await task
     duration = time.monotonic() - start
@@ -177,11 +66,11 @@ async def test_a5_terminal_short_circuit(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_a6_no_busy_waiting(tmp_path, monkeypatch):
-    """A6: 断言无紧循环忙等，sleep 间隔 >= 0.05s，累计循环轮数受限。"""
+async def test_b2_no_busy_waiting_and_sleep_floor(tmp_path, monkeypatch):
+    """B2: 断言无紧循环忙等，sleep 间隔 >= 0.05s 下限，累计循环轮数受限 (热旋防线)。"""
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a6_test"})
+    rec = supervisor.submit({"query": "q", "session_id": "b2_test"})
 
     sleep_durations = []
     real_sleep = asyncio.sleep
@@ -195,32 +84,32 @@ async def test_a6_no_busy_waiting(tmp_path, monkeypatch):
     await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
-        session_id="a6_test",
+        session_id="b2_test",
         wait_max_s=1,
     )
 
     assert len(sleep_durations) > 0
-    assert all(d >= 0.05 for d in sleep_durations)
+    assert all(d >= 0.05 for d in sleep_durations), f"Found sleep < 0.05s: {sleep_durations}"
     assert len(sleep_durations) <= 6  # 1s / 0.25s + margin
 
 
 @pytest.mark.anyio
-async def test_a8_concurrent_cancellation_projection(tmp_path):
-    """A8: 等待中调用 supervisor.cancel，轮询在 <= 0.5s 内返回 CANCELLED 降级卡片。"""
+async def test_b3_concurrent_cancellation_projection(tmp_path):
+    """B3: 等待中调用 supervisor.cancel，轮询在 <= 0.5s 内返回 CANCELLED 降级卡片。"""
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a8_test"})
+    rec = supervisor.submit({"query": "q", "session_id": "b3_test"})
 
     async def _cancel_soon():
         await asyncio.sleep(0.1)
-        supervisor.cancel(rec.job_id, session_id="a8_test")
+        supervisor.cancel(rec.job_id, session_id="b3_test")
 
     task = asyncio.create_task(_cancel_soon())
     start = time.monotonic()
     res = await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
-        session_id="a8_test",
+        session_id="b3_test",
         wait_max_s=5,
     )
     await task
@@ -232,16 +121,16 @@ async def test_a8_concurrent_cancellation_projection(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_a9_cancelled_error_passthrough(tmp_path):
-    """A9: 客户端请求取消时，asyncio.CancelledError 正常向上透传，绝不被 except 吞掉。"""
+async def test_b4_cancelled_error_passthrough(tmp_path):
+    """B4: 客户端请求取消时，asyncio.CancelledError 正常向上透传，绝不被 except 吞掉。"""
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
-    rec = supervisor.submit({"query": "q", "session_id": "a9_test"})
+    rec = supervisor.submit({"query": "q", "session_id": "b4_test"})
 
     poll_task = asyncio.create_task(server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
-        session_id="a9_test",
+        session_id="b4_test",
         wait_max_s=5,
     ))
 
@@ -251,5 +140,45 @@ async def test_a9_cancelled_error_passthrough(tmp_path):
     with pytest.raises(asyncio.CancelledError):
         await poll_task
 
-    # 且后台 worker 的 JobRecord 仍保持存活，未被连带销毁
-    assert supervisor.is_terminal_state(rec.job_id, session_id="a9_test") is False
+    # 且后台 worker 的状态仍保持非终态存活，未被连带销毁
+    poll_res = supervisor.poll(rec.job_id, session_id="b4_test", raw_text=False)
+    assert poll_res["state"] not in POLL_TERMINAL_STATES
+
+
+def test_b5_pure_signature_and_no_ctx():
+    """B5: 断言 dev_reviewer_poll 签名纯净，不包含 ctx 形参，位置参数严格 5 项。"""
+    sig = inspect.signature(server.dev_reviewer_poll)
+    param_names = list(sig.parameters.keys())
+    assert param_names == ["workspace_root", "job_id", "session_id", "wait_max_s", "raw_text"]
+    assert "ctx" not in param_names
+    assert sig.parameters["wait_max_s"].default == 0
+    assert sig.parameters["raw_text"].default is True
+
+
+@pytest.mark.anyio
+async def test_b6_raw_text_heartbeat_projection(tmp_path):
+    """B6: 非终态超时返回时，raw_text=True 返回单行心跳文本，raw_text=False 返回结构化 dict。"""
+    ws = str(tmp_path)
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "b6_test"})
+
+    res_text = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="b6_test",
+        wait_max_s=1,
+        raw_text=True,
+    )
+    assert isinstance(res_text, str)
+    assert res_text.startswith("[Reviewer thinking:")
+
+    res_dict = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="b6_test",
+        wait_max_s=1,
+        raw_text=False,
+    )
+    assert isinstance(res_dict, dict)
+    assert res_dict["state"] == "QUEUED"
+    assert "job_id" in res_dict

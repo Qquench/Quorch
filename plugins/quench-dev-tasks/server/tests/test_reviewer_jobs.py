@@ -444,34 +444,31 @@ def test_heartbeat_single_line_projection_format():
     assert structured["state"] == "RUNNING"
 
 
-def test_progress_snapshot_and_is_terminal_state(tmp_path):
-    """断言 progress_snapshot 与 is_terminal_state 纯读 SSOT 契约 (B2 / D3)。"""
+def test_progress_snapshot_and_no_is_terminal_state(tmp_path):
+    """断言 progress_snapshot 纯读 SSOT 契约，且 is_terminal_state 冗余方法已被移除 (Option B)。"""
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    assert hasattr(supervisor, "is_terminal_state") is False
     rec = supervisor.submit({"query": "q", "session_id": "snap_sess"})
 
     # 1. 运行中/排队中状态
-    assert supervisor.is_terminal_state(rec.job_id, session_id="snap_sess") is False
     snap = supervisor.progress_snapshot(rec.job_id, session_id="snap_sess")
     assert snap is not None
     assert snap.tokens >= 0
     assert snap.elapsed_s >= 0.0
     assert snap.state == "QUEUED"
 
-    # 2. 会话不匹配或作业不存在 -> None / True
+    # 2. 会话不匹配或作业不存在 -> None
     assert supervisor.progress_snapshot("non_existent", session_id="snap_sess") is None
-    assert supervisor.is_terminal_state("non_existent", session_id="snap_sess") is True
     assert supervisor.progress_snapshot(rec.job_id, session_id="wrong_sess") is None
-    assert supervisor.is_terminal_state(rec.job_id, session_id="wrong_sess") is True
 
-    # 3. 终态 COMPLETED -> progress_snapshot 为 None, is_terminal_state 为 True
+    # 3. 终态 COMPLETED -> progress_snapshot 为 None
     supervisor._cas_transition(
         rec.session_id,
         rec.job_id,
         JobState.QUEUED,
         JobState.COMPLETED,
     )
-    assert supervisor.is_terminal_state(rec.job_id, session_id="snap_sess") is True
     assert supervisor.progress_snapshot(rec.job_id, session_id="snap_sess") is None
 
 

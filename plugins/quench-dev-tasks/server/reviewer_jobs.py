@@ -1252,24 +1252,6 @@ class ReviewerJobSupervisor:
         )
         return self.project_poll_result(snapshot, raw_text=raw_text)
 
-    def is_terminal_state(self, job_id: str, *, session_id: str) -> bool:
-        """非投影终态访问器；纯读、无副作用、不抛异常。
-        禁止通过解析 raw_text 字符串判定终态。
-        若作业不存在、鉴权失败或在 TERMINAL_STATES 中，返回 True。
-        """
-        try:
-            val_id = validate_job_id(job_id)
-            from consultation import sanitize_session_id
-            val_sid = sanitize_session_id(session_id, max_len=128)
-            target_sid = self._find_job_session(val_id) or val_sid
-            record = self._load_job_record(target_sid, val_id)
-            if record is None:
-                return True
-            assert_poll_authorized(record, val_sid)
-            return record.state in TERMINAL_STATES
-        except Exception:
-            return True
-
     def progress_snapshot(self, job_id: str, *, session_id: str) -> Optional[JobProgress]:
         """纯读、无副作用、不跨 await 持锁。
         None = 作业不可见（不存在 / session 不匹配 / 已终态 / 异常降级）。

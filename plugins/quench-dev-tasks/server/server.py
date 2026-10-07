@@ -2883,49 +2883,6 @@ async def dev_reviewer_submit(
         }
 
 
-_PROGRESS_EMIT_INTERVAL_S: float = 1.0
-_POLL_SLEEP_INTERVAL_S: float = 0.5
-_MAX_PROGRESS_MESSAGE_CHARS: int = 128
-
-
-async def _emit_poll_progress(
-    ctx: Any,
-    tokens: int,
-    elapsed_s: float,
-    timeout_s: float = 0.0,
-    consumed_s: float = 0.0,
-) -> None:
-    """发射单条 MCP 进度通知（尽力而为 best-effort）。
-    无 progressToken / 无 report_progress / 客户端断开 / 超时 -> 一律静默降级，绝不中断长轮询。
-    显式透传 asyncio.CancelledError，保证外部取消语义穿透。
-    """
-    if ctx is None or not hasattr(ctx, "report_progress") or not callable(ctx.report_progress):
-        return
-    import inspect
-    from reviewer_engine import format_heartbeat_line
-
-    msg = format_heartbeat_line(tokens, elapsed_s)
-    if len(msg) > _MAX_PROGRESS_MESSAGE_CHARS:
-        msg = msg[:_MAX_PROGRESS_MESSAGE_CHARS]
-
-    async def _send() -> None:
-        res = ctx.report_progress(
-            progress=float(consumed_s),
-            total=float(timeout_s) if timeout_s > 0 else None,
-            message=msg,
-        )
-        if inspect.isawaitable(res):
-            await res
-
-    try:
-        # 取消 drain() 是安全的：消息已整体进入写缓冲，不存在半帧撕裂 (B3)
-        await asyncio.wait_for(_send(), timeout=0.2)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        pass
-
-
 @mcp.tool()
 async def dev_reviewer_poll(
     workspace_root: str,
@@ -2933,14 +2890,12 @@ async def dev_reviewer_poll(
     session_id: str,
     wait_max_s: int = 0,
     raw_text: bool = True,
-    ctx: Context = None,
 ) -> Union[str, dict[str, Any]]:
     """Poll status or result of a background Reviewer task.
     Enforces 1KB non-terminal snapshot contract.
 
     轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。
     支持 raw_text=True 纯文本单行心跳输出与终态直出 Markdown，支持 wait_max_s 服务端长轮询。
-    在长轮询期间经 FastMCP Context.report_progress 发射带外心跳通知（尽力而为 best-effort）。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2956,13 +2911,13 @@ async def dev_reviewer_poll(
             "error": f"Invalid wait_max_s: '{wait_max_s}' must be an integer.",
         }
 
-    from reviewer_jobs import ReviewerJobSupervisor
+    from reviewer_jobs import POLL_TERMINAL_STATES, ReviewerJobSupervisor
     supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
 
     timeout_s = max(0, min(25, wait_int))
     start_t = time.monotonic()
 
-    # timeout_s == 0 瞬态直接返回，不睡眠、不发射通知 (K4)
+    # timeout_s == 0 瞬态直接返回，不睡眠 (K4)
     if timeout_s == 0:
         try:
             return supervisor.poll(job_id, session_id=session_id, raw_text=raw_text)
@@ -2972,40 +2927,28 @@ async def dev_reviewer_poll(
             return {"status": "error", "error": str(e)}
 
     deadline = start_t + timeout_s
-    next_emit_tick = start_t  # 首拍即时发射（t≈0 立即一次心跳）
 
     while True:
         try:
-            res = supervisor.poll(job_id, session_id=session_id, raw_text=raw_text)
+            snap_dict = supervisor.poll(job_id, session_id=session_id, raw_text=False)
         except (KeyError, ValueError, PermissionError) as e:
             return {"status": "error", "error": str(e)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-        # 使用非投影终态访问器 is_terminal_state 判定终态，严禁解析 raw_text 字符串 (B2)
-        if supervisor.is_terminal_state(job_id, session_id=session_id):
-            return res
+        state = snap_dict.get("state")
+        if state in POLL_TERMINAL_STATES:
+            if not raw_text:
+                return snap_dict
+            return supervisor.poll(job_id, session_id=session_id, raw_text=True)
 
-        now = time.monotonic()
-        remaining = deadline - now
+        remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return res
+            if not raw_text:
+                return snap_dict
+            return supervisor.poll(job_id, session_id=session_id, raw_text=True)
 
-        # 进度发射（首拍即时，后续每 _PROGRESS_EMIT_INTERVAL_S 节流）
-        if now >= next_emit_tick:
-            snap = supervisor.progress_snapshot(job_id, session_id=session_id)
-            if snap is not None:
-                consumed_s = now - start_t
-                await _emit_poll_progress(
-                    ctx=ctx,
-                    tokens=snap.tokens,
-                    elapsed_s=snap.elapsed_s,
-                    timeout_s=float(timeout_s),
-                    consumed_s=float(consumed_s),
-                )
-            next_emit_tick = now + _PROGRESS_EMIT_INTERVAL_S
-
-        # 睡眠步长：保证下限 0.05s 防止热旋，上限 0.25s (B2 / A6)
+        # 睡眠步长：保证下限 0.05s 防止热旋，上限 0.25s
         sleep_s = min(0.25, max(0.05, remaining))
         await asyncio.sleep(sleep_s)
 
