@@ -12,6 +12,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from types import MappingProxyType
 from unittest.mock import patch
 
 import pytest
@@ -30,12 +31,37 @@ from asset_inventory import (  # noqa: E402
     MAX_SCANNED_FILE_BYTES,
     MUST_NOT_REMOVE_SYMBOLS,
     OUTPUT_MD_REL,
+    FROZEN_V120_REL,
+    CURRENT_INV_REL,
+    DELTA_REPORT_ARG,
+    DELTA_BEGIN_MARK,
+    DELTA_END_MARK,
+    FrozenSnapshotMissingError,
+    FrozenSnapshotUnparsableError,
+    DeltaBlockMalformedError,
+    ResolvedRecord,
+    PersistedRecord,
+    EmergedRecord,
+    CouplingRecord,
+    InventorySnapshot,
+    DeltaReport,
+    INVARIANT_OWNERSHIP,
+    KNOWN_INVARIANT_GAPS,
     DOC_NON_CONSUMER_PREFIXES,
     DOC_ROOT_RELS,
     _is_non_consumer_doc,
     ConsumerEdge,
     InventoryReport,
     ModuleNode,
+    _assert_balanced_markers,
+    strip_delta_block,
+    compute_pure_projection_sha256,
+    atomic_write_text,
+    build_coupling_records,
+    build_module_graph,
+    compute_delta_report,
+    render_delta_report_markdown,
+    write_inventory_with_delta,
     build_consumer_graph,
     build_inventory_report,
     classify_removal_candidates,
@@ -282,7 +308,7 @@ def test_14_time_drift_telemetry_decoupling(tmp_path: Path):
         out_file = REPO_ROOT / OUTPUT_MD_REL
         existing_rendered = out_file.read_text(encoding="utf-8")
 
-        gated_existing = extract_gated_body(existing_rendered)
+        gated_existing = extract_gated_body(strip_delta_block(existing_rendered))
         gated_after = extract_gated_body(rendered_after)
 
         hash_existing = hashlib.sha256(gated_existing.encode("utf-8")).hexdigest()
@@ -386,4 +412,220 @@ def test_gitattributes_contract():
     assert "* text=auto eol=lf" in text
     assert "*.md text eol=lf" in text
     assert b"\r\n" not in gitattributes_path.read_bytes(), ".gitattributes must have LF line endings!"
+
+
+def test_delta_schema_contract():
+    """断言 Delta 差异报告符合 v1.22 §4.1 五段契约与哈希对比表。"""
+    frozen_file = REPO_ROOT / FROZEN_V120_REL
+    report = build_inventory_report(REPO_ROOT)
+    pure_text = render_markdown(report)
+    snapshot = InventorySnapshot(report=report, rendered_pure_markdown=pure_text)
+    delta = compute_delta_report(frozen_file, snapshot)
+
+    assert isinstance(delta, DeltaReport)
+    assert isinstance(delta.resolved, tuple)
+    assert isinstance(delta.persisted, tuple)
+    assert isinstance(delta.emerged, tuple)
+    assert isinstance(delta.coupling, tuple)
+    assert isinstance(delta.module_graph, (dict, MappingProxyType))
+
+    # 哈希必须是合法 64 位十六进制
+    assert re.match(r"^[0-9a-f]{64}$", delta.frozen_sha256)
+    assert re.match(r"^[0-9a-f]{64}$", delta.current_sha256)
+
+    # 验证 Coupling 段双租约
+    lease_names = {c.lease_name for c in delta.coupling}
+    assert "manifest_lease" in lease_names
+    assert "workspace_lease" in lease_names
+
+
+def test_delta_mode_readonly():
+    """D-R2 只读纪律：--delta-report 执行前后 over_engineering_inventory.md 的 SHA256 与 mtime_ns 均不变。"""
+    out_file = REPO_ROOT / OUTPUT_MD_REL
+    assert out_file.is_file()
+    stat_before = out_file.stat()
+    sha_before = hashlib.sha256(out_file.read_bytes()).hexdigest()
+    mtime_before = stat_before.st_mtime_ns
+
+    exit_code = main(["--delta-report"])
+    assert exit_code == EXIT_OK
+
+    stat_after = out_file.stat()
+    sha_after = hashlib.sha256(out_file.read_bytes()).hexdigest()
+    mtime_after = stat_after.st_mtime_ns
+
+    assert sha_after == sha_before, "READONLY_SHA_VIOLATION"
+    assert mtime_after == mtime_before, "READONLY_MTIME_VIOLATION"
+
+
+def test_rebaseline_determinism():
+    """D-R5 / TP-4 确定性律：同一 commit 连续两次生成的清单与 Delta 段逐字节一致。"""
+    frozen_file = REPO_ROOT / FROZEN_V120_REL
+    report1 = build_inventory_report(REPO_ROOT)
+    pure1 = render_markdown(report1)
+    delta1 = compute_delta_report(frozen_file, InventorySnapshot(report1, pure1))
+    full1 = write_inventory_with_delta(pure1, delta1)
+
+    report2 = build_inventory_report(REPO_ROOT)
+    pure2 = render_markdown(report2)
+    delta2 = compute_delta_report(frozen_file, InventorySnapshot(report2, pure2))
+    full2 = write_inventory_with_delta(pure2, delta2)
+
+    assert full1 == full2
+    assert full1.encode("utf-8") == full2.encode("utf-8")
+
+
+def test_additive_regression():
+    """D-R4 加性守卫：当前纯投影与 golden 基线件逐字节完全一致。"""
+    golden_file = REPO_ROOT / "plugins/quench-dev-tasks/server/tests/fixtures/asset_inventory_default_golden.txt"
+    assert golden_file.is_file(), "Golden baseline file is missing!"
+    golden_content = golden_file.read_text(encoding="utf-8")
+
+    out_file = REPO_ROOT / OUTPUT_MD_REL
+    assert out_file.is_file()
+    current_content = out_file.read_text(encoding="utf-8")
+    pure_current = strip_delta_block(current_content)
+
+    golden_norm = golden_content.replace("\r\n", "\n").strip() + "\n"
+    pure_norm = pure_current.replace("\r\n", "\n").strip() + "\n"
+    assert pure_norm == golden_norm, "Additive regression detected against golden baseline!"
+
+
+def test_write_idempotent():
+    """D-R10 (N1) 写幂等律：write(write(x)) == write(x)，严禁 Delta 块重复嵌套累积。"""
+    frozen_file = REPO_ROOT / FROZEN_V120_REL
+    report = build_inventory_report(REPO_ROOT)
+    pure_text = render_markdown(report)
+    snapshot = InventorySnapshot(report, pure_text)
+    delta = compute_delta_report(frozen_file, snapshot)
+
+    once = write_inventory_with_delta(pure_text, delta)
+    twice = write_inventory_with_delta(once, delta)
+    thrice = write_inventory_with_delta(twice, delta)
+
+    assert once == twice
+    assert twice == thrice
+    assert once.count(DELTA_BEGIN_MARK) == 1
+    assert once.count(DELTA_END_MARK) == 1
+
+
+def test_marker_balance_fail_closed():
+    """D-R11 (N3) 标记闭锁律：标记失衡或畸形时严格抛出 DeltaBlockMalformedError。"""
+    # 1. 只有 BEGIN 没有 END
+    with pytest.raises(DeltaBlockMalformedError):
+        _assert_balanced_markers(f"{DELTA_BEGIN_MARK}\nsome text")
+
+    # 2. 只有 END 没有 BEGIN
+    with pytest.raises(DeltaBlockMalformedError):
+        _assert_balanced_markers(f"some text\n{DELTA_END_MARK}")
+
+    # 3. 重复成对标记
+    with pytest.raises(DeltaBlockMalformedError):
+        _assert_balanced_markers(f"{DELTA_BEGIN_MARK}\n1\n{DELTA_END_MARK}\n{DELTA_BEGIN_MARK}\n2\n{DELTA_END_MARK}")
+
+    # 4. 反向标记 (END 在 BEGIN 前)
+    with pytest.raises(DeltaBlockMalformedError):
+        _assert_balanced_markers(f"{DELTA_END_MARK}\nsome text\n{DELTA_BEGIN_MARK}")
+
+
+def test_ordering_and_no_leak():
+    """D-R5 / N4 确定性排序与泄漏防护：邻接表与拓扑元组排序确定，输出中无绝对路径与动态时间戳。"""
+    frozen_file = REPO_ROOT / FROZEN_V120_REL
+    report = build_inventory_report(REPO_ROOT)
+    pure = render_markdown(report)
+    delta = compute_delta_report(frozen_file, InventorySnapshot(report, pure))
+    rendered_delta = render_delta_report_markdown(delta)
+
+    # 1. Module graph 排序
+    for mod_path, deps in delta.module_graph.items():
+        assert deps == tuple(sorted(deps)), f"Module deps for {mod_path} not sorted!"
+
+    # 2. Coupling 排序
+    for c in delta.coupling:
+        assert c.call_topology == tuple(sorted(c.call_topology)), f"Topology for {c.lease_name} not sorted!"
+
+    # 3. 无绝对路径
+    assert re.search(r"[A-Za-z]:[/\\]", rendered_delta) is None
+    assert re.search(r"/(?:Users|home|workspace|tmp|var|private)/", rendered_delta) is None
+
+    # 4. 无 RFC3339 动态时间戳
+    assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", rendered_delta) is None
+
+
+def test_atomic_write(tmp_path: Path):
+    """D-R12 (N7) 原子写律：保证写入成功且不产生遗留临时文件。"""
+    target = tmp_path / "sub" / "output.txt"
+    text = "hello atomic world\n"
+    atomic_write_text(target, text)
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == text
+
+    # 确保没有遗留 tmp 文件
+    tmp_files = list(target.parent.glob("*.tmp.*"))
+    assert len(tmp_files) == 0
+
+
+def test_invariant_mapping_fail_closed(tmp_path: Path):
+    """D-R3 (N8) 完备性与 fail-closed：Persisted 符号若缺失不变量且未在 KNOWN_INVARIANT_GAPS 登记，抛 ValueError。"""
+    fake_frozen = tmp_path / "fake_frozen.md"
+    fake_content = (
+        "## 1. 核心\n\n"
+        "## 2. 潜在删除/重构候选清单\n"
+        "| `__unregistered_orphan_sym__` | `plugins/quench-dev-tasks/server/fake.py` |\n\n"
+        "## 3. 服务端生产模块概览\n"
+    )
+    fake_frozen.write_text(fake_content, encoding="utf-8")
+
+    fake_module = ModuleNode(
+        rel_path="plugins/quench-dev-tasks/server/fake.py",
+        imported_modules=(),
+        imported_symbols=(),
+        defined_symbols=("__unregistered_orphan_sym__",),
+    )
+    fake_report = InventoryReport(
+        modules=(fake_module,),
+        consumers=(),
+        tools=(),
+        audit_reason_histogram={},
+        telemetry_meta={},
+        skipped_files=(),
+        doc_drift_ledger=(),
+        g1prime_gaps=(),
+        removal_candidates=(),
+        must_not_remove=(),
+    )
+    fake_snapshot = InventorySnapshot(fake_report, "pure")
+
+    with pytest.raises(ValueError) as excinfo:
+        compute_delta_report(fake_frozen, fake_snapshot)
+    assert "not in KNOWN_INVARIANT_GAPS" in str(excinfo.value)
+
+
+def test_frozen_snapshot_missing_and_unparsable(tmp_path: Path):
+    """D-R9 边界：快照缺失抛 FrozenSnapshotMissingError；不可解析抛 FrozenSnapshotUnparsableError。"""
+    report = build_inventory_report(REPO_ROOT)
+    snapshot = InventorySnapshot(report, "pure")
+
+    # 1. 缺失
+    non_existent = tmp_path / "missing.md"
+    with pytest.raises(FrozenSnapshotMissingError):
+        compute_delta_report(non_existent, snapshot)
+
+    # 2. 不可解析（缺失必须的 Section 头）
+    bad_file = tmp_path / "bad.md"
+    bad_file.write_text("random broken content", encoding="utf-8")
+    with pytest.raises(FrozenSnapshotUnparsableError):
+        compute_delta_report(bad_file, snapshot)
+
+
+def test_emerged_record_register_only():
+    """D-R8 / N5 纪律：EmergedRecord.suggested_disposition 严格为 REGISTER_ONLY。"""
+    rec = EmergedRecord(
+        symbol="emerged_probe",
+        defining_module="server.py",
+        consumer_count=0,
+        carrying_invariants=(),
+        axiom_mapping=(),
+    )
+    assert rec.suggested_disposition == "REGISTER_ONLY"
 

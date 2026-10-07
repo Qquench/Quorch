@@ -9,19 +9,41 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Final, Mapping, Sequence
+from typing import Final, Literal, Mapping, Sequence
 
 REPO_ROOT_MARKERS: Final[tuple[str, ...]] = (".git", ".agents/quench_stack.yaml")
 SERVER_ROOT_REL: Final[str] = "plugins/quench-dev-tasks/server"
 TESTS_ROOT_REL: Final[str] = "plugins/quench-dev-tasks/server/tests"
 OUTPUT_MD_REL: Final[str] = "docs/architecture/over_engineering_inventory.md"
+FROZEN_V120_REL: Final[str] = "docs/architecture/over_engineering_inventory_v120_frozen.md"
+CURRENT_INV_REL: Final[str] = "docs/architecture/over_engineering_inventory.md"
+DELTA_REPORT_ARG: Final[str] = "--delta-report"
+DELTA_BEGIN_MARK: Final[str] = "<!-- QUENCH-DELTA-BEGIN:v1.21 -->"
+DELTA_END_MARK: Final[str] = "<!-- QUENCH-DELTA-END:v1.21 -->"
+
+
+class FrozenSnapshotMissingError(Exception):
+    """冻结快照文件缺失时抛出。"""
+    pass
+
+
+class FrozenSnapshotUnparsableError(Exception):
+    """冻结快照文件格式异常或无法解析时抛出。"""
+    pass
+
+
+class DeltaBlockMalformedError(Exception):
+    """Delta 分隔符失衡或格式畸形时抛出（Fail-closed 闭锁）。"""
+    pass
 
 CONSUMER_SCAN_ROOTS: Final[tuple[str, ...]] = (
     "plugins/quench-dev-tasks/server",
@@ -114,6 +136,202 @@ class InventoryReport:
     g1prime_gaps: tuple[str, ...]
     removal_candidates: tuple[ConsumerEdge, ...]
     must_not_remove: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedRecord:
+    symbol: str
+    defining_module: str
+    protected_invariants: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PersistedRecord:
+    symbol: str
+    defining_module: str
+    consumer_count: int
+    carrying_invariants: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EmergedRecord:
+    symbol: str
+    defining_module: str
+    consumer_count: int
+    carrying_invariants: tuple[str, ...]
+    axiom_mapping: tuple[str, ...]
+    suggested_disposition: Literal["REGISTER_ONLY"] = "REGISTER_ONLY"
+
+
+@dataclass(frozen=True)
+class CouplingRecord:
+    lease_name: Literal["manifest_lease", "workspace_lease"]
+    semantic_domain: str
+    call_topology: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class InventorySnapshot:
+    report: InventoryReport
+    rendered_pure_markdown: str
+
+
+@dataclass(frozen=True)
+class DeltaReport:
+    resolved: tuple[ResolvedRecord, ...]
+    persisted: tuple[PersistedRecord, ...]
+    emerged: tuple[EmergedRecord, ...]
+    coupling: tuple[CouplingRecord, ...]
+    module_graph: Mapping[str, tuple[str, ...]]
+    frozen_sha256: str
+    current_sha256: str
+
+
+INVARIANT_OWNERSHIP: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType({
+    "reclaim_stale_task": ("INV-1",),
+    "generation": ("INV-1", "A1"),
+    "owner_boot_nonce": ("INV-1", "A1"),
+    "probe_peer": ("INV-1",),
+    "TERMINAL_RESULT_ALLOWED_FIELDS": ("INV-3",),
+    "assert_read_only_sandbox": ("INV-6",),
+    "filelock": ("INV-1",),
+    "precondition_changed": ("INV-1", "A1"),
+    "on_missing_record": ("INV-1",),
+    "canonical_artifact_ref": ("INV-7",),
+    "format_heartbeat_line": ("C2",),
+    "IS_SOLE_PROVIDER_EGRESS": ("INV-9",),
+    "ReviewerRateLimitError": ("INV-9",),
+    "ReviewerTimeoutError": ("INV-9",),
+    "AUDIT_LINE_MAX_BYTES": ("INV-6",),
+    "DegradedReason": ("INV-3",),
+    "assert_poll_authorized": ("INV-6",),
+    "EMOJI_STATUS_OPTIONS": ("INV-2",),
+    "STATUS_REGEX_PART": ("INV-2",),
+    "StateMachineError": ("INV-2",),
+    "VALID_TRANSITIONS": ("INV-2",),
+    "_normalize_status": ("INV-2",),
+    "_degraded_card": ("INV-3", "C3"),
+    "_issue_checkout_lease": ("INV-1",),
+})
+
+KNOWN_INVARIANT_GAPS: Final[frozenset[str]] = frozenset({
+    "BYPASS_PRESET_CATEGORIES",
+    "CONTEXT_SPEC_PATTERN",
+    "CRITICAL_CODE_MANIFESTS",
+    "CodeExplorerError",
+    "Colors",
+    "ConsultMode",
+    "DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS",
+    "DEFAULT_DEADLINE_SECONDS",
+    "DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS",
+    "DEFAULT_MAX_TOTAL_INJECTION_CHARS",
+    "DEFAULT_UNMANAGED_DIRS",
+    "DEFAULT_WINDOW_LINES",
+    "DispatchStrategy",
+    "EXCLUDED_WORKSPACE_DIRS",
+    "FIELD_ALIASES",
+    "FileVerdictAuditSink",
+    "JOB_ID_PATTERN",
+    "KNOWN_TOP_LEVEL_KEYS",
+    "LOG_FILENAME_REGEX",
+    "MAX_CONTEXT_FILES",
+    "MAX_EXPLORE_FILES",
+    "MAX_FILE_BYTES",
+    "MAX_HOPS_LIMIT",
+    "MAX_INJECTION_CHARS",
+    "MAX_LINES_PER_SLICE",
+    "MAX_LOG_FILES_QUOTA",
+    "MAX_LOG_FILE_BYTES",
+    "MAX_QUERY_CHARS",
+    "MAX_REASONING_TOKENS_CEILING",
+    "MAX_RESPONSE_BYTES",
+    "MAX_SLICE_LINES",
+    "MAX_TOTAL_INJECTION_CHARS_UPPER",
+    "MIN_TOTAL_INJECTION_CHARS",
+    "MIN_WINDOW_LINES",
+    "MODE_INSTRUCTIONS",
+    "NEED_FILES_PATTERN",
+    "PROTECTED_CONFIG_NAMES",
+    "QuotaResult",
+    "REQUIRED_FIELDS",
+    "ReadStatus",
+    "ReasoningBudgetExceededError",
+    "ReconcileEntry",
+    "ReviewerHandoff",
+    "SCRIPTS_DIR",
+    "SENSITIVE_PATTERNS",
+    "SERVER_DIR",
+    "SSE_IDLE_TIMEOUT_S",
+    "STATUS_PATTERN",
+    "SkippedFile",
+    "SlicedFile",
+    "SymbolIface",
+    "TASK_DRAFT_PATTERN",
+    "TelemetryRecord",
+    "UnsafePathError",
+    "VALID_AFFECTED_PREFIXES",
+    "VALID_MODES",
+    "ValidationResult",
+    "_ASSERTION_MARKERS",
+    "_DEFAULT_CONFIG_VERSION_PATCH",
+    "_DEFAULT_FAST_TRACK_PATCH",
+    "_DEFAULT_SCHEMA_VERSION_PATCH",
+    "_DRIVE",
+    "_LOCKS_MUTEX",
+    "_MULTI_DOT",
+    "_NUL_BYTE_RE",
+    "_PREFIX_LOCK",
+    "_REVIEWER_LIMITER",
+    "_SECRET_REDACTION_PATTERN",
+    "_SEEN_DEPRECATED_PROVIDERS",
+    "_SESSION_LOCKS",
+    "_WINDOWS_RESERVED_NAMES",
+    "_WIN_RESERVED_NAMES",
+    "__all__",
+    "__getattr__",
+    "_append_hook_log",
+    "_build_quench_stack_config",
+    "_calculate_shannon_entropy",
+    "_deep_merge_dict",
+    "_derive_safety_key_domains",
+    "_enforce_log_quota",
+    "_evaluate_affected_files_mtime",
+    "_extract_affected_files_from_task",
+    "_extract_spec_section",
+    "_extract_task_detail",
+    "_get_git_head_commit",
+    "_get_git_tracked_files",
+    "_get_session_lock",
+    "_glob_to_regex",
+    "_is_local_endpoint",
+    "_iter_sse_payloads",
+    "_lock_local",
+    "_match_glob",
+    "_normalize_chat_endpoint",
+    "_record_from_dict",
+    "_render_task_markdown",
+    "_resolve_namespaced_id",
+    "_resolve_task_file_path",
+    "_safe_baseline_filename",
+    "_validate_credentials_security",
+    "build_safe_slice",
+    "check_task_status_guard",
+    "cmd_archive",
+    "cmd_check",
+    "cmd_init",
+    "cmd_reviewer_debug",
+    "cmd_status",
+    "compute_elapsed_s",
+    "current_dir",
+    "extract_statuses",
+    "is_meta_file",
+    "is_task_file",
+    "is_whitelist_matched",
+    "matches_pattern",
+    "resolve_path",
+    "server_dir",
+    "should_enable_color",
+})
 
 
 MUST_NOT_REMOVE_SYMBOLS: Final[tuple[str, ...]] = (
@@ -386,7 +604,7 @@ def build_consumer_graph(
             except ValueError:
                 continue
 
-            if rel_posix == OUTPUT_MD_REL:
+            if rel_posix == OUTPUT_MD_REL or rel_posix.endswith("_frozen.md") or "over_engineering_inventory" in rel_posix:
                 continue
 
             if target.suffix == ".py":
@@ -770,8 +988,323 @@ def extract_gated_body(content: str) -> str:
     return normalized
 
 
+def _assert_balanced_markers(inventory_text: str) -> None:
+    """断言 Delta 标记在文本中恰好成对出现（0 对或 1 对），失衡即 fail-closed。"""
+    begin_count = inventory_text.count(DELTA_BEGIN_MARK)
+    end_count = inventory_text.count(DELTA_END_MARK)
+    if begin_count != end_count:
+        raise DeltaBlockMalformedError(
+            f"Unbalanced delta markers: begin={begin_count}, end={end_count}"
+        )
+    if begin_count > 1:
+        raise DeltaBlockMalformedError(
+            f"Duplicate delta markers detected: {begin_count} pairs found"
+        )
+    if begin_count == 1:
+        begin_idx = inventory_text.find(DELTA_BEGIN_MARK)
+        end_idx = inventory_text.find(DELTA_END_MARK)
+        if end_idx < begin_idx:
+            raise DeltaBlockMalformedError(
+                "Malformed delta markers: end marker appears before begin marker"
+            )
+
+
+def strip_delta_block(inventory_text: str) -> str:
+    """剥离既有 Delta 块，返回纯投影文本。先校验标记平衡。"""
+    _assert_balanced_markers(inventory_text)
+    if DELTA_BEGIN_MARK not in inventory_text:
+        return inventory_text
+    pattern = re.compile(
+        r"\n*" + re.escape(DELTA_BEGIN_MARK) + r".*?" + re.escape(DELTA_END_MARK) + r"\n*",
+        flags=re.DOTALL,
+    )
+    return pattern.sub("\n\n", inventory_text).strip() + "\n"
+
+
+def compute_pure_projection_sha256(inventory_text: str) -> str:
+    """计算剔除 Delta 块与非门禁遥测段后的纯投影门禁主体 SHA256，保证时间漂移零假红。"""
+    pure_text = strip_delta_block(inventory_text)
+    gated_text = extract_gated_body(pure_text)
+    pure_normalized = gated_text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(pure_normalized.encode("utf-8")).hexdigest()
+
+
+def atomic_write_text(target_path: Path, text: str) -> None:
+    """原子写入文本文件（tmp + os.replace），保证异常时原文件不被破坏。"""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    unique_suffix = hashlib.sha256(str(time.time_ns()).encode("utf-8")).hexdigest()[:8]
+    tmp_path = target_path.with_name(f"{target_path.name}.tmp.{os.getpid()}.{unique_suffix}")
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(normalized)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, target_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+def build_coupling_records(report: InventoryReport) -> tuple[CouplingRecord, ...]:
+    """提取双租约调用拓扑结构（manifest_lease 与 workspace_lease）。"""
+    records: list[CouplingRecord] = []
+
+    # manifest_lease
+    manifest_lease_path = "plugins/quench-dev-tasks/server/manifest_lease.py"
+    ml_consumers: set[str] = set()
+    for e in report.consumers:
+        if e.defined_in == manifest_lease_path:
+            ml_consumers.update(e.consumed_by)
+    records.append(
+        CouplingRecord(
+            lease_name="manifest_lease",
+            semantic_domain="task_coordination",
+            call_topology=tuple(sorted(ml_consumers)),
+        )
+    )
+
+    # workspace_lease
+    workspace_lease_path = "plugins/quench-dev-tasks/server/workspace_lease.py"
+    wl_consumers: set[str] = set()
+    for e in report.consumers:
+        if e.defined_in == workspace_lease_path:
+            wl_consumers.update(e.consumed_by)
+    records.append(
+        CouplingRecord(
+            lease_name="workspace_lease",
+            semantic_domain="session_cleanup",
+            call_topology=tuple(sorted(wl_consumers)),
+        )
+    )
+
+    return tuple(sorted(records, key=lambda c: (c.lease_name, c.semantic_domain)))
+
+
+def build_module_graph(report: InventoryReport) -> Mapping[str, tuple[str, ...]]:
+    """构建模块依赖邻接表，键升序且邻接 tuple 字典序排序。"""
+    prod_mod_map = {Path(m.rel_path).stem: m.rel_path for m in report.modules}
+    graph: dict[str, tuple[str, ...]] = {}
+    for m in report.modules:
+        deps: set[str] = set()
+        for imp in m.imported_modules:
+            stem = imp.split(".")[-1]
+            if stem in prod_mod_map and prod_mod_map[stem] != m.rel_path:
+                deps.add(prod_mod_map[stem])
+        graph[m.rel_path] = tuple(sorted(deps))
+    return MappingProxyType({k: graph[k] for k in sorted(graph.keys())})
+
+
+def compute_delta_report(
+    frozen_path: Path, current_inventory: InventorySnapshot
+) -> DeltaReport:
+    """对比冻结快照与当前清单，生成五段决策就绪差异报告（Resolved/Persisted/Emerged/Coupling/ModuleGraph）。"""
+    if not frozen_path.is_file():
+        raise FrozenSnapshotMissingError(f"Frozen snapshot missing: {frozen_path}")
+
+    frozen_bytes = frozen_path.read_bytes()
+    frozen_sha256 = hashlib.sha256(frozen_bytes).hexdigest()
+
+    frozen_text = frozen_bytes.decode("utf-8", errors="replace")
+    if "## 2. 潜在删除/重构候选清单" not in frozen_text or "## 3. 服务端生产模块概览" not in frozen_text:
+        raise FrozenSnapshotUnparsableError("Frozen snapshot missing required section headers")
+
+    sec2 = frozen_text.split("## 2. 潜在删除/重构候选清单", 1)[1].split("## 3. 服务端生产模块概览", 1)[0]
+    frozen_cands: list[tuple[str, str]] = []
+    for line in sec2.splitlines():
+        m = re.match(r"^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|", line.strip())
+        if m:
+            frozen_cands.append((m.group(1), m.group(2)))
+
+    if not frozen_cands and "暂无零消费者候选符号" not in sec2:
+        raise FrozenSnapshotUnparsableError("Frozen snapshot section 2 contains no recognizable candidate rows")
+
+    report = current_inventory.report
+    curr_defined: dict[tuple[str, str], bool] = {
+        (s, m.rel_path): True for m in report.modules for s in m.defined_symbols
+    }
+    edge_map: dict[tuple[str, str], ConsumerEdge] = {
+        (e.symbol, e.defined_in): e for e in report.consumers
+    }
+
+    resolved_records: list[ResolvedRecord] = []
+    persisted_records: list[PersistedRecord] = []
+
+    for sym, mod in frozen_cands:
+        if (sym, mod) not in curr_defined:
+            invariants = INVARIANT_OWNERSHIP.get(sym, ())
+            resolved_records.append(
+                ResolvedRecord(symbol=sym, defining_module=mod, protected_invariants=invariants)
+            )
+        else:
+            edge = edge_map.get((sym, mod))
+            consumer_count = len(edge.consumed_by) if edge else 0
+            invariants = INVARIANT_OWNERSHIP.get(sym, ())
+            if not invariants and sym not in KNOWN_INVARIANT_GAPS:
+                raise ValueError(
+                    f"Persisted symbol '{sym}' has no carrying invariants and is not in KNOWN_INVARIANT_GAPS (N8 fail-closed)"
+                )
+            persisted_records.append(
+                PersistedRecord(
+                    symbol=sym,
+                    defining_module=mod,
+                    consumer_count=consumer_count,
+                    carrying_invariants=invariants,
+                )
+            )
+
+    frozen_keys = set(frozen_cands)
+    emerged_records: list[EmergedRecord] = []
+    for cand in report.removal_candidates:
+        if (cand.symbol, cand.defined_in) not in frozen_keys:
+            invariants = INVARIANT_OWNERSHIP.get(cand.symbol, ())
+            emerged_records.append(
+                EmergedRecord(
+                    symbol=cand.symbol,
+                    defining_module=cand.defined_in,
+                    consumer_count=len(cand.consumed_by),
+                    carrying_invariants=invariants,
+                    axiom_mapping=(),
+                    suggested_disposition="REGISTER_ONLY",
+                )
+            )
+
+    coupling_records = build_coupling_records(report)
+    module_graph = build_module_graph(report)
+    current_sha256 = compute_pure_projection_sha256(current_inventory.rendered_pure_markdown)
+
+    return DeltaReport(
+        resolved=tuple(sorted(resolved_records, key=lambda r: (r.defining_module, r.symbol))),
+        persisted=tuple(sorted(persisted_records, key=lambda r: (r.defining_module, r.symbol))),
+        emerged=tuple(sorted(emerged_records, key=lambda r: (r.defining_module, r.symbol))),
+        coupling=tuple(sorted(coupling_records, key=lambda c: (c.lease_name, c.semantic_domain))),
+        module_graph=module_graph,
+        frozen_sha256=frozen_sha256,
+        current_sha256=current_sha256,
+    )
+
+
+def render_delta_report_markdown(delta: DeltaReport) -> str:
+    """渲染完全确定性的 v1.20 -> v1.21 架构资产差异报告 (Delta Report)。"""
+    lines: list[str] = [
+        DELTA_BEGIN_MARK,
+        "## 10. v1.20 → v1.21 架构资产差异报告 (Delta Report)",
+        "",
+        "> **v1.22 授权依据声明**:",
+        "> 本报告五段决策就绪维度对齐 v1.22 §4.1 握手规范。",
+        "> 任何生产代码删除动作必须以本报告为唯一证据授权（A6 铁律）。",
+        "",
+        "### 10.1 资产快照哈希对比表 (Hash Parity Table)",
+        "",
+        "| 资产对象 | 相对路径 | SHA256 校验和 | 说明 |",
+        "| :--- | :--- | :--- | :--- |",
+        f"| 冻结基线 (v1.20) | `{FROZEN_V120_REL}` | `{delta.frozen_sha256}` | 纯静态冻结归档 |",
+        f"| 当前纯投影 (v1.21) | `{CURRENT_INV_REL}` | `{delta.current_sha256}` | 剥离 Delta 段后的纯投影哈希 |",
+        "",
+        "---",
+        "",
+        f"### 10.2 已消灭符号清单 (Resolved Symbols, 共 {len(delta.resolved)} 项)",
+        "",
+        "| 符号 | 原定义模块 | 保护不变量确认 |",
+        "| :--- | :--- | :--- |",
+    ]
+
+    if not delta.resolved:
+        lines.append("| NONE | NONE | 暂无已消灭符号 |")
+    else:
+        for r in delta.resolved:
+            inv_str = ", ".join(f"`{i}`" for i in r.protected_invariants) if r.protected_invariants else "NONE"
+            lines.append(f"| `{r.symbol}` | `{r.defining_module}` | {inv_str} |")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        f"### 10.3 延续符号清单 (Persisted Symbols, 共 {len(delta.persisted)} 项)",
+        "",
+        "| 符号 | 定义模块 | 消费者数 | 承载不变量 |",
+        "| :--- | :--- | :--- | :--- |",
+    ])
+
+    if not delta.persisted:
+        lines.append("| NONE | NONE | 0 | NONE |")
+    else:
+        for p in delta.persisted:
+            inv_str = ", ".join(f"`{i}`" for i in p.carrying_invariants) if p.carrying_invariants else "NONE"
+            lines.append(f"| `{p.symbol}` | `{p.defining_module}` | {p.consumer_count} | {inv_str} |")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        f"### 10.4 新暴露候选清单 (Emerged Candidates, 共 {len(delta.emerged)} 项)",
+        "",
+        "| 符号 | 定义模块 | 消费者数 | 承载不变量 | 公理映射 | 建议裁决 |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- |",
+    ])
+
+    if not delta.emerged:
+        lines.append("| NONE | NONE | 0 | NONE | NONE | `REGISTER_ONLY` |")
+    else:
+        for e in delta.emerged:
+            inv_str = ", ".join(f"`{i}`" for i in e.carrying_invariants) if e.carrying_invariants else "NONE"
+            ax_str = ", ".join(f"`{a}`" for a in e.axiom_mapping) if e.axiom_mapping else "NONE"
+            lines.append(f"| `{e.symbol}` | `{e.defining_module}` | {e.consumer_count} | {inv_str} | {ax_str} | `{e.suggested_disposition}` |")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        f"### 10.5 双租约调用拓扑 (Coupling Topology, 共 {len(delta.coupling)} 项)",
+        "",
+        "| 租约名称 | 语义领域 | 调用拓扑 (`call_topology`) |",
+        "| :--- | :--- | :--- |",
+    ])
+
+    if not delta.coupling:
+        lines.append("| NONE | NONE | NONE |")
+    else:
+        for c in delta.coupling:
+            top_str = _fmt_refs(c.call_topology)
+            lines.append(f"| `{c.lease_name}` | `{c.semantic_domain}` | {top_str} |")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        f"### 10.6 生产模块依赖图谱 (Module Import Graph, 共 {len(delta.module_graph)} 个模块)",
+        "",
+        "| 模块路径 | 依赖生产模块 (`imported_modules`) |",
+        "| :--- | :--- |",
+    ])
+
+    for mod_path in sorted(delta.module_graph.keys()):
+        deps = delta.module_graph[mod_path]
+        deps_str = _fmt_refs(deps)
+        lines.append(f"| `{mod_path}` | {deps_str} |")
+
+    lines.extend([
+        "",
+        DELTA_END_MARK,
+        "",
+    ])
+
+    return "\n".join(lines)
+
+
+def write_inventory_with_delta(inventory_text: str, delta: DeltaReport) -> str:
+    """在清单文本中嵌入 Delta 报告段。必须先剥离旧 Delta 段再嵌入，确保 write(write(x)) == write(x)。"""
+    pure_text = strip_delta_block(inventory_text)
+    delta_md = render_delta_report_markdown(delta)
+    combined = pure_text.rstrip() + "\n\n" + delta_md.strip() + "\n"
+    return combined
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """CLI 入口，支持 --write, --check 以及 --repo-root。"""
+    """CLI 入口，支持 --write, --check, --delta-report 以及 --repo-root。"""
     if argv is None:
         argv = sys.argv[1:]
 
@@ -788,12 +1321,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--write",
         action="store_true",
-        help="生成并写入资产清单 Markdown 文件",
+        help="生成并写入资产清单 Markdown 文件（包含纯投影与 Delta 段）",
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="校验现有资产清单的新鲜度（对比门禁主体）",
+        help="校验现有资产清单的新鲜度（纯投影与 Delta 段双重一致性）",
+    )
+    parser.add_argument(
+        "--delta-report",
+        action="store_true",
+        help="纯只读模式：仅向 stdout 打印差异报告，不触碰任何文件",
     )
 
     try:
@@ -809,8 +1347,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
 
     out_file = repo_root / OUTPUT_MD_REL
+    frozen_file = repo_root / FROZEN_V120_REL
 
-    if args.check:
+    if args.delta_report:
+        if not frozen_file.is_file():
+            print(f"Missing frozen snapshot file: {frozen_file}", file=sys.stderr)
+            return EXIT_USAGE
+        report = build_inventory_report(repo_root)
+        rendered_pure = render_markdown(report)
+        snapshot = InventorySnapshot(report=report, rendered_pure_markdown=rendered_pure)
+        try:
+            delta = compute_delta_report(frozen_file, snapshot)
+        except Exception as e:
+            print(f"Delta report calculation failed: {e}", file=sys.stderr)
+            return EXIT_DRIFT
+        delta_md = render_delta_report_markdown(delta)
+        try:
+            sys.stdout.write(delta_md)
+        except UnicodeEncodeError:
+            sys.stdout.buffer.write(delta_md.encode("utf-8"))
+        return EXIT_OK
+
+    elif args.check:
         if not out_file.is_file():
             print(f"Missing inventory file: {out_file}", file=sys.stderr)
             return EXIT_USAGE
@@ -821,32 +1379,68 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EXIT_DRIFT
 
         existing_text = out_file.read_text(encoding="utf-8")
-        report = build_inventory_report(repo_root)
-        new_text = render_markdown(report)
+        try:
+            _assert_balanced_markers(existing_text)
+        except DeltaBlockMalformedError as e:
+            print(f"Marker balance check failed: {e}", file=sys.stderr)
+            return EXIT_DRIFT
 
-        existing_gated = extract_gated_body(existing_text)
-        new_gated = extract_gated_body(new_text)
+        if not frozen_file.is_file():
+            print(f"Missing frozen snapshot file: {frozen_file}", file=sys.stderr)
+            return EXIT_USAGE
+
+        report = build_inventory_report(repo_root)
+        new_pure_text = render_markdown(report)
+        snapshot = InventorySnapshot(report=report, rendered_pure_markdown=new_pure_text)
+        try:
+            delta = compute_delta_report(frozen_file, snapshot)
+        except Exception as e:
+            print(f"Delta report generation failed: {e}", file=sys.stderr)
+            return EXIT_DRIFT
+
+        existing_pure = strip_delta_block(existing_text)
+        existing_gated = extract_gated_body(existing_pure)
+        new_gated = extract_gated_body(new_pure_text)
 
         if existing_gated != new_gated:
-            print("Drift detected between codebase and inventory report!", file=sys.stderr)
+            print("Drift detected between codebase and inventory report pure projection!", file=sys.stderr)
+            return EXIT_DRIFT
+
+        if DELTA_BEGIN_MARK not in existing_text:
+            print("Delta report block missing in existing inventory file!", file=sys.stderr)
+            return EXIT_DRIFT
+
+        existing_delta_block = existing_text[
+            existing_text.find(DELTA_BEGIN_MARK) : existing_text.find(DELTA_END_MARK) + len(DELTA_END_MARK)
+        ]
+        expected_delta_block = render_delta_report_markdown(delta).strip()
+
+        if existing_delta_block != expected_delta_block:
+            print("Drift detected in Delta report block!", file=sys.stderr)
             return EXIT_DRIFT
 
         print("Freshness check passed: inventory matches codebase.", file=sys.stdout)
         return EXIT_OK
 
-    elif args.write:
+    else:
+        # 默认模式（或显式 --write）：生成并写入资产清单
+        if not frozen_file.is_file():
+            print(f"Missing frozen snapshot file: {frozen_file}", file=sys.stderr)
+            return EXIT_USAGE
+
         report = build_inventory_report(repo_root)
-        rendered = render_markdown(report)
-        rendered = rendered.replace("\r\n", "\n").replace("\r", "\n")
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_file, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(rendered)
+        rendered_pure = render_markdown(report)
+        snapshot = InventorySnapshot(report=report, rendered_pure_markdown=rendered_pure)
+        try:
+            delta = compute_delta_report(frozen_file, snapshot)
+        except Exception as e:
+            print(f"Delta report generation failed: {e}", file=sys.stderr)
+            return EXIT_DRIFT
+
+        full_content = write_inventory_with_delta(rendered_pure, delta)
+        atomic_write_text(out_file, full_content)
         print(f"Successfully generated inventory: {out_file}", file=sys.stdout)
         return EXIT_OK
-
-    else:
-        parser.print_help(sys.stderr)
-        return EXIT_USAGE
 
 
 if __name__ == "__main__":
