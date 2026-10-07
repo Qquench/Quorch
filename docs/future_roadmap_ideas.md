@@ -171,3 +171,33 @@ Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、�
 - **前置依赖**: 轻量级终端流式格式化支持（零繁重依赖），跨平台文件变动监听机制。
 
 
+
+---
+
+## 2026-10-07 — Antigravity Native Pro Subagent Reviewer Integration & Elastic Governance (Antigravity 原生 Pro Subagent 审查接入与弹性治理架构)
+
+### 1. Motivation & Background (背景与契机)
+- **外部 API 妥协背景**：当前阶段受限于宿主环境中 Gemini Pro 系列模型代际尚未更新、单次长上下文与深层推理配额消耗等现实制约，系统被迫采用外部 API（`reviewer_engine.py` 外部网络 egress）作为 Reviewer 审查通道。
+- **内生体验诉求**：随着下一代 Gemini Pro 模型的发布与可用（推理深度、响应延迟与用量消耗均满足生产级基准），开发者期望彻底摆脱外部第三方 API 账单与外部网络配置，直接通过 Antigravity 原生直观的 Subagent 功能（`invoke_subagent` 且 `Model: "pro"`）无缝调度 Pro 模型充当架构 Reviewer。
+- **Quench 治理价值与现实摩擦权衡**：
+  - *实际工程价值*：物理级收敛 AI 破坏性修改半径（白名单硬拦截）、状态机磁盘化抗长会话上下文退化、解耦“自写自审”的认知偏见、强约束 DoD 自动化测试交付。
+  - *固有局限与负面影响*：敏捷性与心智负担过重（微小任务流程过重、杀鸡用牛刀）、多 Agent 等待与全局排他锁脆弱性（INV-1）、常驻规则提示词所征收的上下文“规则税”（Rule Tax）、复杂动态重构时的规约僵化。
+
+### 2. Why not now? (为什么当期不做)
+- **底层模型前置依赖缺失**：下一代 Gemini Pro 系列模型在当前宿主环境中尚未正式推出，内生旗舰级推理底座尚不完备。
+- **外部引擎通道成熟闭环**：现行基于 OpenAI 兼容协议的外部 ReviewerClient 通道稳定可靠，已通过 167+ 项测试用例保障，足以支撑日常架构攻防。
+- **IDE Subagent 协议演进中**：Antigravity 等现代 AI IDE 的 Subagent 生命周期与通信规范仍在快速迭代，过早硬编码私有交互接口可能造成后续兼容脆弱性。
+
+### 3. Key Architecture & Preconditions (核心构想与前置条件)
+- **Native Pro Subagent 接入与审计门禁凭证闭环 (Audit Gate Credential Seam)**:
+  - *核心规格已就绪*：仓库内已定义 `plugins/quench-dev-tasks/agents/reviewer/agent.md`，`invoke_subagent` 原生支持 `Model: "pro"`。
+  - *门禁日志闭环*：当前 `dev_tasks_confirm` 强依赖 `.agents/logs/reviewer/verdicts.jsonl` 的物理审计日志。未来需打通两类凭证沉淀路径之一：
+    1. *工具内写入*：为 Reviewer Subagent 配置轻量审计工具（如 `dev_reviewer_record_verdict`），完成审查后直接写入标准裁决日志；
+    2. *主模型代录*：主模型在接收 Pro Subagent 的结构化评审意见后，通过 MCP 工具确认入库，使 Pre-Confirm 审计门禁能够无缝校验放行。
+- **单出口规范与纪律拓宽 (INV-9 & §6 Discipline Evolution)**:
+  - 在 `AGENTS.md` 与 `dev-tasks-discipline.md` 中拓宽合法审查源定义，将“宿主原生派生且指定为 Pro 模型的独立 Subagent”正式纳入与外部 API 并列的合规一级审查通道，消除与 INV-9（Single Provider Egress）的条款冲突。
+- **治理弹性分级（Dynamic Elastic Governance）消解摩擦**:
+  - 为避免过度流程化对轻度任务的敏捷性伤害，在 `quench_stack.yaml` 中支持弹性门禁分级：
+    - *Fast-Track 极简快车道*：低风险文档、配置、微小 Typo 仅约束涉及文件与基础单测，免除重型六字段审查与 Pro 轮询；
+    - *Full-Tier 核心攻防*：对涉及核心状态机、并发安全与高风险架构变更，强制唤醒 Pro Subagent 实施边缘防御检查与架构审查。
+- **前置依赖**: 下一代 Gemini Pro 模型在 Antigravity 环境下正式可用；Antigravity Subagent 稳定性与消息返回结构固化。

@@ -195,6 +195,25 @@ DevTask specifications are strictly validated against the Six-Core-Field structu
 
 > For the authoritative canonical bilingual field mapping table, regex definitions, and authoring rules, see [`dev_tasks_mcp_specification.md` §2.2](../../dev_tasks_mcp_specification.md#22-the-six-core-field-structured-contract) and [`dev-tasks-workflow/SKILL.md` §2](../../plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md#2-the-six-core-fields-standard-任务六大字段编写规范).
 
+### 3.5 Test Tiering Gate Contract (`tier1_fast` vs Full Regression)
+
+Quench enforces a bifurcated test execution contract designed for fast developer feedback loops while preserving full regression safety:
+
+1. **Tier-1 Fast Gate (`pytest -m tier1_fast`)**:
+   - Executes the core fast regression suite within **≤ 5s** budget across Tier-1/Tier-2/Tier-3 foundation units (pure contracts, schema validators, path guards, fast CLI checks, formatters).
+   - Marker injection is strictly decoupled from individual test files via centralized `conftest.py` hook (`pytest_collection_modifyitems`).
+   - Root `pyproject.toml` configures `pythonpath = ["plugins/quench-dev-tasks/server"]` and registers `tier1_fast` without overriding default `testpaths`.
+
+2. **Heavy Concurrency Moat Isolation ($H \cap \text{Tier-1} = \emptyset$)**:
+   - Heavy state-machine concurrency tests, multi-threaded CAS lease races (`reclaim_cas`), and inter-process workspace lock races (`workspace_lease`) remain strictly isolated from Tier-1 fast gate.
+   - Preserves 100% of concurrency test assertions without dilution or pruning.
+
+3. **Physical Verification Gate (`scripts/check_test_tiering_invariants.py`)**:
+   - Automated physical gate validating three core invariants:
+     - Disjointness: $H \cap \text{Tier-1} = \emptyset$
+     - Superset coverage: $\text{Full} \supseteq \text{Tier-1} \cup H$
+     - Execution budget: Tier-1 suite completes well within ≤ 5.0s target with non-empty item count.
+
 ---
 
 ## 4. Architectural Invariants (9 Core — All Test-Anchored)
@@ -239,6 +258,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement | Must respond in < 50ms; no network calls |
 | `hooks/context_injector.py` | T1 | PostToolUse context enrichment | Read-only; non-blocking |
 | `scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |
+| `scripts/check_test_tiering_invariants.py` | T1 | Physical test tiering gate invariant scanner asserting H ∩ Tier-1 = ∅ and collection integrity | Clean subprocess invocation with sanitized environment |
 | `scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
 | `scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
 | `scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |

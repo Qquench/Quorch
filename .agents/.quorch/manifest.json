@@ -781,6 +781,17 @@
       "git_head_sha": "dd689ad90a4081e2a94859758e58691ec65abd8f",
       "git_index_mtime": 1791296191.8902364,
       "released": true
+    },
+    "2026-10-07_v1.20_step10_test_tiering_and_retirement_unification::1": {
+      "task_id": "2026-10-07_v1.20_step10_test_tiering_and_retirement_unification::1",
+      "md_sha256": "21ff8313355bcdee320e3f72f9934c8a9109f617af3e862313b0170c54e923ca",
+      "generation": 1,
+      "holder_token": "token_1791346770803_1996",
+      "last_heartbeat_monotonic_ns": 1078886531000000,
+      "last_heartbeat_wall_utc": "2026-10-07T04:50:20.724280+00:00",
+      "git_head_sha": "8f8a9e6df995462e607dcf1116e29e4b9f59de1e",
+      "git_index_mtime": 1791348234.8134947,
+      "released": true
     }
   }
 }

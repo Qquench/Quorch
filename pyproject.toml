@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+pythonpath = ["plugins/quench-dev-tasks/server"]
+markers = [
+    "tier1_fast: fast unit and smoke tests for rapid inner-loop feedback (<=5s budget)",
+]
