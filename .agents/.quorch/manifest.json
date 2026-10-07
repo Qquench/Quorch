@@ -803,6 +803,17 @@
       "git_head_sha": "baf810bfcf7e6b315e47dbe184c2b3d79bb592f7",
       "git_index_mtime": 1791354765.236047,
       "released": true
+    },
+    "2026-10-08_v1.21_step21.1_ast_architecture_hygiene_consolidation::21.1": {
+      "task_id": "2026-10-08_v1.21_step21.1_ast_architecture_hygiene_consolidation::21.1",
+      "md_sha256": "a5a47007e538e4779f23ebf512cd26a44567b3047b5448fe4355942031d9586f",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1114384765000000,
+      "last_heartbeat_wall_utc": "2026-10-07T14:41:58.973122+00:00",
+      "git_head_sha": "1a0df2597a6a5fe570bec5437fd50ce12cb1637e",
+      "git_index_mtime": 1791382205.076408,
+      "released": false
     }
   }
 }

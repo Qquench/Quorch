@@ -9,14 +9,12 @@
 <!-- QUENCH-CORE-INVARIANTS:BEGIN -->
 ## 1. Session Startup Protocol (MANDATORY FIRST STEP)
 
-**Before writing a single line of code**, call:
-
-```
-dev_tasks_status
-```
+**Before writing a single line of code**, call `dev_tasks_status`.  
+*(In Lazy-MCP environments like Antigravity, call: `call_mcp_tool(ServerName="quench-dev-tasks", ToolName="dev_tasks_status", Arguments={"workspace_root": "..."})`)*
 
 - If active tasks exist → read the task file, proceed to `dev_tasks_checkout`.
 - If no active tasks exist → **do NOT touch source code**. Propose a task via `dev_tasks_propose` or ask the user.
+- **Zero CLI Bypass**: NEVER run terminal/CLI commands (e.g. `python -c ...`) to simulate or bypass FastMCP tools.
 
 ---
 
@@ -74,7 +72,8 @@ When any conflict arises, the **plugin rules files win**. This file intentionall
 - ❌ Impersonate the Reviewer model in-context  
 - ❌ Bypass `dev_tasks_checkout` and edit code directly  
 - ❌ Hard-code any model vendor names or API endpoint strings in core modules  
-- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient
+- ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient  
+- ❌ Bypass FastMCP tools via shell/CLI commands (e.g. running python scripts to mutate tasks) — always use MCP tool calls
 <!-- QUENCH-CORE-INVARIANTS:END -->
 - ❌ Dump verbose execution logs, large diff tables, or token recitations into chat upon task completion (strictly output the ≤5 line C3 Delivery Card)
 

@@ -35,6 +35,8 @@ def test_resolve_discipline_path_invalid_fallback():
     rules = RulesExporter.extract_condensed_rules("non_existent_discipline_xyz.md")
     assert "核心常驻开发纪律" in rules
     assert "未检出任务" in rules
+    assert "call_mcp_tool" in rules
+    assert "bypass MCP" in rules or "绕过 MCP" in rules
 
 
 def test_extract_condensed_rules_real_content():
@@ -44,6 +46,8 @@ def test_extract_condensed_rules_real_content():
     assert "涉及文件" in rules
     assert "单测断言" in rules or "单测" in rules
     assert "Pre-commit" in rules
+    assert "call_mcp_tool" in rules
+    assert "Zero CLI Bypass" in rules or "绕过 MCP" in rules
 
 
 def test_export_cursorrules_and_mdc(tmp_path):
@@ -63,6 +67,8 @@ def test_export_cursorrules_and_mdc(tmp_path):
     with open(legacy_path, "r", encoding="utf-8") as f:
         legacy_content = f.read()
     assert "Quench" in legacy_content
+    assert "call_mcp_tool" in legacy_content
+    assert "Zero CLI Bypass" in legacy_content or "绕过 MCP" in legacy_content
     assert "---" not in legacy_content[:10]  # legacy rules 无需 YAML frontmatter
 
     # 检查 .cursor/rules/*.mdc
@@ -72,6 +78,8 @@ def test_export_cursorrules_and_mdc(tmp_path):
     assert "alwaysApply: true" in mdc_content
     assert 'globs: "*"' in mdc_content
     assert "Quench" in mdc_content
+    assert "call_mcp_tool" in mdc_content
+    assert "Zero CLI Bypass" in mdc_content or "绕过 MCP" in mdc_content
 
 
 def test_export_idempotent_and_force(tmp_path):

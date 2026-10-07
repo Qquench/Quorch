@@ -28,7 +28,7 @@ As an AI coding assistant operating within a Quench-governed project, you MUST s
 
 ## 1. Task Status & Checkout Discipline / 任务状态与领单纪律
 - **No Unmanaged Code Modification / 严禁擅自修改生产代码**：Do NOT modify any production source code before checking out a task (status MUST be `🔨 执行中`). （在未检出任务，状态未处于 `🔨 执行中` 前，严禁修改任何生产源代码。）
-- **State Transition via MCP Tools / 通过 MCP 工具流转状态**：MUST transition task states through MCP tools (dev_tasks_status, dev_tasks_checkout, dev_tasks_complete, dev_tasks_archive). Direct manual text replacement of task status emojis is prohibited. （必须通过 MCP 工具流转状态，严禁直接文本替换修改任务状态 Emoji。）
+- **State Transition via MCP Tools / 通过 MCP 工具流转状态**：MUST transition task states through MCP tools (dev_tasks_status, dev_tasks_checkout, dev_tasks_complete, dev_tasks_archive). Direct manual text replacement of task status emojis OR executing terminal CLI scripts to bypass MCP is strictly prohibited. When tools are lazy-loaded, call them via the host MCP interface (e.g. call_mcp_tool). （必须通过 MCP 工具流转状态，严禁直接文本替换修改任务状态 Emoji 或执行终端 CLI 脚本绕过 MCP。当工具为惰性加载时，必须通过宿主 MCP 接口调用。）
 - **Single Active Task Serial Execution / 单任务串行执行**：Only ONE task is permitted to be in `🔨 执行中` state globally at any given moment. （全局同一时刻仅允许一个任务处于 `🔨 执行中`。）
 
 ## 2. Implementation Scope & Affected Files Whitelist / 代码施工与涉及文件白名单
@@ -93,7 +93,7 @@ class RulesExporter:
                 header,
                 "## 1. 任务领单与状态机推进\n",
                 "- **未领单严禁动源码**：在开始修改任何生产代码前，必须确保当前工作区处于对应任务的 `🔨 执行中` 状态；\n",
-                "- **调用 MCP 工具流转**：通过 `dev_tasks_status` 查看任务，通过 `dev_tasks_checkout` 领单，通过 `dev_tasks_complete` 报竣，严禁手动篡改 Markdown 图标；\n",
+                "- **调用 MCP 工具流转 (Zero CLI Bypass)**：必须通过 MCP 工具流转状态（dev_tasks_status, dev_tasks_checkout, dev_tasks_complete），严禁手动篡改 Markdown 图标或执行终端 CLI 脚本绕过 MCP。当工具为惰性加载时，必须通过宿主 MCP 接口（如 `call_mcp_tool(ServerName=\"quench-dev-tasks\", ToolName=...)`）显式调用；\n",
                 "- **单核串行施工**：全局一次只能有一个任务处于 `🔨 执行中`。\n\n",
                 "## 2. 涉及文件白名单与质量底线\n",
                 "- **严格遵守【涉及文件】白名单**：代码修改范围必须完全落在当前任务单【涉及文件】清单内，严禁越界修改未纳管文件；\n",
