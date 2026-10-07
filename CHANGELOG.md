@@ -3,6 +3,66 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-07] 2026-10-07_v1.20_step10_test_tiering_and_retirement_unification.md
+
+- **Task 1**: 测试分级执行规范与退役账本归一（落地 §1.6、pyproject 配置、conftest 集中打标与真值门禁硬加固）
+
+## [2026-10-07] 2026-10-07_v1.20_step09c_reviewer_poll_progress_slimming.md
+
+- **Task 1**: dev_reviewer_poll 进度桥奥卡姆削减（保留热旋修复，带外发射去机器化）
+
+## [2026-10-07] 2026-10-07_v1.20_step09b_reviewer_poll_progress_bridge.md
+
+- **Task 1**: dev_reviewer_poll 长轮询进度桥（MCP Progress Notification，best-effort）
+
+## [2026-10-07] 2026-10-07_hotfix_ci_process_tree_isolation.md
+
+- **Task 1**: CI 进程树回收跨平台隔离加固与 canary 防自杀 + 隔离性正向断言
+
+## [2026-10-07] 2026-10-06_v1.20_step09_audit_gate_matrix_convergence.md
+
+- **Task 1**: 审计门禁矩阵收敛（终审定稿版）：别名化 tail_window_exhausted、全局单点 effective_on_degraded、死字段退役、最严优先安全单调性与门禁契约锚定
+
+## [2026-10-07] 2026-10-04_v1.20_step08_module_consolidation_and_shim_cleanup.md
+
+- **Task 1**: 模块合并与垫片清理：合并 reporting 相关模块至 reporting.py，收敛双分支导入垫片与 budget_ms 废弃参数，闭环全仓零悬空引用与 daemon launch canary 门禁
+
+## [2026-10-07] 2026-10-04_hotfix_crlf_and_gitattributes.md
+
+- **Task 1**: 修复架构清单 CRLF 污染、落地 .gitattributes 换行契约与生成器加固
+
+## [2026-10-07] 2026-10-03_v1.20_step07_session_log_single_domain_and_reaper_dismantle.md
+
+- **Task 1**: Session 日志单域化与 reaper.py 拆解：原子迁移 reclaim_stale_task 至 manifest_lease，清理日志 GC 垫片与文档漂移
+
+## [2026-10-07] 2026-10-03_v1.20_step06_workspace_lease_hardening.md
+
+- **Task 1**: workspace_lease 单机硬化：删除探针与心跳线程，落地 TTL + generation CAS + 显式 touch 崩溃回收（Reviewer R1 修订）
+
+## [2026-10-07] 2026-10-03_v1.20_step05_reviewer_jobs_convergence.md
+
+- **Task 5.0**: step05 Reviewer 作业状态机收敛与模式协议剃刀化（Reviewer 修订版 R2）
+
+## [2026-10-07] 2026-10-03_v1.20_step04_reconcile_perf_rework.md
+
+- **Task 4.0**: step04 性能重做：工作区对账去时钟化（确定性哈希预算 + 快慢路径筛选 + mtime对抗）
+
+## [2026-10-07] 2026-10-03_v1.20_step03_rule_doc_dedup.md
+
+- **Task 3.0**: step03 瘦身归位：规则文档与规范去重（SSOT 单语正文 + 标题双语，含语义无损物理门禁）
+
+## [2026-10-07] 2026-10-03_v1.20_step02_config_tolerance_and_versioning.md
+
+- **Task 2.0**: step02 瘦身归位：配置版本门与未知键容错（修正 C-1/H-1/H-2 终局硬化版）
+
+## [2026-10-07] 2026-10-03_v1.20_step01.1_asset_inventory_dev_tasks_isolation.md
+
+- **Task 1.1**: step01.1 资产扫描器隔离治理与任务单噪声排除（DOC_NON_CONSUMER_PREFIXES）
+
+## [2026-10-07] 2026-10-02_v1.20_step01_architecture_asset_inventory.md
+
+- **Task 1.0**: v1.20 step01（修订版）：架构资产取证与消费者依赖图谱（P0，只读）
+
 ## [2026-10-02] 2026-10-02_v1.10_step03_job_record_cascade_reaper.md
 
 - （无独立任务条目或全部跳过）
