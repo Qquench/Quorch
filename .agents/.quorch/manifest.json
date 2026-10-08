@@ -825,6 +825,17 @@
       "git_head_sha": "fac487ae3b804fe5ae45269dd36a1ce9d9489c8b",
       "git_index_mtime": 1791460027.8852232,
       "released": true
+    },
+    "2026-10-08_v1.21_step21.3_test_suite_duration_baseline_freeze_and_tier1_curation::21.3": {
+      "task_id": "2026-10-08_v1.21_step21.3_test_suite_duration_baseline_freeze_and_tier1_curation::21.3",
+      "md_sha256": "93384aacfb99643125d3d693bef7c5a257baa28a6c51e13519cd8477b9ba6fa6",
+      "generation": 1,
+      "holder_token": "token_1791462398924_4760",
+      "last_heartbeat_monotonic_ns": 1193306859000000,
+      "last_heartbeat_wall_utc": "2026-10-08T12:37:18.468703+00:00",
+      "git_head_sha": "1906e1dd8346ddfe5046f771d48da074f8e843ee",
+      "git_index_mtime": 1791460361.3517227,
+      "released": true
     }
   }
 }
