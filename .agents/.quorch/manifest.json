@@ -806,13 +806,13 @@
     },
     "2026-10-08_v1.21_step21.1_ast_architecture_hygiene_consolidation::21.1": {
       "task_id": "2026-10-08_v1.21_step21.1_ast_architecture_hygiene_consolidation::21.1",
-      "md_sha256": "a5a47007e538e4779f23ebf512cd26a44567b3047b5448fe4355942031d9586f",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 1114384765000000,
-      "last_heartbeat_wall_utc": "2026-10-07T14:41:58.973122+00:00",
-      "git_head_sha": "1a0df2597a6a5fe570bec5437fd50ce12cb1637e",
-      "git_index_mtime": 1791382205.076408,
+      "md_sha256": "62c3863436bde5cc6ad39a518361a7c594f3f07f9b0b70456327808e40e21420",
+      "generation": 1,
+      "holder_token": "token_1791455683173_6772",
+      "last_heartbeat_monotonic_ns": 1185951562000000,
+      "last_heartbeat_wall_utc": "2026-10-08T10:34:43.173037+00:00",
+      "git_head_sha": "3ba38319d6e4fabe9afc47854fd085864a8c771f",
+      "git_index_mtime": 1791454684.8903224,
       "released": false
     }
   }
