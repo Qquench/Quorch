@@ -33,6 +33,8 @@ from asset_inventory import (  # noqa: E402
     OUTPUT_MD_REL,
     FROZEN_V120_REL,
     CURRENT_INV_REL,
+    SERVER_ROOT_REL,
+    VERDICTS_REL,
     DELTA_REPORT_ARG,
     DELTA_BEGIN_MARK,
     DELTA_END_MARK,
@@ -73,6 +75,106 @@ from asset_inventory import (  # noqa: E402
     render_markdown,
     scan_modules,
 )
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class SyntheticBundle:
+    """消除 .report 歧义：显式复合夹具。"""
+    report: InventoryReport
+    snapshot: InventorySnapshot
+
+
+@pytest.fixture
+def synthetic_bundle() -> SyntheticBundle:
+    """纯内存确定性微型 SyntheticBundle，用于纯逻辑/渲染/排序断言，零物理 I/O。"""
+    mod = ModuleNode(
+        rel_path="plugins/quench-dev-tasks/server/core.py",
+        imported_modules=("typing",),
+        imported_symbols=("Optional",),
+        defined_symbols=("core_func",),
+    )
+    edge = ConsumerEdge(
+        symbol="core_func",
+        defined_in="plugins/quench-dev-tasks/server/core.py",
+        consumed_by=(),
+        test_refs=(),
+        doc_refs=(),
+        is_lower_bound=True,
+    )
+    rep = InventoryReport(
+        modules=(mod,),
+        consumers=(edge,),
+        tools=(),
+        audit_reason_histogram={"reason_a": 1},
+        telemetry_meta={"status": "ok", "total_samples": 1},
+        skipped_files=(),
+        doc_drift_ledger=(),
+        g1prime_gaps=(),
+        removal_candidates=(edge,),
+        must_not_remove=("assert_read_only_sandbox",),
+    )
+    pure_md = render_markdown(rep)
+    snap = InventorySnapshot(report=rep, rendered_pure_markdown=pure_md)
+    return SyntheticBundle(report=rep, snapshot=snap)
+
+
+def create_mini_repo(root: Path) -> Path:
+    """创建自洽的最小微型虚拟仓，耗时 < 15ms。
+    
+    - 预生成并写入合法快照与 on-disk 产物，使虚拟仓处于「fresh == disk」同步态；
+    - 含命中 classify_removal_candidates / MUST_NOT_REMOVE_SYMBOLS / INVARIANT_OWNERSHIP 的代表性符号。
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".git").mkdir(exist_ok=True)
+    agents_dir = root / ".agents"
+    agents_dir.mkdir(exist_ok=True)
+    (agents_dir / "quench_stack.yaml").write_text("config_version: 1\n", encoding="utf-8")
+
+    logs_dir = root / ".agents/logs/reviewer"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "verdicts.jsonl").write_text('{"reason": "init"}\n', encoding="utf-8")
+
+    server_dir = root / SERVER_ROOT_REL
+    server_dir.mkdir(parents=True, exist_ok=True)
+    (server_dir / "sample.py").write_text(
+        "assert_read_only_sandbox = 1\n"
+        "_issue_checkout_lease = 2\n"
+        "_fake_orphan_removal_candidate = 3\n",
+        encoding="utf-8",
+    )
+
+    docs_arch = root / "docs/architecture"
+    docs_arch.mkdir(parents=True, exist_ok=True)
+    frozen_content = (
+        "# Quench Over Engineering Inventory v1.20 (Frozen)\n\n"
+        "## 1. 核心系统机制与保全不变量\n"
+        "| `assert_read_only_sandbox` | 约束与承载不变量 |\n\n"
+        "---\n\n"
+        "## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 2 项)\n"
+        "| `_fake_resolved_sym` | `plugins/quench-dev-tasks/server/sample.py` |\n"
+        "| `_issue_checkout_lease` | `plugins/quench-dev-tasks/server/sample.py` |\n\n"
+        "---\n\n"
+        "## 3. 服务端生产模块概览 (Server Production Modules, 共 1 个模块)\n"
+        "| `plugins/quench-dev-tasks/server/sample.py` | 3 | 0 | 0 |\n"
+    )
+    (root / FROZEN_V120_REL).write_text(frozen_content, encoding="utf-8")
+
+    report = build_inventory_report(root)
+    pure = render_markdown(report)
+    snapshot = InventorySnapshot(report=report, rendered_pure_markdown=pure)
+    delta = compute_delta_report(root / FROZEN_V120_REL, snapshot)
+    full = write_inventory_with_delta(pure, delta)
+    atomic_write_text(root / OUTPUT_MD_REL, full)
+    return root
+
+
+@pytest.fixture
+def mini_repo_fixture(tmp_path: Path) -> Path:
+    """提供独立的自洽微型虚拟仓。"""
+    repo = tmp_path / "mini_repo"
+    return create_mini_repo(repo)
+
 
 
 def test_01_discover_repo_root_from_tests():
@@ -135,19 +237,17 @@ def test_04_skip_oversized_file(tmp_path: Path):
     assert any("big_module.py" in s[0] for s in getattr(scan_modules, "last_skipped", ()))
 
 
-def test_05_render_markdown_byte_identical():
-    """5. 同输入两次 render_markdown 逐字节相同。"""
-    report = build_inventory_report(REPO_ROOT)
-    rendered_1 = render_markdown(report)
-    rendered_2 = render_markdown(report)
+def test_05_render_markdown_byte_identical(synthetic_bundle: SyntheticBundle):
+    """5. 同输入两次 render_markdown 逐字节相同（由 synthetic_bundle 纯内存夹具驱动，零磁盘 I/O）。"""
+    rendered_1 = render_markdown(synthetic_bundle.report)
+    rendered_2 = render_markdown(synthetic_bundle.report)
     assert rendered_1 == rendered_2
     assert rendered_1.encode("utf-8") == rendered_2.encode("utf-8")
 
 
-def test_06_no_absolute_paths_no_git_sha_no_rfc3339():
-    """6. 渲染结果不含绝对路径、git sha 与 RFC3339 时间戳（正则白名单校验）。"""
-    report = build_inventory_report(REPO_ROOT)
-    rendered = render_markdown(report)
+def test_06_no_absolute_paths_no_git_sha_no_rfc3339(synthetic_bundle: SyntheticBundle):
+    """6. 渲染结果不含绝对路径、git sha 与 RFC3339 时间戳（synthetic_bundle 纯内存白名单 + 磁盘只读静态补偿）。"""
+    rendered = render_markdown(synthetic_bundle.report)
 
     # 1) 不含 Windows / Unix 绝对路径
     assert re.search(r"[A-Za-z]:[/\\]", rendered) is None, "Detected absolute Windows drive path in rendered output"
@@ -158,6 +258,15 @@ def test_06_no_absolute_paths_no_git_sha_no_rfc3339():
 
     # 3) 不含 RFC3339 动态时间戳 (YYYY-MM-DDTHH:MM:SS)
     assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", rendered) is None, "Detected RFC3339 timestamp"
+
+    # 4) [静态真仓补偿] 直接纯读取磁盘已固化的生产 inventory 文件主体（无需触发重扫，严防动态遥测误报）
+    disk_inventory = REPO_ROOT / OUTPUT_MD_REL
+    if disk_inventory.is_file():
+        disk_gated = extract_gated_body(strip_delta_block(disk_inventory.read_text(encoding="utf-8")))
+        assert re.search(r"[A-Za-z]:[/\\]", disk_gated) is None
+        assert re.search(r"/(?:Users|home|workspace|tmp|var|private)/", disk_gated) is None
+        assert re.search(r"\b[0-9a-f]{40}\b", disk_gated) is None
+        assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", disk_gated) is None
 
 
 def test_07_ast_imports_subset_of_stdlib():
@@ -257,26 +366,27 @@ def test_11_must_not_remove_symbols_hard_override():
 
 
 def test_12_check_three_way_exit_semantics(tmp_path: Path):
-    """12. --check 语义三分：一致 → EXIT_OK；不一致 → EXIT_DRIFT；产物缺失 → EXIT_USAGE。"""
-    # 1) 产物缺失 -> EXIT_USAGE
-    dummy_root = tmp_path / "repo"
-    dummy_root.mkdir()
-    (dummy_root / ".git").mkdir()
-    assert main(["--repo-root", str(dummy_root), "--check"]) == EXIT_USAGE
+    """12. --check 语义三分：一致 → EXIT_OK；不一致 → EXIT_DRIFT；产物缺失 → EXIT_USAGE。
+    
+    [TP-2 架构不变量守卫]：
+    - 分支 1 (产物缺失)：在独立的 tmp_path mini 仓库中删除产物，断言 EXIT_USAGE；
+    - 分支 2 (真仓锚点)：对真仓 REPO_ROOT 运行未 mock、未隔离、未被跳过的 --check 校验，断言 EXIT_OK；
+    - 分支 3 (产物漂移)：在独立的 tmp_path mini 仓库中篡改产物，断言 EXIT_DRIFT。
+    """
+    # 1) 产物缺失 -> EXIT_USAGE (隔离在 tmp mini-repo 中)
+    b1_repo = create_mini_repo(tmp_path / "mini_repo_b1")
+    (b1_repo / OUTPUT_MD_REL).unlink()
+    assert main(["--repo-root", str(b1_repo), "--check"]) == EXIT_USAGE
 
-    # 2) 真实仓库产物当前一致 -> EXIT_OK
-    assert main(["--check"]) == EXIT_OK
+    # 2) 真实仓库产物当前一致 -> EXIT_OK (全单测中唯一保留的真仓完整扫描锚点)
+    assert main(["--repo-root", str(REPO_ROOT), "--check"]) == EXIT_OK
 
-    # 3) 模拟产物漂移 -> EXIT_DRIFT
-    out_file = REPO_ROOT / OUTPUT_MD_REL
-    original_bytes = out_file.read_bytes()
-    drifted_text = original_bytes.decode("utf-8").replace("Architecture Asset Inventory", "TAMPERED HEADER")
-    try:
-        with open(out_file, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(drifted_text)
-        assert main(["--check"]) == EXIT_DRIFT
-    finally:
-        out_file.write_bytes(original_bytes)
+    # 3) 模拟产物漂移 -> EXIT_DRIFT (隔离在独立的 tmp mini-repo 中，零真仓磁盘污染与回滚风险)
+    b3_repo = create_mini_repo(tmp_path / "mini_repo_b3")
+    b3_out = b3_repo / OUTPUT_MD_REL
+    original_text = b3_out.read_text(encoding="utf-8")
+    b3_out.write_text(original_text.replace("Architecture Asset Inventory", "TAMPERED HEADER"), encoding="utf-8")
+    assert main(["--repo-root", str(b3_repo), "--check"]) == EXIT_DRIFT
 
 
 def test_13_output_crlf_free():
@@ -287,44 +397,33 @@ def test_13_output_crlf_free():
     assert b"\r\n" not in raw_bytes, "Output markdown contains CRLF line endings!"
 
 
-def test_14_time_drift_telemetry_decoupling(tmp_path: Path):
-    """14. 时间漂移回归：向临时 verdicts.jsonl 追加记录后重算产物主体哈希不变、--check 返回 EXIT_OK。"""
-    v_path = REPO_ROOT / ".agents/logs/reviewer/verdicts.jsonl"
-    original_verdicts: bytes | None = v_path.read_bytes() if v_path.is_file() else None
+def test_14_time_drift_telemetry_decoupling(mini_repo_fixture: Path):
+    """14. 时间漂移回归：向临时 verdicts.jsonl 追加记录后重算产物主体哈希不变、--check 返回 EXIT_OK（由 mini_repo_fixture 驱动）。"""
+    v_path = mini_repo_fixture / ".agents/logs/reviewer/verdicts.jsonl"
+    out_file = mini_repo_fixture / OUTPUT_MD_REL
 
-    try:
-        # 1) 基准检查通过
-        assert main(["--check"]) == EXIT_OK
+    # 1) 基准检查通过
+    assert main(["--repo-root", str(mini_repo_fixture), "--check"]) == EXIT_OK
 
-        # 2) 追加一条新型遥测记录
-        v_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(v_path, "a", encoding="utf-8", newline="\n") as fh:
-            fh.write('{"reason": "__unit_test_time_drift_probe__"}\n')
+    # 2) 追加一条新型遥测记录
+    with open(v_path, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write('{"reason": "__unit_test_time_drift_probe__"}\n')
 
-        # 3) 重新构建 report，验证提取的主体文本哈希完全一致
-        report_after = build_inventory_report(REPO_ROOT)
-        rendered_after = render_markdown(report_after)
+    # 3) 重新构建 report，验证提取的主体文本哈希完全一致
+    report_after = build_inventory_report(mini_repo_fixture)
+    rendered_after = render_markdown(report_after)
 
-        out_file = REPO_ROOT / OUTPUT_MD_REL
-        existing_rendered = out_file.read_text(encoding="utf-8")
+    existing_rendered = out_file.read_text(encoding="utf-8")
+    gated_existing = extract_gated_body(strip_delta_block(existing_rendered))
+    gated_after = extract_gated_body(rendered_after)
 
-        gated_existing = extract_gated_body(strip_delta_block(existing_rendered))
-        gated_after = extract_gated_body(rendered_after)
+    hash_existing = hashlib.sha256(gated_existing.encode("utf-8")).hexdigest()
+    hash_after = hashlib.sha256(gated_after.encode("utf-8")).hexdigest()
 
-        hash_existing = hashlib.sha256(gated_existing.encode("utf-8")).hexdigest()
-        hash_after = hashlib.sha256(gated_after.encode("utf-8")).hexdigest()
+    assert hash_existing == hash_after, "Telemetry addition caused drift in gated body!"
 
-        assert hash_existing == hash_after, "Telemetry addition caused drift in gated body!"
-
-        # 4) --check 门禁零假红，依然返回 EXIT_OK
-        assert main(["--check"]) == EXIT_OK
-
-    finally:
-        # 恢复现场
-        if original_verdicts is not None:
-            v_path.write_bytes(original_verdicts)
-        elif v_path.is_file():
-            v_path.unlink()
+    # 4) --check 门禁零假红，依然返回 EXIT_OK
+    assert main(["--repo-root", str(mini_repo_fixture), "--check"]) == EXIT_OK
 
 
 def test_doc_non_consumer_prefixes_subset_of_doc_roots():
@@ -414,10 +513,10 @@ def test_gitattributes_contract():
     assert b"\r\n" not in gitattributes_path.read_bytes(), ".gitattributes must have LF line endings!"
 
 
-def test_delta_schema_contract():
-    """断言 Delta 差异报告符合 v1.22 §4.1 五段契约与哈希对比表。"""
-    frozen_file = REPO_ROOT / FROZEN_V120_REL
-    report = build_inventory_report(REPO_ROOT)
+def test_delta_schema_contract(mini_repo_fixture: Path):
+    """断言 Delta 差异报告符合 v1.22 §4.1 五段契约与哈希对比表（由 mini_repo_fixture 驱动）。"""
+    frozen_file = mini_repo_fixture / FROZEN_V120_REL
+    report = build_inventory_report(mini_repo_fixture)
     pure_text = render_markdown(report)
     snapshot = InventorySnapshot(report=report, rendered_pure_markdown=pure_text)
     delta = compute_delta_report(frozen_file, snapshot)
@@ -439,15 +538,15 @@ def test_delta_schema_contract():
     assert "workspace_lease" in lease_names
 
 
-def test_delta_mode_readonly():
-    """D-R2 只读纪律：--delta-report 执行前后 over_engineering_inventory.md 的 SHA256 与 mtime_ns 均不变。"""
-    out_file = REPO_ROOT / OUTPUT_MD_REL
+def test_delta_mode_readonly(mini_repo_fixture: Path):
+    """D-R2 只读纪律：--delta-report 执行前后 over_engineering_inventory.md 的 SHA256 与 mtime_ns 均不变（由 mini_repo_fixture 驱动）。"""
+    out_file = mini_repo_fixture / OUTPUT_MD_REL
     assert out_file.is_file()
     stat_before = out_file.stat()
     sha_before = hashlib.sha256(out_file.read_bytes()).hexdigest()
     mtime_before = stat_before.st_mtime_ns
 
-    exit_code = main(["--delta-report"])
+    exit_code = main(["--repo-root", str(mini_repo_fixture), "--delta-report"])
     assert exit_code == EXIT_OK
 
     stat_after = out_file.stat()
@@ -458,15 +557,15 @@ def test_delta_mode_readonly():
     assert mtime_after == mtime_before, "READONLY_MTIME_VIOLATION"
 
 
-def test_rebaseline_determinism():
-    """D-R5 / TP-4 确定性律：同一 commit 连续两次生成的清单与 Delta 段逐字节一致。"""
-    frozen_file = REPO_ROOT / FROZEN_V120_REL
-    report1 = build_inventory_report(REPO_ROOT)
+def test_rebaseline_determinism(mini_repo_fixture: Path):
+    """D-R5 / TP-4 确定性律：同一 commit 连续两次生成的清单与 Delta 段逐字节一致（由 mini_repo_fixture 驱动）。"""
+    frozen_file = mini_repo_fixture / FROZEN_V120_REL
+    report1 = build_inventory_report(mini_repo_fixture)
     pure1 = render_markdown(report1)
     delta1 = compute_delta_report(frozen_file, InventorySnapshot(report1, pure1))
     full1 = write_inventory_with_delta(pure1, delta1)
 
-    report2 = build_inventory_report(REPO_ROOT)
+    report2 = build_inventory_report(mini_repo_fixture)
     pure2 = render_markdown(report2)
     delta2 = compute_delta_report(frozen_file, InventorySnapshot(report2, pure2))
     full2 = write_inventory_with_delta(pure2, delta2)
@@ -491,10 +590,10 @@ def test_additive_regression():
     assert pure_norm == golden_norm, "Additive regression detected against golden baseline!"
 
 
-def test_write_idempotent():
-    """D-R10 (N1) 写幂等律：write(write(x)) == write(x)，严禁 Delta 块重复嵌套累积。"""
-    frozen_file = REPO_ROOT / FROZEN_V120_REL
-    report = build_inventory_report(REPO_ROOT)
+def test_write_idempotent(mini_repo_fixture: Path):
+    """D-R10 (N1) 写幂等律：write(write(x)) == write(x)，严禁 Delta 块重复嵌套累积（由 mini_repo_fixture 驱动）。"""
+    frozen_file = mini_repo_fixture / FROZEN_V120_REL
+    report = build_inventory_report(mini_repo_fixture)
     pure_text = render_markdown(report)
     snapshot = InventorySnapshot(report, pure_text)
     delta = compute_delta_report(frozen_file, snapshot)
@@ -528,10 +627,10 @@ def test_marker_balance_fail_closed():
         _assert_balanced_markers(f"{DELTA_END_MARK}\nsome text\n{DELTA_BEGIN_MARK}")
 
 
-def test_ordering_and_no_leak():
-    """D-R5 / N4 确定性排序与泄漏防护：邻接表与拓扑元组排序确定，输出中无绝对路径与动态时间戳。"""
-    frozen_file = REPO_ROOT / FROZEN_V120_REL
-    report = build_inventory_report(REPO_ROOT)
+def test_ordering_and_no_leak(mini_repo_fixture: Path):
+    """D-R5 / N4 确定性排序与泄漏防护：邻接表与拓扑元组排序确定，输出中无绝对路径与动态时间戳（由 mini_repo_fixture 驱动）。"""
+    frozen_file = mini_repo_fixture / FROZEN_V120_REL
+    report = build_inventory_report(mini_repo_fixture)
     pure = render_markdown(report)
     delta = compute_delta_report(frozen_file, InventorySnapshot(report, pure))
     rendered_delta = render_delta_report_markdown(delta)
@@ -601,10 +700,9 @@ def test_invariant_mapping_fail_closed(tmp_path: Path):
     assert "not in KNOWN_INVARIANT_GAPS" in str(excinfo.value)
 
 
-def test_frozen_snapshot_missing_and_unparsable(tmp_path: Path):
-    """D-R9 边界：快照缺失抛 FrozenSnapshotMissingError；不可解析抛 FrozenSnapshotUnparsableError。"""
-    report = build_inventory_report(REPO_ROOT)
-    snapshot = InventorySnapshot(report, "pure")
+def test_frozen_snapshot_missing_and_unparsable(tmp_path: Path, synthetic_bundle: SyntheticBundle):
+    """D-R9 边界：快照缺失抛 FrozenSnapshotMissingError；不可解析抛 FrozenSnapshotUnparsableError（由 synthetic_bundle 驱动）。"""
+    snapshot = synthetic_bundle.snapshot
 
     # 1. 缺失
     non_existent = tmp_path / "missing.md"
