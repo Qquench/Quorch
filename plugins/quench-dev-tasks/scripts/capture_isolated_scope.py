@@ -23,10 +23,13 @@ if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
 LEGACY_RULE_MAP: Final[dict[str, str]] = {
-    "plugins/quench-dev-tasks/server/tests/test_lease_symbol_removal.py": "lease_symbol_removal",
-    "plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py": "touch_outcome_truthiness",
-    "plugins/quench-dev-tasks/server/tests/test_no_vendor_literals_in_core.py": "vendor_literal_in_core",
-    "plugins/quench-dev-tasks/server/tests/test_no_api_bypass.py": "api_bypass",
+    f"plugins/quench-dev-tasks/server/tests/test_{r}.py": r
+    for r in (
+        "lease_symbol_removal",
+        "touch_outcome_truthiness",
+        "vendor_literal_in_core",
+        "api_bypass",
+    )
 }
 
 

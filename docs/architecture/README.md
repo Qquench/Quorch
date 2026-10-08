@@ -222,15 +222,15 @@ Quench enforces a bifurcated test execution contract designed for fast developer
 
 | ID | Name | Enforcement Mechanism | Test File |
 |----|------|-----------------------|-----------|
-| **INV-1** | Single-core serial execution | Cross-process `filelock` on manifest; second `checkout` rejected | `test_state_machine.py`, `test_reclaim_cas.py` |
+| **INV-1** | Single-core serial execution | Cross-process `filelock` on manifest; second `checkout` rejected | `test_state_machine.py`, `test_reclaim_cas.py`, `test_architecture_hygiene.py` |
 | **INV-2** | State machine is MCP-only | Server validates every transition; Markdown emoji never parsed as state source | `test_server_tools.py` |
 | **INV-3** | Anti-roleplay (no in-context Reviewer impersonation) | `findings == ""` in degraded fallback card; schema enforced | `test_anti_roleplay_discipline_contract.py` |
 | **INV-4** | Stdio channel purity (`stdout` = JSON-RPC only) | No `print()` in server modules; CI grep gate | `test_anti_roleplay_discipline_contract.py` |
-| **INV-5** | Vendor neutrality | `PROVIDER_PRESETS` declarative registry; static AST neutrality scan | `test_reviewer_factory_neutrality.py`, `test_no_vendor_literals_in_core.py` |
+| **INV-5** | Vendor neutrality | `PROVIDER_PRESETS` declarative registry; static AST neutrality scan | `test_reviewer_factory_neutrality.py`, `test_architecture_hygiene.py`, `test_no_vendor_literals_in_core.py` |
 | **INV-6** | Review is read-only (no production file writes during review) | Consultation sandbox guard; read-only path assertions | `test_consultation_context_guard.py` |
 | **INV-7** | Physical feasibility gate (path + pytest dry-run before promotion) | `dev_tasks_promote_draft` enforces checks; lint gate blocks invalid paths | `test_draft_lint.py` |
 | **INV-8** | Context budget cap (`max_total_injection_chars`) | `project_config.py` enforces cap before injection; truncation tested | `test_consultation_context_guard.py` |
-| **INV-9** | Single Provider Egress (no raw API bypass) | CI & test static AST scanner (`check_no_api_bypass.py`) asserts all Reviewer model calls transit through `ReviewerClient` | `test_no_api_bypass.py` |
+| **INV-9** | Single Provider Egress (no raw API bypass) | CI & test static AST scanner (`check_no_api_bypass.py`) asserts all Reviewer model calls transit through `ReviewerClient` | `test_architecture_hygiene.py`, `test_no_api_bypass.py` |
 
 ---
 

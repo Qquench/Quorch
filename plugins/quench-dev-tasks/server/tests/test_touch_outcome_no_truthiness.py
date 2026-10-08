@@ -2,18 +2,17 @@
 # If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import ast
+from enum import Enum
 import os
+from pathlib import Path
 import sys
 import tempfile
-from pathlib import Path
 
 import pytest
 
 SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
-
-from enum import Enum
 
 from workspace_lease import (
     WorkspaceLeaseGuard,
@@ -51,38 +50,20 @@ def test_touch_returns_lost_when_lease_file_deleted(temp_workspace):
     assert guard.is_held() is False
 
 
-def test_no_implicit_truthiness_on_touch_in_server_ast():
-    """静态 AST 扫描门禁：确保服务端生产代码中绝不存在对 touch() 进行布尔隐式判定的模式。
-    禁止出现：
-      - if not <expr>.touch():
-      - if <expr>.touch():
-    必须显式比对：
-      - if <expr>.touch() == LeaseTouchOutcome.LOST:
-    """
-    server_path = Path(SERVER_DIR)
-    py_files = list(server_path.glob("*.py"))
-    assert len(py_files) > 0
+def test_crlf_touch_outcome_truthiness_detection(tmp_path: Path):
+    """追加 CRLF 规范化负向断言：验证包含 \\r\\n 换行符的隐式真值判定代码仍能被精确检测。"""
+    crlf_source = (
+        "if not guard.touch():\r\n"
+        "    print('lost')\r\n"
+    )
+    test_file = tmp_path / "crlf_truthiness.py"
+    test_file.write_bytes(crlf_source.encode("utf-8"))
 
-    violations = []
-
-    for py_file in py_files:
-        with open(py_file, "r", encoding="utf-8") as f:
-            try:
-                tree = ast.parse(f.read(), filename=str(py_file))
-            except SyntaxError:
-                continue
-
-        for node in ast.walk(tree):
-            # 扫描 if <test>:
-            if isinstance(node, ast.If):
-                test = node.test
-                # 检查直接调用: if <x>.touch():
-                if isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute) and test.func.attr == "touch":
-                    violations.append(f"{py_file.name}:{node.lineno} -> if {test.func.attr}() (隐式真值判定)")
-                # 检查一元非: if not <x>.touch():
-                elif isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
-                    operand = test.operand
-                    if isinstance(operand, ast.Call) and isinstance(operand.func, ast.Attribute) and operand.func.attr == "touch":
-                        violations.append(f"{py_file.name}:{node.lineno} -> if not {operand.func.attr}() (隐式真值判定)")
-
-    assert not violations, f"发现违规的 touch() 隐式真值判定：\n" + "\n".join(violations)
+    tree = ast.parse(test_file.read_bytes(), filename=str(test_file))
+    found = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not):
+            op = node.test.operand
+            if isinstance(op, ast.Call) and isinstance(op.func, ast.Attribute) and op.func.attr == "touch":
+                found = True
+    assert found is True

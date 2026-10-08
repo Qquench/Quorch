@@ -186,3 +186,14 @@ def test_quorch_reviewer_debug_dry_run_cli():
     )
     assert proc.returncode == 0, f"Command failed: {proc.stderr}"
     assert "dry_run_success" in proc.stdout, f"Unexpected stdout: {proc.stdout}"
+
+
+def test_crlf_api_bypass_detection(tmp_path: Path):
+    """追加 CRLF 规范化负向断言：验证包含 \\r\\n 换行符的源码中的未授权 provider SDK 仍能被精确检测。"""
+    crlf_code = "import openai\r\nclient = openai.OpenAI()\r\n"
+    crlf_file = tmp_path / "crlf_openai.py"
+    crlf_file.write_bytes(crlf_code.encode("utf-8"))
+
+    violations = scan_file_for_bypass(str(crlf_file))
+    assert any(v.rule == "FORBIDDEN_PROVIDER_IMPORT" for v in violations)
+

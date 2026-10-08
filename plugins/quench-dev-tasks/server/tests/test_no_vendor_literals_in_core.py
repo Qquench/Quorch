@@ -109,24 +109,20 @@ def find_vendor_violations(root: Path) -> list[VendorViolation]:
     return violations
 
 
-def test_core_modules_have_no_vendor_literals():
-    """断言核心服务器模块（非 tests）100% 协议中立，不含未豁免的厂商字面量。"""
-    t0 = time.perf_counter()
-    violations = find_vendor_violations(SCAN_ROOT)
-    elapsed_ms = (time.perf_counter() - t0) * 1000
-
-    # 性能护栏：顶层扫描耗时必须 < 200 ms（超时即视为误设为全量递归）
-    assert elapsed_ms < 200, f"Scanner took {elapsed_ms:.2f} ms (expected < 200 ms)"
-
-    # 防自我命中与测试排除：断言扫描到的任何路径都不以 test_ 开头
-    scanned_files = [p for p, _, _ in iter_scannable_lines(SCAN_ROOT)]
-    scanned_filenames = {p.name for p in scanned_files}
-    assert not any(name.startswith("test_") for name in scanned_filenames), (
-        f"Test files must not be scanned: {scanned_filenames}"
+def test_crlf_line_endings_vendor_literal_detection(tmp_path: Path):
+    """追加 CRLF 规范化负向断言：验证包含 \\r\\n 换行符的源码中的未豁免厂商字面量仍能被精确检测。"""
+    crlf_source = (
+        "# Line 1\r\n"
+        "LEAKED_VENDOR = 'deepseek'\r\n"
+        "# Line 3\r\n"
     )
+    test_file = tmp_path / "crlf_vendor.py"
+    test_file.write_bytes(crlf_source.encode("utf-8"))
 
-    # 核心模块必须 100% 纯净中立，无任何违规
-    assert violations == [], f"Found vendor violations in core modules: {violations}"
+    violations = find_vendor_violations(tmp_path)
+    assert len(violations) == 1
+    assert violations[0].token == "deepseek"
+    assert violations[0].lineno == 2
 
 
 def test_scanner_detects_planted_vendor_literal(tmp_path: Path):

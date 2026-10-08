@@ -809,11 +809,11 @@
       "md_sha256": "62c3863436bde5cc6ad39a518361a7c594f3f07f9b0b70456327808e40e21420",
       "generation": 1,
       "holder_token": "token_1791455683173_6772",
-      "last_heartbeat_monotonic_ns": 1185951562000000,
-      "last_heartbeat_wall_utc": "2026-10-08T10:34:43.173037+00:00",
-      "git_head_sha": "3ba38319d6e4fabe9afc47854fd085864a8c771f",
-      "git_index_mtime": 1791454684.8903224,
-      "released": false
+      "last_heartbeat_monotonic_ns": 1187819187000000,
+      "last_heartbeat_wall_utc": "2026-10-08T11:05:50.785000+00:00",
+      "git_head_sha": "4a8d136a4c8134898b40416b34e94deaac0bb26e",
+      "git_index_mtime": 1791457532.5626147,
+      "released": true
     }
   }
 }
