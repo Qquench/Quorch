@@ -286,6 +286,8 @@ def test_quench_stack_local_yaml_overlay(temp_workspace):
     cfg = load_project_config(str(temp_workspace))
     assert cfg.reviewer_engine.provider == "none"
     assert cfg.reviewer_engine.timeout_seconds == 120
+    assert cfg.local_override_loaded is False
+    assert cfg.local_override_path is None
 
     # 提供 local 时，覆盖相应字段且保留其余字段
     local_data = {
@@ -303,5 +305,90 @@ def test_quench_stack_local_yaml_overlay(temp_workspace):
     assert cfg_overridden.reviewer_engine.base_url == "http://127.0.0.1:11434/v1"
     # timeout_seconds 依然保留基础配置
     assert cfg_overridden.reviewer_engine.timeout_seconds == 120
+    assert cfg_overridden.local_override_loaded is True
+    assert cfg_overridden.local_override_path == str(local_yaml_file)
+
+
+def test_local_override_monotonic_tightening_and_baseline_lock(temp_workspace):
+    """验证 .agents/quench_stack.local.yaml 安全字段的单调收紧硬门禁与基线锁定"""
+    from project_config import ConfigError
+    import yaml
+
+    agents_dir = temp_workspace / ".agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    yaml_file = agents_dir / "quench_stack.yaml"
+    local_yaml_file = agents_dir / "quench_stack.local.yaml"
+
+    base_data = {
+        "project_name": "secure_project",
+        "audit_gate": {
+            "enabled": True,
+            "on_missing_record": "block",
+            "on_degraded": "warn",
+        },
+        "governance_scope": {
+            "managed_paths": ["plugins/**", "server/**"],
+            "unmanaged_paths": ["docs/**"],
+        },
+        "governance": {
+            "manifest_path": ".agents/.quorch/manifest.json",
+        },
+    }
+    yaml_file.write_text(yaml.dump(base_data), encoding="utf-8")
+
+    # 1. 放宽 on_missing_record (block -> allow) 必须被 fail-closed 拦截
+    local_yaml_file.write_text(
+        yaml.dump({"audit_gate": {"on_missing_record": "allow"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "safety_downgrade_denied" in str(exc_info.value)
+
+    # 2. 试图关闭已启用的门禁 (enabled: false) 必须被拦截
+    local_yaml_file.write_text(
+        yaml.dump({"audit_gate": {"enabled": False}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "safety_downgrade_denied" in str(exc_info.value)
+
+    # 3. 试图收窄 managed_paths 必须被拦截
+    local_yaml_file.write_text(
+        yaml.dump({"governance_scope": {"managed_paths": ["plugins/**"]}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "safety_downgrade_denied" in str(exc_info.value)
+
+    # 4. 试图放宽 unmanaged_paths 必须被拦截
+    local_yaml_file.write_text(
+        yaml.dump({"governance_scope": {"unmanaged_paths": ["docs/**", "src/**"]}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "safety_downgrade_denied" in str(exc_info.value)
+
+    # 5. 试图重定向 manifest_path 必须被拦截
+    local_yaml_file.write_text(
+        yaml.dump({"governance": {"manifest_path": "other/manifest.json"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(str(temp_workspace))
+    assert "safety_downgrade_denied" in str(exc_info.value)
+
+    # 6. 加严配置 (on_degraded: warn -> block) 应当合法生效
+    local_yaml_file.write_text(
+        yaml.dump({"audit_gate": {"on_degraded": "block"}}),
+        encoding="utf-8",
+    )
+    cfg_tightened = load_project_config(str(temp_workspace))
+    assert cfg_tightened.audit_gate.on_degraded == "block"
+    assert cfg_tightened.audit_gate.on_missing_record == "block"
+
 
 

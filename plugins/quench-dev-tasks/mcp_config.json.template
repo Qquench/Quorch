@@ -4,7 +4,26 @@
       "command": "{{PYTHON_EXECUTABLE}}",
       "args": [
         "{{SERVER_SCRIPT_PATH}}"
-      ]
+      ],
+      "tools": {
+        "dev_tasks_status": { "eager": true },
+        "dev_tasks_propose": { "eager": true },
+        "dev_tasks_confirm": { "eager": true },
+        "dev_tasks_checkout": { "eager": true },
+        "dev_tasks_complete": { "eager": true },
+        "dev_tasks_heartbeat": { "eager": true },
+        "dev_tasks_reclaim": { "eager": true },
+        "dev_tasks_promote_draft": { "eager": true },
+        "dev_tasks_refine_spec": { "eager": true },
+        "dev_tasks_escalate": { "eager": true },
+        "dev_tasks_export_handoff_card": { "eager": true },
+        "dev_tasks_archive": { "eager": true },
+        "dev_tasks_set_bypass": { "eager": true },
+        "dev_reviewer_submit": { "eager": true },
+        "dev_reviewer_poll": { "eager": true },
+        "dev_reviewer_cancel": { "eager": true },
+        "dev_reviewer_consult": { "eager": true }
+      }
     }
   }
 }

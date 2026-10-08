@@ -29,6 +29,7 @@ class ConfigFault(str, Enum):
     NFD_MISMATCH         = "nfd_mismatch"                # 可降级（carve-out 反馈）
     INVALID_SAFETY_VALUE = "invalid_safety_value"        # fail-closed（raise ConfigError）
     VERSION_UNSUPPORTED  = "config_version_unsupported"  # fail-closed（raise ConfigError）
+    SAFETY_DOWNGRADE_DENIED = "safety_downgrade_denied"   # fail-closed（raise ConfigError）
 
 
 class ConfigError(ValueError):
@@ -615,6 +616,8 @@ class QuenchStackConfig:
     runner_profile: RunnerProfile = field(default_factory=RunnerProfile)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     audit_gate: AuditGatePolicy = field(default_factory=AuditGatePolicy)
+    local_override_loaded: bool = False
+    local_override_path: str | None = None
 
     def resolve_path(self, field_name: str) -> str:
         """将相对路径属性解析为基于 workspace_root 的绝对路径"""
@@ -1121,7 +1124,63 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     data, _ = migrate_config_if_needed(yaml_path, data)
 
     # 检查本地私有覆盖配置 .agents/quench_stack.local.yaml (已在 .gitignore 中忽略)
+    def _merge_local_override(base: dict, overlay: dict) -> dict:
+        """对安全与治理字段执行单调收紧硬门禁与基线锁定；其余字段走深合并。"""
+        audit_order = {"block": 2, "warn": 1, "allow": 0}
+        base_ag = base.get("audit_gate") if isinstance(base.get("audit_gate"), dict) else {}
+        over_ag = overlay.get("audit_gate") if isinstance(overlay.get("audit_gate"), dict) else {}
+        if base_ag.get("enabled") is True and over_ag.get("enabled") is False:
+            raise ConfigError(
+                f"Local override cannot disable audit_gate when enabled in baseline ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                "本地覆盖不得在基线已启用的情况下关闭 audit_gate"
+            )
+
+        for policy in ("on_missing_record", "on_degraded", "on_internal_error"):
+            if policy in over_ag:
+                base_val = str(base_ag.get(policy, "block" if policy != "on_internal_error" else "allow")).strip().lower()
+                over_val = str(over_ag.get(policy)).strip().lower()
+                base_rank = audit_order.get(base_val, 0)
+                over_rank = audit_order.get(over_val, 0)
+                if over_rank < base_rank:
+                    raise ConfigError(
+                        f"Local override cannot loosen audit_gate.{policy} from '{base_val}' to '{over_val}' ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                        f"本地覆盖不得将 audit_gate.{policy} 从 '{base_val}' 放宽至 '{over_val}'"
+                    )
+
+        base_scope = base.get("governance_scope") if isinstance(base.get("governance_scope"), dict) else {}
+        over_scope = overlay.get("governance_scope") if isinstance(overlay.get("governance_scope"), dict) else {}
+        if "managed_paths" in over_scope and "managed_paths" in base_scope:
+            base_managed = set(base_scope["managed_paths"])
+            over_managed = set(over_scope["managed_paths"])
+            if not base_managed.issubset(over_managed):
+                missing = base_managed - over_managed
+                raise ConfigError(
+                    f"Local override cannot narrow governance_scope.managed_paths (missing {missing}) ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                    "本地覆盖不得收窄基线受管路径"
+                )
+
+        if "unmanaged_paths" in over_scope and "unmanaged_paths" in base_scope:
+            base_unmanaged = set(base_scope["unmanaged_paths"])
+            over_unmanaged = set(over_scope["unmanaged_paths"])
+            if not over_unmanaged.issubset(base_unmanaged):
+                added = over_unmanaged - base_unmanaged
+                raise ConfigError(
+                    f"Local override cannot widen governance_scope.unmanaged_paths (added {added}) ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                    "本地覆盖不得放宽基线非受管路径"
+                )
+
+        base_gov = base.get("governance") if isinstance(base.get("governance"), dict) else {}
+        over_gov = overlay.get("governance") if isinstance(overlay.get("governance"), dict) else {}
+        if "manifest_path" in over_gov and base_gov.get("manifest_path") != over_gov.get("manifest_path"):
+            raise ConfigError(
+                f"Local override cannot redirect governance.manifest_path ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                "本地覆盖不得重定向 manifest_path"
+            )
+
+        return _deep_merge_dict(base, overlay)
+
     local_yaml_path = os.path.join(root, ".agents", "quench_stack.local.yaml")
+    local_override_loaded = False
     if os.path.isfile(local_yaml_path):
         try:
             with open(local_yaml_path, "r", encoding="utf-8") as f:
@@ -1129,9 +1188,10 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
             if raw_local.strip():
                 local_data = yaml.safe_load(raw_local)
                 if isinstance(local_data, dict):
-                    data = _deep_merge_dict(data, local_data)
-        except yaml.YAMLError as e:
-            raise ValueError(f"Failed to parse local override config {local_yaml_path} (YAML syntax error): {e} / 解析本地覆盖配置 {local_yaml_path} 失败（YAML 语法错误）: {e}") from e
+                    data = _merge_local_override(data, local_data)
+                    local_override_loaded = True
+        except (yaml.YAMLError, ConfigError):
+            raise
         except Exception as e:
             raise ValueError(f"Failed to read local override config {local_yaml_path}: {e} / 读取本地覆盖配置 {local_yaml_path} 失败: {e}") from e
 
@@ -1163,6 +1223,8 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
     data["workspace_root"] = root
     cfg, _ = migrate_and_validate(data)
+    cfg.local_override_loaded = local_override_loaded
+    cfg.local_override_path = local_yaml_path if local_override_loaded else None
     return cfg
 
 

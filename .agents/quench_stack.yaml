@@ -1,6 +1,17 @@
 # ==============================================================================
-# Quench 项目特异化配置清单 (Quench Project Stack Manifest)
-# 供 quench-dev-tasks 插件读取，实现 MCP 仓库本身的自我治理与规范驱动演进。
+# Quench Project Stack Baseline Configuration
+# Read by the quench-dev-tasks plugin to enforce repository self-governance.
+#
+# ⚠️ ARCHITECTURE & CONFIGURATION LAYER NOTICE (FOR LLM AGENTS & DEVELOPERS):
+# 1. This file is the Git-tracked SSOT baseline for team governance (scope, tests, audit gates).
+# 2. NEVER write plaintext API keys, personal secrets, or local endpoints into this file!
+# 3. Machine-specific Reviewer engine configurations (provider, model, base_url, api_key_env, etc.)
+#    MUST be placed in:
+#    👉 .agents/quench_stack.local.yaml  (strictly .gitignored)
+# 4. If you see 'provider: "none"' below, it ONLY means the repository baseline does not bundle
+#    a default external model. Check .agents/quench_stack.local.yaml for active local overrides.
+# 5. For full reference schemas and multi-engine configuration examples, see:
+#    👉 .agents/quench_stack.sample.yaml
 # ==============================================================================
 
 project_name: "quench-dev-orchestrator"
@@ -36,9 +47,14 @@ governance_scope:
     - "*.md"
 
 schema_version: "1.0"
-# 配置规范版本（整数，用于调度编排内核版本门禁与向前兼容迁移；与元数据清单的 schema_version 相互解耦）
+# Configuration specification version (integer; used for orchestrator migration & backward compatibility)
 config_version: 1
 
+# Baseline Reviewer Engine Configuration (Default placeholder: "none")
+# ⚠️ NOTE FOR AI AGENTS:
+# Do NOT assume Reviewer is unconfigured based solely on 'provider: "none"' below!
+# Machine-specific engines (e.g., deepseek, custom API, ollama, etc.) are declared
+# as private overrides in '.agents/quench_stack.local.yaml' (.gitignored).
 reviewer_engine:
   provider: "none"
   model: "default"
@@ -63,6 +79,6 @@ governance:
 audit_gate:
   enabled: true
   on_missing_record: "block"
-  # tail_window_exhausted_policy 已弃用并收敛为 on_degraded 的别名（生效值遵循最严优先：block > warn > allow）
+  # Note: tail_window_exhausted_policy is deprecated and aliased to on_degraded (most-restrictive-wins: block > warn > allow)
   on_degraded: "warn"
   on_internal_error: "allow"

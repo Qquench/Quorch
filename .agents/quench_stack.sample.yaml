@@ -1,43 +1,74 @@
 # ==============================================================================
-# Quench Project Configuration Sample (.agents/quench_stack.sample.yaml)
-# Copy this file to .agents/quench_stack.local.yaml for local developer overrides (git-ignored)
+# Quench 本地配置示例参考清单 (.agents/quench_stack.sample.yaml)
+#
+# ⚠️ 说明 (Important Notice)：
+# 1. 本文件为参考文档与模板样例，Quench 配置加载器【不会】直接读取本文件。
+# 2. 团队通用治理基线位于 .agents/quench_stack.yaml（受 Git 版本控制）。
+# 3. 如需在本机配置特定的 Reviewer 审计引擎，请将本文件的相关配置段复制到：
+#    👉 .agents/quench_stack.local.yaml （已被 .gitignore 忽略，绝不会意外提交密钥）
 # ==============================================================================
 
-# Base configuration is declared in quench_stack.yaml.
-# In local override file quench_stack.local.yaml, only declare fields requiring customization.
+# ------------------------------------------------------------------------------
+# 示例 1: DeepSeek 官方 API（推荐，高性价比推理引擎）
+# ------------------------------------------------------------------------------
+# reviewer_engine:
+#   provider: "deepseek"
+#   model: "deepseek-flash"           # 或 "deepseek-reasoner"
+#   base_url: "https://api.deepseek.com"
+#   api_key_env: "DEEPSEEK_API_KEY"   # 环境变量名，严禁硬编码明文密钥
+#   thinking: true                    # 开启思维链推导流输出
+#   reasoning_effort: "high"
+#   timeout_seconds: 180
 
-# Example 1: Remote OpenAI-compatible API endpoint (API key sourced from environment variable)
+# ------------------------------------------------------------------------------
+# 示例 2: 通用 OpenAI 兼容接口 / 聚合网关 (OpenAI-compatible Custom API)
+# ------------------------------------------------------------------------------
 # reviewer_engine:
 #   provider: "custom"
-#   model: "your-model-name"
-#   base_url: "https://api.your-provider.com/v1"
-#   api_key_env: "YOUR_PROVIDER_API_KEY"
+#   model: "qwen-max"
+#   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#   api_key_env: "DASHSCOPE_API_KEY"
 #   thinking: true
 #   reasoning_effort: "high"
+#   timeout_seconds: 180
 
-# Example 2: Local Ollama server (offline, zero credentials required)
+# ------------------------------------------------------------------------------
+# 示例 3: 本地 Ollama 私有化部署（完全离线、零出网、免凭据）
+# ------------------------------------------------------------------------------
 # reviewer_engine:
 #   provider: "custom"
 #   model: "qwen2.5-coder:14b"
 #   base_url: "http://127.0.0.1:11434/v1"
+#   api_key_env: null
+#   timeout_seconds: 120
 
-# Example 3: Local vLLM private server (offline, zero credentials required)
+# ------------------------------------------------------------------------------
+# 示例 4: 本地 vLLM / SGLang 高性能私有化部署（完全离线、免凭据）
+# ------------------------------------------------------------------------------
 # reviewer_engine:
 #   provider: "custom"
 #   model: "default"
 #   base_url: "http://127.0.0.1:8000/v1"
+#   api_key_env: null
+#   timeout_seconds: 120
 
-# Example 4: Corporate proxy / aggregator gateway
+# ------------------------------------------------------------------------------
+# 示例 5: 企业内部网关 / 代理转发 (Corporate LLM Proxy)
+# ------------------------------------------------------------------------------
 # reviewer_engine:
 #   provider: "custom"
 #   model: "internal-reviewer"
 #   base_url: "https://llm-gateway.corp.internal/v1"
 #   api_key_env: "CORP_GATEWAY_TOKEN"
+#   timeout_seconds: 180
 
-# Example 5: Audit gate configuration override
+# ------------------------------------------------------------------------------
+# 示例 6: 审计门禁本地加严配置（单调收紧硬门禁：本地只能更严或一致，严禁放宽）
+# ⚠️ 注：内核通过 _merge_local_override 物理校验，若本地尝试放宽策略或关闭门禁，将触发 fail-closed 阻断！
+# ------------------------------------------------------------------------------
 # audit_gate:
 #   enabled: true
 #   on_missing_record: "block"
-#   # tail_window_exhausted_policy 已弃用并收敛为 on_degraded 的别名（生效值遵循最严优先：block > warn > allow）
-#   on_degraded: "warn"
+#   on_degraded: "block"               # 比基线的 warn 更严（合法）
 #   on_internal_error: "allow"
+

@@ -9,8 +9,8 @@
 <!-- QUENCH-CORE-INVARIANTS:BEGIN -->
 ## 1. Session Startup Protocol (MANDATORY FIRST STEP)
 
-**Before writing a single line of code**, call `dev_tasks_status`.  
-*(In Lazy-MCP environments like Antigravity, call: `call_mcp_tool(ServerName="quench-dev-tasks", ToolName="dev_tasks_status", Arguments={"workspace_root": "..."})`)*
+**Before writing a single line of code**, call `dev_tasks_status(workspace_root="...")`.  
+*(All Quench tools are registered as eager tools — invoke `dev_tasks_*` directly)*
 
 - If active tasks exist → read the task file, proceed to `dev_tasks_checkout`.
 - If no active tasks exist → **do NOT touch source code**. Propose a task via `dev_tasks_propose` or ask the user.

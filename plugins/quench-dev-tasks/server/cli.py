@@ -216,6 +216,9 @@ def cmd_check_engine(
         api_key_present = bool(raw_key and raw_key.strip())
         api_key_masked = _mask_secret(raw_key)
 
+        local_override_loaded = getattr(cfg, "local_override_loaded", False)
+        source_label = "local override (.agents/quench_stack.local.yaml)" if local_override_loaded else "base (.agents/quench_stack.yaml)"
+
         if provider == "none":
             error_msg = "ReviewerEngine provider is set to 'none' / 未启用外部审查引擎"
         elif not api_key_present:
@@ -243,6 +246,8 @@ def cmd_check_engine(
     exit_code = 0 if (provider != "none" and api_key_present and connectivity_ok) else 1
 
     result = {
+        "config_source": source_label,
+        "local_override_loaded": local_override_loaded,
         "provider": provider,
         "model": model,
         "api_key_env": api_key_env,
@@ -264,6 +269,7 @@ def cmd_check_engine(
     print(c.bold("\n======================================================="))
     print(c.bold("  Quench ReviewerEngine 体检报告"))
     print(c.bold("======================================================="))
+    print(f"📄 Config Source   : {c.cyan(source_label)}")
     print(f"⚙️  Provider       : {c.cyan(provider)}")
     print(f"🤖 Model          : {c.cyan(model)}")
     print(f"🔑 API Key Env    : {api_key_env}")

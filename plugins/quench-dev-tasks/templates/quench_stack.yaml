@@ -1,7 +1,17 @@
 # ==============================================================================
-# Quench Project Stack Manifest (Quench 项目特异化配置清单)
-# Read by the quench-dev-tasks plugin to decouple project boundaries and tests.
-# 供 quench-dev-tasks 插件读取，实现项目特定边界、测试套件与目录映射的解耦。
+# Quench Project Stack Manifest Baseline
+# Read by the quench-dev-tasks plugin to decouple project boundaries and test suites.
+#
+# ⚠️ ARCHITECTURE & CONFIGURATION LAYER NOTICE (FOR LLM AGENTS & DEVELOPERS):
+# 1. This file is the Git-tracked SSOT baseline for team governance (scope, tests, audit gates).
+# 2. NEVER write plaintext API keys, personal secrets, or local endpoints into this file!
+# 3. Machine-specific Reviewer engine configurations (provider, model, base_url, api_key_env, etc.)
+#    MUST be placed in:
+#    👉 .agents/quench_stack.local.yaml  (strictly .gitignored)
+# 4. If you see 'provider: "none"' below, it ONLY means the repository baseline does not bundle
+#    a default external model. Check .agents/quench_stack.local.yaml for active local overrides.
+# 5. For full reference schemas and multi-engine configuration examples, see:
+#    👉 .agents/quench_stack.sample.yaml
 # ==============================================================================
 
 # Configuration schema version (managed automatically / 配置架构版本)
