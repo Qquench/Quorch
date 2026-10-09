@@ -3,6 +3,26 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-09] 2026-10-09_v1.21_step21.4_tier2_calibration_and_milestone_recertification.md
+
+- **Task 21.4**: Tier-2 度量校准修订、跨版本预算信封与里程碑结项再认证 (TR-4 落地 · 终审定稿版)
+
+## [2026-10-09] 2026-10-08_v1.21_step21.3_test_suite_duration_baseline_freeze_and_tier1_curation.md
+
+- **Task 21.3**: 测试套件耗时基线冻结与 Tier-1/Tier-2 精准策展（TR-3 落地，三层阈值语义显式化 + 抗抖动方差守卫 + 测量自递归物理隔离 + 并发不变量硬门禁 H 互斥不变）［R3 架构审查终版］
+
+## [2026-10-09] 2026-10-08_v1.21_step21.2_asset_inventory_test_unitization_and_io_deamplification.md
+
+- **Task 21.2**: 资产扫描测试单元化隔离与 I/O 去放大（TR-2 落地，TP-2/TP-4 真仓唯一 anchor + 混合夹具，单次真仓扫描预算约束）［R4 终审放行核准版］
+
+## [2026-10-09] 2026-10-08_v1.21_step21.1_ast_architecture_hygiene_consolidation.md
+
+- **Task 21.1**: AST 架构卫生门禁归并（TR-1 落地，先取证后剪枝的 TP-1/TP-3 物理奇偶证明）［R4.1 终审放行版］
+
+## [2026-10-09] 2026-10-08_v1.21_step21.0_asset_rebaseline_and_delta_report.md
+
+- **Task 21.0**: 架构资产再基线与 v1.20→v1.21 差异报告（只读取证，落地 TP-4 与 §4.1 握手规范）
+
 ## [2026-10-07] 2026-10-07_v1.20_step10_test_tiering_and_retirement_unification.md
 
 - **Task 1**: 测试分级执行规范与退役账本归一（落地 §1.6、pyproject 配置、conftest 集中打标与真值门禁硬加固）

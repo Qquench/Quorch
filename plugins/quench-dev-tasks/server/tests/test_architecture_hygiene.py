@@ -212,3 +212,52 @@ def test_findings_sorting_and_deduplication(scanner):
     keys = [finding_sort_key(f) for f in findings]
     assert keys == sorted(keys)
     assert len(keys) == len(set(keys))
+
+
+# TR-4 基线防护与架构卫生闭锁
+
+
+def test_init_project_does_not_export_duration_baselines():
+    """TR-4 / M3: 断言 init_project.py 绝不导出或引用 check_test_duration_baselines 基线脚本。"""
+    init_script_path = PLUGIN_ROOT / "scripts" / "init_project.py"
+    content = init_script_path.read_text(encoding="utf-8")
+    assert "check_test_duration_baselines" not in content
+
+
+def test_no_stale_reentry_guard_value_in_docs():
+    """TR-4 / R5 / R6: 定向扫描核心架构文档、脚本、配置与根 README，断言无旧哨兵值与旧常量别名残留。"""
+    repo_root = PLUGIN_ROOT.parent.parent
+    target_files: list[Path] = []
+
+    # docs/architecture/ 下的所有 markdown
+    arch_dir = repo_root / "docs" / "architecture"
+    if arch_dir.is_dir():
+        target_files.extend(arch_dir.glob("*.md"))
+
+    # scripts/ 下的所有 py 脚本
+    scripts_dir = repo_root / "scripts"
+    if scripts_dir.is_dir():
+        target_files.extend(scripts_dir.glob("*.py"))
+
+    # .agents/ 下的 yaml/json
+    agents_dir = repo_root / ".agents"
+    if agents_dir.is_dir():
+        target_files.extend(agents_dir.glob("*.yaml"))
+        target_files.extend(agents_dir.glob("*.json"))
+
+    # 根 README.md 与 README_zh.md
+    for readme_name in ("README.md", "README_zh.md"):
+        r_path = repo_root / readme_name
+        if r_path.is_file():
+            target_files.append(r_path)
+
+    violations: list[str] = []
+    for file_path in target_files:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+        if "QUENCH_TEST_DURATION_BENCH_ACTIVE=1" in text:
+            violations.append(f"{file_path.name}: contains stale 'QUENCH_TEST_DURATION_BENCH_ACTIVE=1'")
+        if "TIER2_TARGET_S" in text:
+            violations.append(f"{file_path.name}: contains retired 'TIER2_TARGET_S'")
+
+    assert violations == []
+

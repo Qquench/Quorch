@@ -836,6 +836,28 @@
       "git_head_sha": "1906e1dd8346ddfe5046f771d48da074f8e843ee",
       "git_index_mtime": 1791460361.3517227,
       "released": true
+    },
+    "2026-10-09_v1.21_step21.4_tier2_calibration_and_milestone_recertification::21.4": {
+      "task_id": "2026-10-09_v1.21_step21.4_tier2_calibration_and_milestone_recertification::21.4",
+      "md_sha256": "d504cd97d4f9363b5d479131e0398005300e0f3b1cde0afd9501878e5738028c",
+      "generation": 1,
+      "holder_token": "token_1791534951082_26540",
+      "last_heartbeat_monotonic_ns": 1266049187000000,
+      "last_heartbeat_wall_utc": "2026-10-09T08:49:39.754361+00:00",
+      "git_head_sha": "d2907939cb6988b9ab6f3fd62341d8203207e5cc",
+      "git_index_mtime": 1791469143.433097,
+      "released": true
+    },
+    "2026-10-09_v1.21_step21.5_over_engineering_removal_guardrails::21.5": {
+      "task_id": "2026-10-09_v1.21_step21.5_over_engineering_removal_guardrails::21.5",
+      "md_sha256": "2fabbca5a41375a7e5ef6a91642082426a252128c586361d86f70bac33dc95e5",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1266640171000000,
+      "last_heartbeat_wall_utc": "2026-10-09T08:59:30.733851+00:00",
+      "git_head_sha": "d2907939cb6988b9ab6f3fd62341d8203207e5cc",
+      "git_index_mtime": 1791469143.433097,
+      "released": false
     }
   }
 }

@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Quench DevTasks - 测试套件耗时基线冻结与守卫工具 (TR-3).
+"""Quench DevTasks - 测试套件耗时基线冻结与守卫工具 (TR-3 / TR-4).
 
 退出码矩阵 (Exit Code Matrix):
   --check : 硬失败族 -> 1 (budget > HARD_FAIL / 两轮 CV > MAX_CV / 非零退出 / 超时 / 解析失败 /
             样本不足(iterations < MEASURED_ITERATIONS) / min_duration<=0 或 mean<=0);
             WARN (mean > 5.0 且 <= 8.0) / INFO (mean <= 3.0) -> 0;
-  --tier2 : 除子进程异常外 -> 0 (> TIER2_TARGET_S 仅 WARN);
+  --tier2 : PANIC (> TIER2_PANIC_S) 或子进程异常 -> 1;
+            WARN (> TIER2_WARN_S 且 <= TIER2_PANIC_S) 或 OK (<= TIER2_WARN_S) -> 0;
   无参数  : 等价于 --check.
 """
 
@@ -21,7 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Final, Mapping, NamedTuple, Sequence
+from typing import Final, Literal, Mapping, NamedTuple, Sequence
 
 # 确保可复用 scripts/check_test_tiering_invariants.py
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -35,8 +36,11 @@ TIER1_HARD_FAIL_S: Final[float] = 8.0   # 超此值 fail-closed（CI 阻断；�
 TIER1_TARGET_S: Final[float] = 5.0      # 超此值 WARN（放行，exit 0）
 TIER1_FAST_GOAL_S: Final[float] = 3.0   # 报告项（info，对应路线图 §4.3 观测口径，不作门禁）
 
-# --- Tier-2 阈值 ---
-TIER2_TARGET_S: Final[float] = 35.0     # 软目标（WARN，exit 0；40s 为里程碑 DoD 另行核验）
+# --- Tier-2 阈值（双闸预算信封与硬阻断恐慌线，TR-4 单一 SSOT）---
+TIER2_WARN_S: Final[float] = 65.0       # 营运预算信封上限（WARN，放行，exit 0）
+TIER2_PANIC_S: Final[float] = 110.0     # 灾难回潮硬阻断线（严格低于 v1.20 历史基准 114s；FAIL/PANIC，exit 1）
+
+Tier2Verdict = Literal["OK", "WARN", "PANIC"]
 
 # --- 方差门禁 ---
 TIER1_MAX_CV: Final[float] = 0.15       # std_dev(ddof=1) / mean
@@ -46,6 +50,7 @@ MEASURED_ITERATIONS: Final[int] = 3     # 正式采样次数（iterations 语义
 
 # --- 物理隔离与超时 ---
 REENTRY_GUARD_ENV: Final[str] = "QUENCH_TEST_DURATION_BENCH_ACTIVE"
+REENTRY_GUARD_VALUE: Final[str] = "quench-bench-v1"
 HARNESS_TEST_FILENAME: Final[str] = "test_duration_baselines_contract.py"
 TIER1_ITERATION_TIMEOUT_S: Final[float] = 15.0   # 与既有 budget 测试对齐
 TIER2_TOTAL_TIMEOUT_S: Final[float] = 300.0
@@ -104,8 +109,61 @@ def calculate_metrics(durations: Sequence[float]) -> BaselineMetrics:
 
 
 def should_skip_benchmark_harness(env: Mapping[str, str]) -> bool:
-    """纯函数：env 含 REENTRY_GUARD_ENV 即 True（契约测试模块导入期据此 pytest.skip）。"""
-    return bool(env.get(REENTRY_GUARD_ENV))
+    """纯函数：仅当 env 中 REENTRY_GUARD_ENV == REENTRY_GUARD_VALUE 时返回 True。"""
+    return env.get(REENTRY_GUARD_ENV) == REENTRY_GUARD_VALUE
+
+
+def assert_running_in_quench_self_repo(repo_root: Path) -> None:
+    """Relative-path self-anchor guard checking required Quench repository markers."""
+    readme_path = repo_root / "docs" / "architecture" / "README.md"
+    stack_path = repo_root / ".agents" / "quench_stack.yaml"
+    if not (readme_path.is_file() and stack_path.is_file()):
+        raise RuntimeError(
+            f"Repository self-anchor check failed in '{repo_root}'. "
+            "Missing required anchor files (docs/architecture/README.md or .agents/quench_stack.yaml)."
+        )
+
+
+def classify_tier2(elapsed: float) -> Tier2Verdict:
+    """Classify Tier-2 elapsed duration.
+
+    IEEE-754 and domain boundary ordering:
+    - NaN -> ValueError
+    - not isfinite -> PANIC if > 0 else ValueError
+    - <= 0 -> ValueError
+    - <= TIER2_WARN_S -> OK
+    - <= TIER2_PANIC_S -> WARN
+    - > TIER2_PANIC_S -> PANIC
+    """
+    if math.isnan(elapsed):
+        raise ValueError(f"Invalid NaN duration: {elapsed}")
+    if not math.isfinite(elapsed):
+        if elapsed > 0:
+            return "PANIC"
+        raise ValueError(f"Invalid non-positive infinite duration: {elapsed}")
+    if elapsed <= 0.0:
+        raise ValueError(f"Invalid non-positive duration: {elapsed}")
+    if elapsed <= TIER2_WARN_S:
+        return "OK"
+    if elapsed <= TIER2_PANIC_S:
+        return "WARN"
+    return "PANIC"
+
+
+def classify_tier2_samples(samples: Sequence[float]) -> Tier2Verdict:
+    """Classify multiple Tier-2 duration samples.
+
+    Note: In current practice, Tier-2 benchmark runs as a single shot (n=1).
+    This multi-sample classification serves as forward-defense specification.
+    """
+    if not samples:
+        raise ValueError("samples sequence cannot be empty / 耗时序列不能为空")
+    if any(math.isnan(x) for x in samples):
+        raise ValueError("samples sequence contains NaN / 耗时序列包含 NaN")
+    if max(samples) > TIER2_PANIC_S:
+        return "PANIC"
+    mean_val = sum(samples) / len(samples)
+    return classify_tier2(mean_val)
 
 
 def _has_executed_tests(output: str) -> bool:
@@ -133,6 +191,7 @@ def run_tier1_benchmark(
     *,
     allow_retry: bool = True,
     runner_func=None,
+    assert_self_repo: bool = True,
 ) -> tuple[bool, BaselineMetrics, list[str]]:
     """运行 Tier-1 基线测试与方差判定。
 
@@ -144,6 +203,9 @@ def run_tier1_benchmark(
     解析失败定义为：子进程输出中无法确认 collected/executed 用例数 > 0（用例数=0 或摘要行完全缺失报红）。
     """
     logs: list[str] = []
+
+    if assert_self_repo:
+        assert_running_in_quench_self_repo(repo_root)
 
     # 库层假绿封堵 (R-A): iterations 必须 >= 2
     if iterations < 2:
@@ -180,7 +242,7 @@ def run_tier1_benchmark(
     runner = runner_func or default_runner
 
     child_env = sanitized_env()
-    child_env[REENTRY_GUARD_ENV] = "1"
+    child_env[REENTRY_GUARD_ENV] = REENTRY_GUARD_VALUE
     tier1_cmd = [sys.executable, "-m", "pytest", *TIER1_ARGV]
 
     max_rounds = 1 + (MAX_CV_RETRY_ROUNDS if allow_retry else 0)
@@ -287,10 +349,15 @@ def run_tier1_benchmark(
 
 def run_tier2_benchmark(
     repo_root: Path,
+    *,
     runner_func=None,
+    assert_self_repo: bool = True,
 ) -> tuple[bool, float, list[str]]:
-    """全量回归计时报告；强制 --deselect <HARNESS_TEST_FILENAME>（由模块路径派生）；不参与 --check 硬判定。"""
+    """全量回归计时报告；强制 --deselect <HARNESS_TEST_FILENAME>（由模块路径派生）；硬阻断 PANIC (> TIER2_PANIC_S)。"""
     logs: list[str] = []
+
+    if assert_self_repo:
+        assert_running_in_quench_self_repo(repo_root)
 
     def default_runner(cmd: list[str], env: dict[str, str], timeout: float) -> tuple[int, str, float]:
         t0 = time.monotonic()
@@ -311,7 +378,7 @@ def run_tier2_benchmark(
     runner = runner_func or default_runner
 
     child_env = sanitized_env()
-    child_env[REENTRY_GUARD_ENV] = "1"
+    child_env[REENTRY_GUARD_ENV] = REENTRY_GUARD_VALUE
 
     # --deselect 路径由相对模块路径派生
     harness_rel = Path("plugins") / "quench-dev-tasks" / "server" / "tests" / HARNESS_TEST_FILENAME
@@ -339,20 +406,26 @@ def run_tier2_benchmark(
         logs.append(f"Tier-2 run failed with exit code {code}:\n{out.strip()}")
         return False, elapsed, logs
 
-    if elapsed > TIER2_TARGET_S:
+    verdict = classify_tier2_samples([elapsed])
+    if verdict == "PANIC":
         logs.append(
-            f"Tier-2 baseline warning: took {elapsed:.2f}s > target {TIER2_TARGET_S:.1f}s (WARN, exit 0)"
+            f"Tier-2 panic threshold exceeded: took {elapsed:.2f}s > panic threshold {TIER2_PANIC_S:.1f}s (PANIC, exit 1)"
+        )
+        return False, elapsed, logs
+    elif verdict == "WARN":
+        logs.append(
+            f"Tier-2 baseline warning: took {elapsed:.2f}s > warn envelope {TIER2_WARN_S:.1f}s (WARN, exit 0)"
         )
     else:
         logs.append(
-            f"Tier-2 baseline OK: took {elapsed:.2f}s <= target {TIER2_TARGET_S:.1f}s"
+            f"Tier-2 baseline OK: took {elapsed:.2f}s <= warn envelope {TIER2_WARN_S:.1f}s"
         )
 
     return True, elapsed, logs
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Check test duration baselines and variance (TR-3)")
+    parser = argparse.ArgumentParser(description="Check test duration baselines and variance (TR-3 / TR-4)")
     parser.add_argument("--repo-root", default=None, help="Explicit repository root")
     parser.add_argument(
         "--check",
@@ -377,6 +450,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo_root = Path(args.repo_root).resolve()
     else:
         repo_root = Path(__file__).resolve().parent.parent
+
+    # 跨克隆可移植自锚定检查
+    assert_running_in_quench_self_repo(repo_root)
 
     # 默认模式为 --check
     do_check = args.check or (not args.tier2)

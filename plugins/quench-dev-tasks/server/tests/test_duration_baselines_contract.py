@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -48,12 +50,14 @@ def test_calculate_metrics_single_and_empty():
         bench_tool.calculate_metrics([])
 
 
-def test_should_skip_benchmark_harness():
-    """验证重入哨兵纯函数。"""
-    assert bench_tool.should_skip_benchmark_harness({bench_tool.REENTRY_GUARD_ENV: "1"}) is True
-    assert bench_tool.should_skip_benchmark_harness({bench_tool.REENTRY_GUARD_ENV: "true"}) is True
+def test_reentry_guard_round_trip():
+    """C1 / B1: 验证重入哨兵魔术值匹配与读写往返。"""
+    assert bench_tool.should_skip_benchmark_harness({bench_tool.REENTRY_GUARD_ENV: bench_tool.REENTRY_GUARD_VALUE}) is True
+    assert bench_tool.should_skip_benchmark_harness({bench_tool.REENTRY_GUARD_ENV: "1"}) is False
+    assert bench_tool.should_skip_benchmark_harness({bench_tool.REENTRY_GUARD_ENV: "true"}) is False
+    assert bench_tool.should_skip_benchmark_harness({bench_tool.REENTRY_GUARD_ENV: ""}) is False
     assert bench_tool.should_skip_benchmark_harness({}) is False
-    assert bench_tool.should_skip_benchmark_harness({"OTHER_ENV": "1"}) is False
+    assert bench_tool.should_skip_benchmark_harness({"OTHER_ENV": bench_tool.REENTRY_GUARD_VALUE}) is False
 
 
 def test_argv_parity_with_budget_test():
@@ -219,20 +223,124 @@ def test_synthetic_nonzero_exit_fails_closed():
 
 
 def test_synthetic_tier2_runner():
-    """B-3: 契约测试内禁止真跑 Tier-2；使用 mock 验证 argv 拼接与 WARN 行为。"""
+    """B-3 / R1: 契约测试内禁止真跑 Tier-2；使用 mock 验证 argv 拼接、assert_self_repo 开关与 WARN/PANIC 双闸分支。"""
     captured_cmd = []
 
-    def mock_tier2_runner(cmd, env, timeout):
+    def mock_tier2_warn_runner(cmd, env, timeout):
         captured_cmd.extend(cmd)
-        return 0, "809 passed in 38.0s", 38.5
+        return 0, "809 passed in 70.0s", 70.5
 
-    ok, elapsed, logs = bench_tool.run_tier2_benchmark(REPO_ROOT, runner_func=mock_tier2_runner)
-    assert ok is True
-    assert elapsed == 38.5
+    ok_warn, elapsed_warn, logs_warn = bench_tool.run_tier2_benchmark(
+        REPO_ROOT, runner_func=mock_tier2_warn_runner, assert_self_repo=False
+    )
+    assert ok_warn is True
+    assert elapsed_warn == 70.5
     # 验证包含了 --deselect
     assert "--deselect" in captured_cmd
     harness_rel = Path("plugins") / "quench-dev-tasks" / "server" / "tests" / bench_tool.HARNESS_TEST_FILENAME
     expected_deselect = str(harness_rel).replace("\\", "/")
     assert expected_deselect in captured_cmd
-    # 耗时 > 35.0s 产生警告但依然返回 ok=True
-    assert any("Tier-2 baseline warning" in log for log in logs)
+    # 耗时 > 65.0s 产生警告但依然返回 ok=True
+    assert any("Tier-2 baseline warning" in log for log in logs_warn)
+
+    # PANIC 分支验证
+    def mock_tier2_panic_runner(cmd, env, timeout):
+        return 0, "809 passed in 115.0s", 115.5
+
+    ok_panic, elapsed_panic, logs_panic = bench_tool.run_tier2_benchmark(
+        REPO_ROOT, runner_func=mock_tier2_panic_runner, assert_self_repo=False
+    )
+    assert ok_panic is False
+    assert elapsed_panic == 115.5
+    assert any("Tier-2 panic threshold exceeded" in log for log in logs_panic)
+
+
+def test_classify_tier2_boundaries():
+    """验证 classify_tier2 显式等号临界与异常值防御。"""
+    # 异常与非正
+    with pytest.raises(ValueError):
+        bench_tool.classify_tier2(0.0)
+    with pytest.raises(ValueError):
+        bench_tool.classify_tier2(-5.0)
+    with pytest.raises(ValueError):
+        bench_tool.classify_tier2(float("nan"))
+    with pytest.raises(ValueError):
+        bench_tool.classify_tier2(float("-inf"))
+
+    # OK 边界: <= 65.0
+    assert bench_tool.classify_tier2(0.001) == "OK"
+    assert bench_tool.classify_tier2(65.0) == "OK"
+
+    # WARN 边界: > 65.0 and <= 110.0
+    assert bench_tool.classify_tier2(65.001) == "WARN"
+    assert bench_tool.classify_tier2(110.0) == "WARN"
+
+    # PANIC 边界: > 110.0
+    assert bench_tool.classify_tier2(110.001) == "PANIC"
+    assert bench_tool.classify_tier2(float("inf")) == "PANIC"
+
+
+def test_classify_tier2_samples_empty_and_nan():
+    """V5: 验证 classify_tier2_samples 空序列与 NaN fail-closed 抛 ValueError。"""
+    with pytest.raises(ValueError, match="samples sequence cannot be empty"):
+        bench_tool.classify_tier2_samples([])
+
+    with pytest.raises(ValueError, match="contains NaN"):
+        bench_tool.classify_tier2_samples([60.0, float("nan")])
+
+
+def test_classify_tier2_samples_outlier_panic():
+    """R4: 验证单次灾难性 PANIC 级离群不被均值稀释，由 max(samples) 兜底判定为 PANIC。"""
+    # mean = (61.0 + 61.0 + 120.0) / 3 = 80.67s (若仅按 mean 会被稀释为 WARN)，但 max 为 120.0 > 110.0 -> 必须判 PANIC
+    assert bench_tool.classify_tier2_samples([61.0, 61.0, 120.0]) == "PANIC"
+    assert bench_tool.classify_tier2_samples([60.0, 62.0]) == "OK"
+    assert bench_tool.classify_tier2_samples([66.0, 68.0]) == "WARN"
+
+
+def test_tier2_target_s_alias_removed():
+    """断言废弃的 TIER2_TARGET_S 别名已彻底退役，模块不再暴露此符号。"""
+    assert not hasattr(bench_tool, "TIER2_TARGET_S")
+    assert hasattr(bench_tool, "TIER2_WARN_S")
+    assert hasattr(bench_tool, "TIER2_PANIC_S")
+
+
+def test_tier2_docstring_exit_matrix_sync():
+    """R2 / B2: 验证模块 docstring 中退出码矩阵已同步，不含旧常量且含 PANIC。"""
+    doc = bench_tool.__doc__ or ""
+    assert "TIER2_TARGET_S" not in doc
+    assert "PANIC" in doc
+
+
+def test_assert_running_in_quench_self_repo(tmp_path: Path):
+    """M3: 验证相对路径自锚定守卫：真仓正常通过，缺少标记文件的目录抛出 RuntimeError。"""
+    bench_tool.assert_running_in_quench_self_repo(REPO_ROOT)
+
+    # 虚拟空白目录测试
+    with pytest.raises(RuntimeError, match="Repository self-anchor check failed"):
+        bench_tool.assert_running_in_quench_self_repo(tmp_path)
+
+
+def test_authoritative_regression_command_no_deselect():
+    """M1: 双向断言：① 权威全量回归命令严禁包含 --deselect；② 唯一携带 --deselect 构造点绑定反自噬探针单例。"""
+    # 权威回归标准命令 (TP-3 零净覆盖损失)
+    authoritative_cmd = ["python", "-m", "pytest", "-q"]
+    assert "--deselect" not in authoritative_cmd
+
+    # 检查 check_test_duration_baselines.py 源码中 --deselect 仅在 run_tier2_benchmark 内部用于 HARNESS_TEST_FILENAME
+    source_path = REPO_ROOT / "scripts" / "check_test_duration_baselines.py"
+    source_text = source_path.read_text(encoding="utf-8")
+    deselect_matches = re.findall(r'"--deselect"', source_text)
+    assert len(deselect_matches) == 1, f"Expected exactly 1 '--deselect' in duration benchmark spawner, got {len(deselect_matches)}"
+    assert "HARNESS_TEST_FILENAME" in source_text
+
+
+def test_no_non_magic_guard_write():
+    """R3: 源码静态扫描断言不存在对 REENTRY_GUARD_ENV 赋非魔术值字面量。"""
+    source_path = REPO_ROOT / "scripts" / "check_test_duration_baselines.py"
+    source_text = source_path.read_text(encoding="utf-8")
+    # 匹配任何 child_env[REENTRY_GUARD_ENV] = ...
+    writes = re.findall(r"\[REENTRY_GUARD_ENV\]\s*=\s*(.+)", source_text)
+    assert len(writes) >= 2, f"Expected at least 2 writes to REENTRY_GUARD_ENV, found {len(writes)}"
+    for w in writes:
+        assert w.strip() == "REENTRY_GUARD_VALUE", f"Unexpected write value to REENTRY_GUARD_ENV: {w}"
+
