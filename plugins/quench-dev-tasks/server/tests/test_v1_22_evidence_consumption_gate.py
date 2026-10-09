@@ -338,3 +338,107 @@ def test_step22_1_ledger_evidence_anchored():
     assert "docs/architecture/over_engineering_inventory.md#10.4" in adj_22_1.get("evidence_refs", [])
     assert adj_22_1["collapsed_into"] == "22.0"
 
+
+# ==============================================================================
+# Step 22.2: 双 lease 独立失效域隔离与 fail-closed 契约门禁 (Dual Lease Topology & A7 Gate)
+# ==============================================================================
+
+@dataclass(frozen=True)
+class DualLeaseTopologyVerdict:
+    manifest_lease_callers: Tuple[str, ...]
+    workspace_lease_callers: Tuple[str, ...]
+    is_disjoint: bool
+
+
+def evaluate_dual_lease_topology(inventory_md_text: str) -> DualLeaseTopologyVerdict:
+    """纯函数：解析 Markdown 文档中 §10.5 双租约调用拓扑并断言两者的隔离性。"""
+    header_pattern = re.compile(r"###\s+10\.5\s+.*双租约.*", re.IGNORECASE)
+    match = header_pattern.search(inventory_md_text)
+    if not match:
+        return DualLeaseTopologyVerdict(
+            manifest_lease_callers=(),
+            workspace_lease_callers=(),
+            is_disjoint=False,
+        )
+
+    rest = inventory_md_text[match.end():]
+    section_end = re.search(r"(\r?\n---|###)", rest)
+    section_content = rest[:section_end.start()] if section_end else rest
+
+    manifest_callers: List[str] = []
+    workspace_callers: List[str] = []
+
+    for line in section_content.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or "---" in line or "调用拓扑" in line:
+            continue
+        cols = [c.strip() for c in line.split("|")[1:-1]]
+        if len(cols) < 3:
+            continue
+        lease_name = cols[0].strip().strip("`")
+        raw_callers = cols[2].strip()
+        callers = [
+            c.strip().strip("`")
+            for c in raw_callers.split(",")
+            if c.strip() and c.strip().strip("`").upper() != "NONE"
+        ]
+        if lease_name == "manifest_lease":
+            manifest_callers.extend(callers)
+        elif lease_name == "workspace_lease":
+            workspace_callers.extend(callers)
+
+    m_set = set(manifest_callers)
+    w_set = set(workspace_callers)
+    is_disjoint = len(m_set.intersection(w_set)) == 0 and bool(manifest_callers) and bool(workspace_callers)
+
+    return DualLeaseTopologyVerdict(
+        manifest_lease_callers=tuple(sorted(manifest_callers)),
+        workspace_lease_callers=tuple(sorted(workspace_callers)),
+        is_disjoint=is_disjoint,
+    )
+
+
+@pytest.mark.tier1_fast
+def test_step22_2_dual_lease_topology_strictly_disjoint():
+    """断言真实架构清单中 §10.5 双租约调用拓扑严格不相交（独立失效域物理证明）。"""
+    ws = _get_workspace_root()
+    inv_file = ws / "docs" / "architecture" / "over_engineering_inventory.md"
+    assert inv_file.is_file(), f"Missing inventory file: {inv_file}"
+    verdict = evaluate_dual_lease_topology(inv_file.read_text(encoding="utf-8"))
+
+    assert verdict.is_disjoint is True, "manifest_lease 与 workspace_lease 调用拓扑存在交叉重叠，违反独立失效域隔离"
+    assert len(verdict.manifest_lease_callers) > 0, "manifest_lease 调用拓扑为空"
+    assert len(verdict.workspace_lease_callers) > 0, "workspace_lease 调用拓扑为空"
+    # 交叉交集严格为空
+    overlap = set(verdict.manifest_lease_callers).intersection(set(verdict.workspace_lease_callers))
+    assert len(overlap) == 0, f"发现跨 lease 交叉调用污染: {overlap}"
+
+
+@pytest.mark.tier1_fast
+def test_step22_2_dual_lease_synthetic_collision_fail_closed():
+    """断言当合成数据中存在跨 lease 交叉调用时，门禁判定 is_disjoint 为 False (fail-closed)。"""
+    synthetic_overlap = (
+        "### 10.5 双租约调用拓扑 (Coupling Topology, 共 2 项)\n\n"
+        "| 租约名称 | 语义领域 | 调用拓扑 (`call_topology`) |\n"
+        "| :--- | :--- | :--- |\n"
+        "| `manifest_lease` | `task_coordination` | `plugins/quench-dev-tasks/server/server.py` |\n"
+        "| `workspace_lease` | `session_cleanup` | `plugins/quench-dev-tasks/server/server.py` |\n"
+    )
+    v_overlap = evaluate_dual_lease_topology(synthetic_overlap)
+    assert v_overlap.is_disjoint is False
+
+
+@pytest.mark.tier1_fast
+def test_step22_2_ledger_evidence_anchored():
+    """断言账本中 step22.2 显式锚定 #10.5 证据段。"""
+    ws = _get_workspace_root()
+    ledger_path = ws / "docs" / "architecture" / "v1.22_step22.0_evidence_consumption_ledger.md"
+    text = ledger_path.read_text(encoding="utf-8")
+    fm = _parse_yaml_front_matter(text)
+
+    adj_22_2 = next((a for a in fm["adjudications"] if str(a["step_id"]) == "22.2"), None)
+    assert adj_22_2 is not None, "Missing step 22.2 in ledger"
+    assert "docs/architecture/over_engineering_inventory.md#10.5" in adj_22_2.get("evidence_refs", [])
+    assert adj_22_2["disposition"] == "CONFIRMED"
+
+

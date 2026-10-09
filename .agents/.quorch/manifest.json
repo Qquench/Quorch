@@ -891,6 +891,17 @@
       "git_head_sha": "76bfe392dece6b67d0358193c338fd19df8752e8",
       "git_index_mtime": 1791541709.7829893,
       "released": true
+    },
+    "2026-10-09_v1.22_step22.2_dual_lease_primitives_slimming::22.2": {
+      "task_id": "2026-10-09_v1.22_step22.2_dual_lease_primitives_slimming::22.2",
+      "md_sha256": "e907a71a9c5708cc01c122599e1ecf37d87bd51634f6208bfa551dd2f9892442",
+      "generation": 1,
+      "holder_token": "token_1791542665090_26540",
+      "last_heartbeat_monotonic_ns": 1273852500000000,
+      "last_heartbeat_wall_utc": "2026-10-09T10:59:43.069653+00:00",
+      "git_head_sha": "2e1a7d5c8451c5487160b4e2ba285019a9b19498",
+      "git_index_mtime": 1791543416.7466712,
+      "released": true
     }
   }
 }

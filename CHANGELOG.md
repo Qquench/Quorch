@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-09] 2026-10-09_v1.22_step22.2_dual_lease_primitives_slimming.md
+
+- **Task 22.2**: 双 lease 独立失效域隔离与 fail-closed 契约门禁 (Dual Lease Isolation & Fail-Closed Contract Gate)
+
 ## [2026-10-09] 2026-10-09_v1.22_step22.1_emerged_vacuity_and_evidence_gate.md
 
 - **Task 22.1**: Emerged 候选空集负向断言与证据闭合门禁 (Emerged Vacuity & Evidence Closed Gate)
