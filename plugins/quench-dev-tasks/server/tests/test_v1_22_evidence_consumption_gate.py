@@ -442,6 +442,36 @@ def test_step22_2_ledger_evidence_anchored():
     assert adj_22_2["disposition"] == "CONFIRMED"
 
 
+@pytest.mark.tier1_fast
+def test_ledger_frontmatter_body_parity():
+    """断言账本 front-matter 与正文各小节裁决状态与证据引用严格双向对齐 (SSOT 防腐门禁)。"""
+    ws = _get_workspace_root()
+    ledger_path = ws / "docs" / "architecture" / "v1.22_step22.0_evidence_consumption_ledger.md"
+    text = ledger_path.read_text(encoding="utf-8")
+    fm = _parse_yaml_front_matter(text)
+
+    # 提取正文中的小节裁决与证据
+    # 例如: ### 2.3 step22.2 ...
+    # - **裁决状态**: `CONFIRMED`
+    # - **证据引用**: ...
+    sec_pattern = re.compile(
+        r"###\s+2\.[0-9]+\s+step(22\.[0-9]+)[^\n]*\n"
+        r"-\s+\*\*裁决状态\*\*:\s*`([A-Z_]+)`[^\n]*\n"
+        r"-\s+\*\*证据引用\*\*:\s*([^\n]+)",
+        re.MULTILINE,
+    )
+    matches = sec_pattern.findall(text)
+    assert len(matches) >= 6, f"Expected 6 section entries in ledger body, found {len(matches)}"
+
+    for step_id, body_disp, body_evidence in matches:
+        fm_adj = next((a for a in fm["adjudications"] if str(a["step_id"]) == step_id), None)
+        assert fm_adj is not None, f"Step {step_id} in body but missing from front-matter"
+        assert fm_adj["disposition"] == body_disp, f"Step {step_id} disposition mismatch"
+        if not fm_adj.get("evidence_refs"):
+            assert "[]" in body_evidence, f"Step {step_id} has empty evidence_refs in front-matter but body has: {body_evidence}"
+
+
+
 # ==============================================================================
 # Step 22.3: 23 生产模块依赖无环拓扑与分层隔离硬门禁 (Module Import DAG Gate)
 # ==============================================================================

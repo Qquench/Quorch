@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-09] 2026-10-09_v1.22_step22.5_rebaseline_and_milestone_exit.md
+
+- **Task 22.5**: v1.22 全量再基线收尾与里程碑退出检查 (Rebaseline & Milestone Exit Gate)
+
 ## [2026-10-09] 2026-10-09_v1.22_step22.2_dual_lease_primitives_slimming.md
 
 - **Task 22.2**: 双 lease 独立失效域隔离与 fail-closed 契约门禁 (Dual Lease Isolation & Fail-Closed Contract Gate)

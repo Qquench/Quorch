@@ -913,6 +913,17 @@
       "git_head_sha": "9794000e45ff81eb7d03870a9afe058e6fdb59e2",
       "git_index_mtime": 1791543614.3111584,
       "released": false
+    },
+    "2026-10-09_v1.22_step22.5_rebaseline_and_milestone_exit::22.5": {
+      "task_id": "2026-10-09_v1.22_step22.5_rebaseline_and_milestone_exit::22.5",
+      "md_sha256": "78cb009c944a0b23a3a29143534082a0f7b93586d82f5d4e1989508c419cac4f",
+      "generation": 1,
+      "holder_token": "token_1791544817340_26540",
+      "last_heartbeat_monotonic_ns": 1280392343000000,
+      "last_heartbeat_wall_utc": "2026-10-09T12:48:42.910751+00:00",
+      "git_head_sha": "c20712ffeb95fdf19985a8587ad59e0e8ae92fa7",
+      "git_index_mtime": 1791544280.126731,
+      "released": true
     }
   }
 }
