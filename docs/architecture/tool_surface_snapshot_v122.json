@@ -1,0 +1,629 @@
+{
+  "canonical_hash": "4fa698fe768fe13bcbc875c4857dddd80f06ec3e97cc9ac1755e0c8a58f414b1",
+  "duplicate_param_signatures": [],
+  "entries": [
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_reviewer_cancel_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "job_id"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_reviewer_cancel_",
+      "return_annotation": "dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_reviewer_consult_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "query"
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "context_files"
+        },
+        {
+          "annotation": "str",
+          "default": "'critique'",
+          "kind": "pos_or_kw",
+          "name": "mode"
+        },
+        {
+          "annotation": "int",
+          "default": "1",
+          "kind": "pos_or_kw",
+          "name": "max_hops"
+        },
+        {
+          "annotation": "str | None",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        },
+        {
+          "annotation": "Context",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "ctx"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_reviewer_consult_",
+      "return_annotation": "dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_reviewer_poll_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "job_id"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        },
+        {
+          "annotation": "int",
+          "default": "0",
+          "kind": "pos_or_kw",
+          "name": "wait_max_s"
+        },
+        {
+          "annotation": "bool",
+          "default": "True",
+          "kind": "pos_or_kw",
+          "name": "raw_text"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_reviewer_poll_",
+      "return_annotation": "Union[str, dict[str, Any]]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_reviewer_submit_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "query"
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "context_files"
+        },
+        {
+          "annotation": "str",
+          "default": "'evaluate'",
+          "kind": "pos_or_kw",
+          "name": "mode"
+        },
+        {
+          "annotation": "int",
+          "default": "1",
+          "kind": "pos_or_kw",
+          "name": "max_hops"
+        },
+        {
+          "annotation": "str | None",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        },
+        {
+          "annotation": "str | None",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "idempotency_key"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_reviewer_submit_",
+      "return_annotation": "dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_archive_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_file"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_archive_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_checkout_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "task_file"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_checkout_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_complete_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_file"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "dod_output"
+        },
+        {
+          "annotation": "str",
+          "default": "''",
+          "kind": "pos_or_kw",
+          "name": "test_evidence"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "holder_token"
+        },
+        {
+          "annotation": "Optional[int]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "generation"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_complete_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_confirm_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_file"
+        },
+        {
+          "annotation": "List[str]",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_ids"
+        },
+        {
+          "annotation": "str",
+          "default": "'confirm'",
+          "kind": "pos_or_kw",
+          "name": "action"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_confirm_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_escalate_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_file"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "reason"
+        },
+        {
+          "annotation": "Optional[List[str]]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "context_files"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_escalate_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_export_handoff_card_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        },
+        {
+          "annotation": "bool",
+          "default": "False",
+          "kind": "pos_or_kw",
+          "name": "include_context"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_export_handoff_card_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_tasks_heartbeat_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "'.'",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "holder_token"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_heartbeat_",
+      "return_annotation": "dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_promote_draft_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_file"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_promote_draft_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_propose_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "task_file_name"
+        },
+        {
+          "annotation": "List[Dict[str, Any]]",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "tasks"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_propose_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_tasks_reclaim_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "'.'",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "''",
+          "kind": "pos_or_kw",
+          "name": "task_id"
+        },
+        {
+          "annotation": "int",
+          "default": "0",
+          "kind": "pos_or_kw",
+          "name": "expected_generation"
+        },
+        {
+          "annotation": "str",
+          "default": "''",
+          "kind": "pos_or_kw",
+          "name": "expected_holder_token"
+        },
+        {
+          "annotation": "bool",
+          "default": "False",
+          "kind": "pos_or_kw",
+          "name": "force"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_reclaim_",
+      "return_annotation": "dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": true,
+      "name": "_mcp_sym_dev_tasks_refine_spec_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "Dict[str, Any]",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "draft_task"
+        },
+        {
+          "annotation": "Optional[List[str]]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "context_files"
+        },
+        {
+          "annotation": "int",
+          "default": "1",
+          "kind": "pos_or_kw",
+          "name": "max_hops"
+        },
+        {
+          "annotation": "bool",
+          "default": "False",
+          "kind": "pos_or_kw",
+          "name": "persist"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_refine_spec_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_set_bypass_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "str",
+          "default": "'enable'",
+          "kind": "pos_or_kw",
+          "name": "action"
+        },
+        {
+          "annotation": "str",
+          "default": "'ui_styling'",
+          "kind": "pos_or_kw",
+          "name": "category"
+        },
+        {
+          "annotation": "str",
+          "default": "''",
+          "kind": "pos_or_kw",
+          "name": "reason"
+        },
+        {
+          "annotation": "bool",
+          "default": "False",
+          "kind": "pos_or_kw",
+          "name": "user_authorized"
+        },
+        {
+          "annotation": "int",
+          "default": "4",
+          "kind": "pos_or_kw",
+          "name": "duration_hours"
+        },
+        {
+          "annotation": "Optional[str]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "session_id"
+        },
+        {
+          "annotation": "Optional[List[str]]",
+          "default": "None",
+          "kind": "pos_or_kw",
+          "name": "custom_patterns"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_set_bypass_",
+      "return_annotation": "Dict[str, Any]"
+    },
+    {
+      "decorator_form": "called",
+      "is_async": false,
+      "name": "_mcp_sym_dev_tasks_status_",
+      "params": [
+        {
+          "annotation": "str",
+          "default": "<required>",
+          "kind": "pos_or_kw",
+          "name": "workspace_root"
+        },
+        {
+          "annotation": "bool",
+          "default": "False",
+          "kind": "pos_or_kw",
+          "name": "include_drafts"
+        }
+      ],
+      "qualified_name": "_mcp_sym_server_dot_dev_tasks_status_",
+      "return_annotation": "Dict[str, Any]"
+    }
+  ],
+  "skipped_dynamic": 0,
+  "total_tools": 17
+}

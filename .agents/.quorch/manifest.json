@@ -869,6 +869,17 @@
       "git_head_sha": "61f19673b23352081158091b3c1719580ef7e678",
       "git_index_mtime": 1791537106.6827548,
       "released": true
+    },
+    "2026-10-09_v1.22_step22.4a_tool_surface_snapshot_and_triplet_gate::22.4a": {
+      "task_id": "2026-10-09_v1.22_step22.4a_tool_surface_snapshot_and_triplet_gate::22.4a",
+      "md_sha256": "63cbec5c037328bc988e88648e68ba93c4277832fe15e051118801550f5c5c86",
+      "generation": 1,
+      "holder_token": "token_1791540665722_26540",
+      "last_heartbeat_monotonic_ns": 1271935921000000,
+      "last_heartbeat_wall_utc": "2026-10-09T10:27:46.494460+00:00",
+      "git_head_sha": "8480e39062b5a30bd01112a86e4a6595b16ddf91",
+      "git_index_mtime": 1791540439.4195056,
+      "released": true
     }
   }
 }
