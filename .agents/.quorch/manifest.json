@@ -902,6 +902,17 @@
       "git_head_sha": "2e1a7d5c8451c5487160b4e2ba285019a9b19498",
       "git_index_mtime": 1791543416.7466712,
       "released": true
+    },
+    "2026-10-09_v1.22_step22.3_module_topology_and_layering_gate::22.3": {
+      "task_id": "2026-10-09_v1.22_step22.3_module_topology_and_layering_gate::22.3",
+      "md_sha256": "f83730c86ef7e61d61543012d94b57a537ce983ef6fd2038ca40dacb28216cb9",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1273934062000000,
+      "last_heartbeat_wall_utc": "2026-10-09T11:01:04.626815+00:00",
+      "git_head_sha": "9794000e45ff81eb7d03870a9afe058e6fdb59e2",
+      "git_index_mtime": 1791543614.3111584,
+      "released": false
     }
   }
 }

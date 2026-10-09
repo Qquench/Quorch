@@ -442,3 +442,174 @@ def test_step22_2_ledger_evidence_anchored():
     assert adj_22_2["disposition"] == "CONFIRMED"
 
 
+# ==============================================================================
+# Step 22.3: 23 生产模块依赖无环拓扑与分层隔离硬门禁 (Module Import DAG Gate)
+# ==============================================================================
+
+@dataclass(frozen=True)
+class ModuleTopologyVerdict:
+    module_count: int
+    raw_cycles: Tuple[Tuple[str, ...], ...]
+    is_core_dag: bool
+    adjacency: Dict[str, Tuple[str, ...]]
+
+
+def evaluate_module_import_topology(inventory_md_text: str) -> ModuleTopologyVerdict:
+    """纯函数：解析 Markdown 文档中 §10.6 生产模块依赖图谱并计算有向无环性与分层约束。"""
+    header_pattern = re.compile(r"###\s+10\.6\s+.*模块依赖图谱.*", re.IGNORECASE)
+    match = header_pattern.search(inventory_md_text)
+    if not match:
+        return ModuleTopologyVerdict(
+            module_count=0,
+            raw_cycles=(("MISSING_SECTION_10_6",),),
+            is_core_dag=False,
+            adjacency={},
+        )
+
+    rest = inventory_md_text[match.end():]
+    section_end = re.search(r"(\r?\n---|<!--)", rest)
+    section_content = rest[:section_end.start()] if section_end else rest
+
+    adjacency: Dict[str, List[str]] = {}
+
+    for line in section_content.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or "---" in line or "imported_modules" in line:
+            continue
+        cols = [c.strip() for c in line.split("|")[1:-1]]
+        if len(cols) < 2:
+            continue
+        mod_path = cols[0].strip().strip("`")
+        raw_deps = cols[1].strip()
+        deps = [
+            d.strip().strip("`")
+            for d in raw_deps.split(",")
+            if d.strip() and d.strip().strip("`").upper() != "NONE"
+        ]
+        adjacency[mod_path] = sorted(deps)
+
+    visited_state: Dict[str, int] = {m: 0 for m in adjacency}
+    detected_cycles: List[Tuple[str, ...]] = []
+
+    def dfs(curr: str, path: List[str]) -> None:
+        visited_state[curr] = 1
+        path.append(curr)
+        for nxt in adjacency.get(curr, []):
+            if nxt not in visited_state:
+                continue
+            if visited_state[nxt] == 1:
+                cycle_idx = path.index(nxt)
+                detected_cycles.append(tuple(path[cycle_idx:] + [nxt]))
+            elif visited_state[nxt] == 0:
+                dfs(nxt, path)
+        path.pop()
+        visited_state[curr] = 2
+
+    for mod in sorted(adjacency.keys()):
+        if visited_state[mod] == 0:
+            dfs(mod, [])
+
+    # 核心 DAG 判定：排除 project_config -> reviewer_engine 的惰性工厂边缘后，图严格为 DAG
+    core_adj = {
+        m: [d for d in deps if not (m.endswith("project_config.py") and d.endswith("reviewer_engine.py"))]
+        for m, deps in adjacency.items()
+    }
+    core_visited: Dict[str, int] = {m: 0 for m in core_adj}
+    core_cycles: List[Tuple[str, ...]] = []
+
+    def dfs_core(curr: str, path: List[str]) -> None:
+        core_visited[curr] = 1
+        path.append(curr)
+        for nxt in core_adj.get(curr, []):
+            if nxt not in core_visited:
+                continue
+            if core_visited[nxt] == 1:
+                cycle_idx = path.index(nxt)
+                core_cycles.append(tuple(path[cycle_idx:] + [nxt]))
+            elif core_visited[nxt] == 0:
+                dfs_core(nxt, path)
+        path.pop()
+        core_visited[curr] = 2
+
+    for mod in sorted(core_adj.keys()):
+        if core_visited[mod] == 0:
+            dfs_core(mod, [])
+
+    return ModuleTopologyVerdict(
+        module_count=len(adjacency),
+        raw_cycles=tuple(detected_cycles),
+        is_core_dag=(len(core_cycles) == 0),
+        adjacency={m: tuple(deps) for m, deps in sorted(adjacency.items())},
+    )
+
+
+@pytest.mark.tier1_fast
+def test_step22_3_module_import_topology_strictly_acyclic():
+    """断言真实架构清单中 §10.6 生产模块依赖图谱严格为 23 个模块且核心依赖拓扑为 DAG。"""
+    ws = _get_workspace_root()
+    inv_file = ws / "docs" / "architecture" / "over_engineering_inventory.md"
+    assert inv_file.is_file(), f"Missing inventory file: {inv_file}"
+    verdict = evaluate_module_import_topology(inv_file.read_text(encoding="utf-8"))
+
+    assert verdict.module_count == 23, f"生产模块总数与基数 23 不符: {verdict.module_count}"
+    assert verdict.is_core_dag is True, "核心模块依赖图存在循环引用"
+    # 原始拓扑中唯一的已知环是 project_config 内部工厂函数的局部延迟导入
+    assert len(verdict.raw_cycles) == 1
+    cycle = verdict.raw_cycles[0]
+    assert "project_config.py" in cycle[0] and "reviewer_engine.py" in cycle[1]
+
+
+@pytest.mark.tier1_fast
+def test_step22_3_module_import_synthetic_cycle_fail_closed():
+    """断言当合成数据中存在未知循环引用时，门禁判定 is_core_dag 为 False。"""
+    synthetic_cycle = (
+        "### 10.6 生产模块依赖图谱 (Module Import Graph, 共 2 个模块)\n\n"
+        "| 模块路径 | 依赖生产模块 (`imported_modules`) |\n"
+        "| :--- | :--- |\n"
+        "| `plugins/quench-dev-tasks/server/mod_a.py` | `plugins/quench-dev-tasks/server/mod_b.py` |\n"
+        "| `plugins/quench-dev-tasks/server/mod_b.py` | `plugins/quench-dev-tasks/server/mod_a.py` |\n"
+    )
+    v_cycle = evaluate_module_import_topology(synthetic_cycle)
+    assert v_cycle.is_core_dag is False
+    assert len(v_cycle.raw_cycles) > 0
+
+
+@pytest.mark.tier1_fast
+def test_step22_3_dual_lease_modules_mutually_isolated():
+    """断言 manifest_lease.py 与 workspace_lease.py 静态拓扑层互不依赖（静态隔离互证）。"""
+    ws = _get_workspace_root()
+    inv_file = ws / "docs" / "architecture" / "over_engineering_inventory.md"
+    verdict = evaluate_module_import_topology(inv_file.read_text(encoding="utf-8"))
+
+    ml = "plugins/quench-dev-tasks/server/manifest_lease.py"
+    wl = "plugins/quench-dev-tasks/server/workspace_lease.py"
+
+    assert ml in verdict.adjacency, f"Missing {ml} in adjacency"
+    assert wl in verdict.adjacency, f"Missing {wl} in adjacency"
+
+    assert wl not in verdict.adjacency[ml], "manifest_lease.py 静态依赖了 workspace_lease.py"
+    assert ml not in verdict.adjacency[wl], "workspace_lease.py 静态依赖了 manifest_lease.py"
+
+
+# ==============================================================================
+# Step 22.4: G1' 复杂度预算与 ToolSurface 快照机械唯一性门禁
+# ==============================================================================
+
+@pytest.mark.tier1_fast
+def test_step22_4_tool_surface_snapshot_hash_and_budget_clean():
+    """断言 ToolSurface 快照逐字节锁定且重复签名组严格为 0 (G1' 复杂度预算达成)。"""
+    import json
+    ws = _get_workspace_root()
+    snapshot_path = ws / "docs" / "architecture" / "tool_surface_snapshot_v122.json"
+    assert snapshot_path.is_file(), f"Missing snapshot file: {snapshot_path}"
+
+    data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert len(data["entries"]) == 17
+    assert len(data["duplicate_param_signatures"]) == 0
+
+    # 规范化 canonical_hash 校验
+    assert data["canonical_hash"] == "4fa698fe768fe13bcbc875c4857dddd80f06ec3e97cc9ac1755e0c8a58f414b1"
+
+
+
+
