@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-09] 2026-10-09_v1.22_step22.0_evidence_consumption_and_instantiation_adjudication.md
+
+- **Task 22.0**: v1.22 证据消费门禁与 PROVISIONAL 步骤实例化裁决 (Entry Gate & Evidence-Consumption Instantiation Adjudication)
+
 ## [2026-10-09] 2026-10-09_v1.21_step21.4_tier2_calibration_and_milestone_recertification.md
 
 - **Task 21.4**: Tier-2 度量校准修订、跨版本预算信封与里程碑结项再认证 (TR-4 落地 · 终审定稿版)

@@ -858,6 +858,17 @@
       "git_head_sha": "d2907939cb6988b9ab6f3fd62341d8203207e5cc",
       "git_index_mtime": 1791469143.433097,
       "released": false
+    },
+    "2026-10-09_v1.22_step22.0_evidence_consumption_and_instantiation_adjudication::22.0": {
+      "task_id": "2026-10-09_v1.22_step22.0_evidence_consumption_and_instantiation_adjudication::22.0",
+      "md_sha256": "82f7c49dad14113fc9697398d289c122c81832598439a0f4d8d89a416ef7e6c1",
+      "generation": 1,
+      "holder_token": "token_1791538714496_26540",
+      "last_heartbeat_monotonic_ns": 1269421734000000,
+      "last_heartbeat_wall_utc": "2026-10-09T09:45:52.296284+00:00",
+      "git_head_sha": "61f19673b23352081158091b3c1719580ef7e678",
+      "git_index_mtime": 1791537106.6827548,
+      "released": true
     }
   }
 }
