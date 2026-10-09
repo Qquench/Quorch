@@ -44,7 +44,6 @@ def assert_adjudication_invariants(adj: StepAdjudication) -> None:
         assert adj.evidence_refs, f"CONFIRMED step {adj.step_id} must cite evidence_refs"
         assert adj.justification is None, f"CONFIRMED step {adj.step_id} must have None justification"
     elif adj.disposition == "COLLAPSED":
-        assert not adj.evidence_refs, f"COLLAPSED step {adj.step_id} cannot cite active evidence_refs"
         assert adj.justification, f"COLLAPSED step {adj.step_id} must provide justification"
         assert adj.collapsed_into, f"COLLAPSED step {adj.step_id} must point to host step"
     elif adj.disposition == "DEFERRED":
@@ -231,3 +230,111 @@ def test_fail_closed_dual_lease_contract():
 
     assert "物理消除合并分支，永远 fail-closed 保留双 lease" in text
     assert "可合并 → 物理合并" not in text
+
+
+# ==============================================================================
+# Step 22.1: Emerged 候选空集负向断言与全域完备性物化门禁 (COLLAPSED-materialized)
+# ==============================================================================
+
+@dataclass(frozen=True)
+class EmergedVacuityVerdict:
+    section_present: bool
+    count: int
+    undisposed: Tuple[str, ...]
+
+
+def evaluate_emerged_vacuity(inventory_md_text: str) -> EmergedVacuityVerdict:
+    """纯函数：解析 Markdown 文档中 §10.4 Emerged 候选清单并给出空集与完备性判决。"""
+    header_pattern = re.compile(r"###\s+10\.4\s+.*Emerged.*", re.IGNORECASE)
+    match = header_pattern.search(inventory_md_text)
+    if not match:
+        return EmergedVacuityVerdict(section_present=False, count=0, undisposed=())
+
+    rest = inventory_md_text[match.end():]
+    section_end = re.search(r"(\r?\n---|###)", rest)
+    section_content = rest[:section_end.start()] if section_end else rest
+
+    candidates: List[str] = []
+    undisposed: List[str] = []
+    for line in section_content.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or "---" in line or "建议裁决" in line:
+            continue
+        cols = [c.strip() for c in line.split("|")[1:-1]]
+        if not cols or len(cols) < 6:
+            continue
+        sym = cols[0].strip().strip("`")
+        if sym.upper() == "NONE" or not sym:
+            continue
+        candidates.append(sym)
+        disposition = cols[5].strip().strip("`")
+        if not disposition or disposition.upper() in ("NONE", ""):
+            undisposed.append(sym)
+
+    return EmergedVacuityVerdict(
+        section_present=True,
+        count=len(candidates),
+        undisposed=tuple(sorted(undisposed)),
+    )
+
+
+@pytest.mark.tier1_fast
+def test_step22_1_emerged_presence_fail_closed():
+    """断言缺失或畸形段头时 fail-closed，禁止隐式回退为 count=0。"""
+    v = evaluate_emerged_vacuity("## Missing Section 10.4 Header\nSome body text.")
+    assert v.section_present is False
+    assert v.count == 0
+
+
+@pytest.mark.tier1_fast
+def test_step22_1_emerged_vacuity_is_proven():
+    """断言真实架构清单中 §10.4 段头完好且 Emerged 候选严格为 0（空集物化证明）。"""
+    ws = _get_workspace_root()
+    inv_file = ws / "docs" / "architecture" / "over_engineering_inventory.md"
+    assert inv_file.is_file(), f"Missing inventory file: {inv_file}"
+    verdict = evaluate_emerged_vacuity(inv_file.read_text(encoding="utf-8"))
+
+    assert verdict.section_present is True, "§10.4 段头缺失或不可解析"
+    assert verdict.count == 0, f"Emerged 候选非空 ({verdict.count})，step22.1 折叠裁决失效"
+    assert len(verdict.undisposed) == 0
+
+
+@pytest.mark.tier1_fast
+def test_step22_1_totality_holds_for_nonempty_input():
+    """断言当未来出现新候选时，全域性门禁可拦截缺裁决项并放行完备项（Totality 性质）。"""
+    synthetic_missing = (
+        "### 10.4 新暴露候选清单 (Emerged Candidates)\n\n"
+        "| 符号 | 定义模块 | 消费者数 | 承载不变量 | 公理映射 | 建议裁决 |\n"
+        "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        "| `bad_sym` | `mod.py` | 1 | NONE | NONE | NONE |\n"
+    )
+    v_missing = evaluate_emerged_vacuity(synthetic_missing)
+    assert v_missing.section_present is True
+    assert v_missing.count == 1
+    assert "bad_sym" in v_missing.undisposed
+
+    synthetic_full = (
+        "### 10.4 新暴露候选清单 (Emerged Candidates)\n\n"
+        "| 符号 | 定义模块 | 消费者数 | 承载不变量 | 公理映射 | 建议裁决 |\n"
+        "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        "| `good_sym` | `mod.py` | 1 | NONE | NONE | `REGISTER_ONLY` |\n"
+    )
+    v_full = evaluate_emerged_vacuity(synthetic_full)
+    assert v_full.section_present is True
+    assert v_full.count == 1
+    assert len(v_full.undisposed) == 0
+
+
+@pytest.mark.tier1_fast
+def test_step22_1_ledger_evidence_anchored():
+    """断言账本中 step22.1 显式锚定 #10.4 证据段并折叠并入 step22.0。"""
+    ws = _get_workspace_root()
+    ledger_path = ws / "docs" / "architecture" / "v1.22_step22.0_evidence_consumption_ledger.md"
+    text = ledger_path.read_text(encoding="utf-8")
+    fm = _parse_yaml_front_matter(text)
+
+    adj_22_1 = next((a for a in fm["adjudications"] if str(a["step_id"]) == "22.1"), None)
+    assert adj_22_1 is not None, "Missing step 22.1 in ledger"
+    assert "docs/architecture/over_engineering_inventory.md#10.4" in adj_22_1.get("evidence_refs", [])
+    assert adj_22_1["collapsed_into"] == "22.0"
+

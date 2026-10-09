@@ -880,6 +880,17 @@
       "git_head_sha": "8480e39062b5a30bd01112a86e4a6595b16ddf91",
       "git_index_mtime": 1791540439.4195056,
       "released": true
+    },
+    "2026-10-09_v1.22_step22.1_emerged_vacuity_and_evidence_gate::22.1": {
+      "task_id": "2026-10-09_v1.22_step22.1_emerged_vacuity_and_evidence_gate::22.1",
+      "md_sha256": "2fcb3f3ea1fcd1cd0ffc3ad470ad7eea61fc1323113809d5d603b65bf294eddd",
+      "generation": 1,
+      "holder_token": "token_1791542074281_26540",
+      "last_heartbeat_monotonic_ns": 1272637421000000,
+      "last_heartbeat_wall_utc": "2026-10-09T10:39:27.984318+00:00",
+      "git_head_sha": "76bfe392dece6b67d0358193c338fd19df8752e8",
+      "git_index_mtime": 1791541709.7829893,
+      "released": true
     }
   }
 }
