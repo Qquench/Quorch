@@ -924,6 +924,39 @@
       "git_head_sha": "c20712ffeb95fdf19985a8587ad59e0e8ae92fa7",
       "git_index_mtime": 1791544280.126731,
       "released": true
+    },
+    "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.1": {
+      "task_id": "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.1",
+      "md_sha256": "7110bbff88feaa24c1f8c11a84277eced7ec94c2d376756fdee868bd7a5e8a21",
+      "generation": 1,
+      "holder_token": "token_1791555479988_26540",
+      "last_heartbeat_monotonic_ns": 1286428265000000,
+      "last_heartbeat_wall_utc": "2026-10-09T14:29:18.832600+00:00",
+      "git_head_sha": "3edef0f1bf20942b7367e2e5fee8c51a9fa8dce9",
+      "git_index_mtime": 1791555616.243631,
+      "released": true
+    },
+    "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.2": {
+      "task_id": "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.2",
+      "md_sha256": "0c21791d5243f0171bb2ed8f27d70f006d598cb1423638ee5a25f406dce5f4e0",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1285009765000000,
+      "last_heartbeat_wall_utc": "2026-10-09T14:05:40.335133+00:00",
+      "git_head_sha": "3edef0f1bf20942b7367e2e5fee8c51a9fa8dce9",
+      "git_index_mtime": 1791554344.0960224,
+      "released": false
+    },
+    "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.3": {
+      "task_id": "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.3",
+      "md_sha256": "0c21791d5243f0171bb2ed8f27d70f006d598cb1423638ee5a25f406dce5f4e0",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 1285009781000000,
+      "last_heartbeat_wall_utc": "2026-10-09T14:05:40.345135+00:00",
+      "git_head_sha": "3edef0f1bf20942b7367e2e5fee8c51a9fa8dce9",
+      "git_index_mtime": 1791554344.0960224,
+      "released": false
     }
   }
 }

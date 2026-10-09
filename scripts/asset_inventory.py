@@ -67,7 +67,11 @@ DOC_ROOT_RELS: Final[tuple[str, ...]] = (
     "CHANGELOG.md",
     "dev_tasks_mcp_specification.md",
 )
-DOC_NON_CONSUMER_PREFIXES: Final[tuple[str, ...]] = ("docs/dev_tasks",)
+DOC_NON_CONSUMER_PREFIXES: Final[tuple[str, ...]] = (
+    "docs/dev_tasks",
+    "docs/roadmap/archive",
+    "docs/architecture/archive",
+)
 
 
 def _is_non_consumer_doc(rel_posix: str) -> bool:
