@@ -130,7 +130,10 @@ def test_ssot_constants_aligned_across_readme_roadmap_code():
     """SSOT 三向一致物理门：README §3.5 = 路线图 §3.5 = 代码常数严格一致。"""
     code_text = (REPO_ROOT / "scripts/check_test_duration_baselines.py").read_text(encoding="utf-8")
     readme_text = (REPO_ROOT / "docs/architecture/README.md").read_text(encoding="utf-8")
-    roadmap_text = (REPO_ROOT / "docs/roadmap/v1.23_resource_efficiency_and_doc_compaction_roadmap.md").read_text(encoding="utf-8")
+    roadmap_path = REPO_ROOT / "docs/roadmap/v1.23_resource_efficiency_and_doc_compaction_roadmap.md"
+    if not roadmap_path.is_file():
+        roadmap_path = REPO_ROOT / "docs/roadmap/archive/v1.23_resource_efficiency_and_doc_compaction_roadmap.md"
+    roadmap_text = roadmap_path.read_text(encoding="utf-8")
 
     # 1. 安全地板常数 == 30.0
     m = re.search(r"TIER2_ABSOLUTE_FLOOR_S\s*:\s*Final\[float\]\s*=\s*([0-9.]+)", code_text)
