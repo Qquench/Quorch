@@ -92,10 +92,9 @@ The Quench DevTasks MCP server exposes exactly 17 specialized tools:
 | 11 | `dev_tasks_export_handoff_card` | Runner | Export Reviewer handoff card markdown without state mutation |
 | 12 | `dev_tasks_set_bypass` | Runner & Human | Activate time-bounded bypass token for hotfixes/typos |
 | 13 | `dev_tasks_archive` | Runner & Reviewer | Archive fully closed tasks to `archive/` and update changelog |
-| 14 | `dev_reviewer_consult` | Reviewer & Runner | Synchronous direct architectural critique and advisory |
-| 15 | `dev_reviewer_submit` | Reviewer & Runner | Submit background asynchronous architectural review job |
-| 16 | `dev_reviewer_poll` | Reviewer & Runner | Poll background review job progress and non-terminal snapshot |
-| 17 | `dev_reviewer_cancel` | Reviewer & Runner | Deterministically cancel in-flight review job |
+| 14 | `dev_reviewer_submit` | Reviewer & Runner | Submit background asynchronous architectural review job |
+| 15 | `dev_reviewer_poll` | Reviewer & Runner | Poll background review job progress and non-terminal snapshot |
+| 16 | `dev_reviewer_cancel` | Reviewer & Runner | Deterministically cancel in-flight review job |
 
 ---
 
@@ -189,8 +188,8 @@ For deep architectural review or large refactoring proposals, use asynchronous j
 2. Poll progress via `dev_reviewer_poll`. While in progress, poll responses provide compact non-terminal status snapshots bounded to $\le 1024$ bytes.
 3. If necessary, cancel jobs via `dev_reviewer_cancel`.
 
-### 6.2 Synchronous Consultation
-For quick sanity checks, call `dev_reviewer_consult`.
+### 6.2 Asynchronous Consultation & Review
+For architectural reviews and guidance, submit jobs via `dev_reviewer_submit` and poll via `dev_reviewer_poll`.
 
 ### 6.3 Anti-Forgery Protection
 Quench enforces physical defenses against fabricated or roleplayed reviews:
@@ -204,7 +203,7 @@ Quench enforces physical defenses against fabricated or roleplayed reviews:
 
 | Issue | Root Cause | Remediation |
 |---|---|---|
-| Checkout Rejected: `Task is currently in 🔄 需返工` | Task was flagged for rework by Reviewer | Consult Reviewer or human via `dev_tasks_escalate` or `dev_reviewer_consult` to refine spec |
+| Checkout Rejected: `Task is currently in 🔄 需返工` | Task was flagged for rework by Reviewer | Consult Reviewer or human via `dev_tasks_escalate` or `dev_reviewer_submit` to refine spec |
 | Checkout Rejected: Task already checked out | Another session or stale process holds the lease | Check process status; if dead, call `dev_tasks_reclaim` |
 | Pre-Tool Interception: Unmanaged file edit | Target file is outside `【涉及文件】` whitelist | Revert unwanted change, or update task scope through `dev_tasks_refine_spec` / `dev_tasks_propose` |
 | Emergency Hotfix Blocked | Unmanaged emergency typo or CI fix | Activate time-bounded token via `dev_tasks_set_bypass` |

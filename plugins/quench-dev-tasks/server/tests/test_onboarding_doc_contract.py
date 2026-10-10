@@ -72,7 +72,7 @@ def test_no_tool_reference_drift():
     """Assert all 'dev_*' tool mentions in onboarding doc match real server.py registered tools."""
     # Retrieve real registered tools from FastMCP instance
     registered_tools = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert len(registered_tools) == 17, f"Expected 17 registered tools, got {len(registered_tools)}"
+    assert len(registered_tools) == 16, f"Expected 16 registered tools, got {len(registered_tools)}"
 
     content = DOC_PATH.read_text(encoding="utf-8")
     # Match all tokens like dev_tasks_* or dev_reviewer_*
@@ -90,7 +90,6 @@ def test_no_tool_reference_drift():
         "dev_tasks_status",
         "dev_tasks_checkout",
         "dev_tasks_complete",
-        "dev_reviewer_consult",
         "dev_reviewer_submit",
         "dev_reviewer_poll",
         "dev_tasks_heartbeat",

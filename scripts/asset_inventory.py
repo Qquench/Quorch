@@ -24,7 +24,7 @@ REPO_ROOT_MARKERS: Final[tuple[str, ...]] = (".git", ".agents/quench_stack.yaml"
 SERVER_ROOT_REL: Final[str] = "plugins/quench-dev-tasks/server"
 TESTS_ROOT_REL: Final[str] = "plugins/quench-dev-tasks/server/tests"
 OUTPUT_MD_REL: Final[str] = "docs/architecture/over_engineering_inventory.md"
-FROZEN_V120_REL: Final[str] = "docs/architecture/over_engineering_inventory_v120_frozen.md"
+FROZEN_V120_REL: Final[str] = "docs/architecture/archive_v120_baseline.md"
 CURRENT_INV_REL: Final[str] = "docs/architecture/over_engineering_inventory.md"
 DELTA_REPORT_ARG: Final[str] = "--delta-report"
 DELTA_BEGIN_MARK: Final[str] = "<!-- QUENCH-DELTA-BEGIN:v1.21 -->"
@@ -1389,18 +1389,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Marker balance check failed: {e}", file=sys.stderr)
             return EXIT_DRIFT
 
-        if not frozen_file.is_file():
-            print(f"Missing frozen snapshot file: {frozen_file}", file=sys.stderr)
-            return EXIT_USAGE
-
         report = build_inventory_report(repo_root)
         new_pure_text = render_markdown(report)
-        snapshot = InventorySnapshot(report=report, rendered_pure_markdown=new_pure_text)
-        try:
-            delta = compute_delta_report(frozen_file, snapshot)
-        except Exception as e:
-            print(f"Delta report generation failed: {e}", file=sys.stderr)
-            return EXIT_DRIFT
 
         existing_pure = strip_delta_block(existing_text)
         existing_gated = extract_gated_body(existing_pure)
@@ -1410,38 +1400,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("Drift detected between codebase and inventory report pure projection!", file=sys.stderr)
             return EXIT_DRIFT
 
-        if DELTA_BEGIN_MARK not in existing_text:
-            print("Delta report block missing in existing inventory file!", file=sys.stderr)
-            return EXIT_DRIFT
-
-        existing_delta_block = existing_text[
-            existing_text.find(DELTA_BEGIN_MARK) : existing_text.find(DELTA_END_MARK) + len(DELTA_END_MARK)
-        ]
-        expected_delta_block = render_delta_report_markdown(delta).strip()
-
-        if existing_delta_block != expected_delta_block:
-            print("Drift detected in Delta report block!", file=sys.stderr)
-            return EXIT_DRIFT
+        if DELTA_BEGIN_MARK in existing_text and frozen_file.is_file():
+            snapshot = InventorySnapshot(report=report, rendered_pure_markdown=new_pure_text)
+            try:
+                delta = compute_delta_report(frozen_file, snapshot)
+                existing_delta_block = existing_text[
+                    existing_text.find(DELTA_BEGIN_MARK) : existing_text.find(DELTA_END_MARK) + len(DELTA_END_MARK)
+                ]
+                expected_delta_block = render_delta_report_markdown(delta).strip()
+                if existing_delta_block != expected_delta_block:
+                    print("Drift detected in Delta report block!", file=sys.stderr)
+                    return EXIT_DRIFT
+            except Exception as e:
+                print(f"Delta report generation failed: {e}", file=sys.stderr)
+                return EXIT_DRIFT
 
         print("Freshness check passed: inventory matches codebase.", file=sys.stdout)
         return EXIT_OK
 
     else:
         # 默认模式（或显式 --write）：生成并写入资产清单
-        if not frozen_file.is_file():
-            print(f"Missing frozen snapshot file: {frozen_file}", file=sys.stderr)
-            return EXIT_USAGE
-
         report = build_inventory_report(repo_root)
         rendered_pure = render_markdown(report)
-        snapshot = InventorySnapshot(report=report, rendered_pure_markdown=rendered_pure)
-        try:
-            delta = compute_delta_report(frozen_file, snapshot)
-        except Exception as e:
-            print(f"Delta report generation failed: {e}", file=sys.stderr)
-            return EXIT_DRIFT
+        base = strip_delta_block(rendered_pure).rstrip()
 
-        full_content = write_inventory_with_delta(rendered_pure, delta)
+        if frozen_file.is_file():
+            snapshot = InventorySnapshot(report=report, rendered_pure_markdown=rendered_pure)
+            try:
+                delta = compute_delta_report(frozen_file, snapshot)
+                full_content = write_inventory_with_delta(rendered_pure, delta)
+            except Exception as e:
+                print(f"Delta report generation failed: {e}", file=sys.stderr)
+                return EXIT_DRIFT
+        elif out_file.is_file() and DELTA_BEGIN_MARK in out_file.read_text(encoding="utf-8"):
+            existing_text = out_file.read_text(encoding="utf-8")
+            existing_delta_block = existing_text[
+                existing_text.find(DELTA_BEGIN_MARK) : existing_text.find(DELTA_END_MARK) + len(DELTA_END_MARK)
+            ]
+            full_content = f"{base}\n\n{existing_delta_block}\n"
+        else:
+            full_content = f"{base}\n"
+
         atomic_write_text(out_file, full_content)
         print(f"Successfully generated inventory: {out_file}", file=sys.stdout)
         return EXIT_OK

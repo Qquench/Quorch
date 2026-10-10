@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import re
@@ -36,11 +37,43 @@ TIER1_HARD_FAIL_S: Final[float] = 8.0   # 超此值 fail-closed（CI 阻断；�
 TIER1_TARGET_S: Final[float] = 5.0      # 超此值 WARN（放行，exit 0）
 TIER1_FAST_GOAL_S: Final[float] = 3.0   # 报告项（info，对应路线图 §4.3 观测口径，不作门禁）
 
-# --- Tier-2 阈值（双闸预算信封与硬阻断恐慌线，TR-4 单一 SSOT）---
-TIER2_WARN_S: Final[float] = 65.0       # 营运预算信封上限（WARN，放行，exit 0）
-TIER2_PANIC_S: Final[float] = 110.0     # 灾难回潮硬阻断线（严格低于 v1.20 历史基准 114s；FAIL/PANIC，exit 1）
+# --- Tier-2 动态性能信封（v1.23 单向下移 + 双向假红防护）---
+TIER2_ABSOLUTE_FLOOR_S: Final[float] = 30.0     # 30s 安全地板（区别于路线图废除的 85s 固定操作地板）
+TIER2_WARN_MULTIPLIER: Final[float] = 1.15      # WARN 系数 = Baseline_next * 1.15
+TIER2_PANIC_MULTIPLIER: Final[float] = 1.30     # PANIC 系数 = Baseline_next * 1.30
+RATCHET_CONFIRM_ROUNDS: Final[int] = 3          # 下行收敛：单次运行 3 采样或连续 3 轮确认后才下移
+PANIC_DOWNGRADE_STREAK: Final[int] = 2          # 上行防抖：运行内连续 K 次超限才硬红，单次超限降级 WARN
+BASELINE_STATE_PATH: Final[Path] = Path(".agents/bench/tier2_baseline.json")  # 可选侧车，不入资产扫描，缺失时 fail-safe 到告警
+TIER2_DEFAULT_BASELINE_S: Final[float] = 65.0   # 默认保守基线
 
-Tier2Verdict = Literal["OK", "WARN", "PANIC"]
+# 保持既有常量向后兼容
+TIER2_WARN_S: Final[float] = 65.0       # 静态兼容上限
+TIER2_PANIC_S: Final[float] = 110.0     # 静态兼容阻断线
+
+
+class Tier2Verdict(str):
+    """Tier-2 判定结果类型，双向兼容 ('OK'/'WARN'/'PANIC') 与 ('pass'/'warn'/'panic_pending'/'panic')。"""
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, str):
+            return False
+        s1 = self.lower()
+        s2 = other.lower()
+        if s1 in ("pass", "ok") and s2 in ("pass", "ok"):
+            return True
+        if s1 == "warn" and s2 == "warn":
+            return True
+        if s1 == "panic" and s2 == "panic":
+            return True
+        if s1 == "panic_pending" and s2 == "panic_pending":
+            return True
+        return super().__eq__(other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash(self.lower())
 
 # --- 方差门禁 ---
 TIER1_MAX_CV: Final[float] = 0.15       # std_dev(ddof=1) / mean
@@ -124,46 +157,130 @@ def assert_running_in_quench_self_repo(repo_root: Path) -> None:
         )
 
 
-def classify_tier2(elapsed: float) -> Tier2Verdict:
+def robust_baseline(samples: Sequence[float]) -> float:
+    """计算耗时样本的鲁棒估计量（中位数，过滤瞬态毛刺与离群）。"""
+    if not samples:
+        raise ValueError("samples sequence cannot be empty / 耗时序列不能为空")
+    for x in samples:
+        if math.isnan(x):
+            raise ValueError(f"Invalid NaN duration in samples: {x}")
+        if not math.isfinite(x) or x <= 0.0:
+            raise ValueError(f"Invalid non-positive or infinite duration in samples: {x}")
+    cleaned = sorted(float(x) for x in samples)
+    return float(statistics.median(cleaned))
+
+
+def next_baseline(prev: float, robust_est: float) -> float:
+    """单向下移收敛公式：Baseline_next = max(TIER2_ABSOLUTE_FLOOR_S, min(prev, robust_est))。"""
+    if math.isnan(prev) or not math.isfinite(prev) or prev <= 0.0:
+        prev = TIER2_DEFAULT_BASELINE_S
+    if math.isnan(robust_est) or not math.isfinite(robust_est) or robust_est <= 0.0:
+        robust_est = prev
+    return max(TIER2_ABSOLUTE_FLOOR_S, min(float(prev), float(robust_est)))
+
+
+def load_tier2_baseline(state_path: Path | None = None) -> float:
+    """从侧车文件读取基线；若不存在或损坏则 fail-safe 返回 TIER2_DEFAULT_BASELINE_S。"""
+    p = state_path if state_path is not None else BASELINE_STATE_PATH
+    try:
+        if p.is_file():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            val = float(data.get("baseline_s", TIER2_DEFAULT_BASELINE_S))
+            if math.isfinite(val) and val >= TIER2_ABSOLUTE_FLOOR_S:
+                return val
+    except Exception:
+        pass
+    return TIER2_DEFAULT_BASELINE_S
+
+
+def save_tier2_baseline(baseline: float, state_path: Path | None = None) -> bool:
+    """原子写入侧车文件（tmp -> replace）；失败时不阻断。"""
+    p = state_path if state_path is not None else BASELINE_STATE_PATH
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        content = json.dumps({"baseline_s": round(baseline, 3), "updated_at": time.time()}, indent=2)
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(p)
+        return True
+    except Exception:
+        return False
+
+
+def classify_tier2(
+    elapsed: float,
+    baseline: float | None = None,
+    panic_streak: int = PANIC_DOWNGRADE_STREAK,
+) -> Tier2Verdict:
     """Classify Tier-2 elapsed duration.
 
     IEEE-754 and domain boundary ordering:
     - NaN -> ValueError
     - not isfinite -> PANIC if > 0 else ValueError
     - <= 0 -> ValueError
-    - <= TIER2_WARN_S -> OK
-    - <= TIER2_PANIC_S -> WARN
-    - > TIER2_PANIC_S -> PANIC
+    - When baseline is None:
+        - <= TIER2_WARN_S -> OK
+        - <= TIER2_PANIC_S -> WARN
+        - > TIER2_PANIC_S -> PANIC
+    - When baseline is provided:
+        - <= baseline * 1.15 -> pass
+        - <= baseline * 1.30 -> warn
+        - > baseline * 1.30:
+            if panic_streak < PANIC_DOWNGRADE_STREAK -> panic_pending
+            else -> panic
     """
     if math.isnan(elapsed):
         raise ValueError(f"Invalid NaN duration: {elapsed}")
     if not math.isfinite(elapsed):
         if elapsed > 0:
-            return "PANIC"
+            return Tier2Verdict("PANIC")
         raise ValueError(f"Invalid non-positive infinite duration: {elapsed}")
     if elapsed <= 0.0:
         raise ValueError(f"Invalid non-positive duration: {elapsed}")
-    if elapsed <= TIER2_WARN_S:
-        return "OK"
-    if elapsed <= TIER2_PANIC_S:
-        return "WARN"
-    return "PANIC"
+
+    if baseline is None:
+        if elapsed <= TIER2_WARN_S:
+            return Tier2Verdict("OK")
+        if elapsed <= TIER2_PANIC_S:
+            return Tier2Verdict("WARN")
+        return Tier2Verdict("PANIC")
+
+    warn_thresh = baseline * TIER2_WARN_MULTIPLIER
+    panic_thresh = baseline * TIER2_PANIC_MULTIPLIER
+
+    if elapsed <= warn_thresh:
+        return Tier2Verdict("pass")
+    if elapsed <= panic_thresh:
+        return Tier2Verdict("warn")
+    if panic_streak < PANIC_DOWNGRADE_STREAK:
+        return Tier2Verdict("panic_pending")
+    return Tier2Verdict("panic")
 
 
-def classify_tier2_samples(samples: Sequence[float]) -> Tier2Verdict:
+def classify_tier2_samples(
+    samples: Sequence[float],
+    baseline: float | None = None,
+) -> Tier2Verdict:
     """Classify multiple Tier-2 duration samples.
 
-    Note: In current practice, Tier-2 benchmark runs as a single shot (n=1).
-    This multi-sample classification serves as forward-defense specification.
+    NaN/empty -> ValueError
+    Respects PANIC_DOWNGRADE_STREAK.
     """
     if not samples:
         raise ValueError("samples sequence cannot be empty / 耗时序列不能为空")
     if any(math.isnan(x) for x in samples):
         raise ValueError("samples sequence contains NaN / 耗时序列包含 NaN")
-    if max(samples) > TIER2_PANIC_S:
-        return "PANIC"
-    mean_val = sum(samples) / len(samples)
-    return classify_tier2(mean_val)
+
+    if baseline is None:
+        if max(samples) > TIER2_PANIC_S:
+            return Tier2Verdict("PANIC")
+        mean_val = sum(samples) / len(samples)
+        return classify_tier2(mean_val, baseline=None)
+
+    panic_thresh = baseline * TIER2_PANIC_MULTIPLIER
+    panic_count = sum(1 for x in samples if x > panic_thresh)
+    median_val = robust_baseline(samples)
+    return classify_tier2(median_val, baseline=baseline, panic_streak=panic_count)
 
 
 def _has_executed_tests(output: str) -> bool:
@@ -352,6 +469,7 @@ def run_tier2_benchmark(
     *,
     runner_func=None,
     assert_self_repo: bool = True,
+    baseline_path: Path | None = None,
 ) -> tuple[bool, float, list[str]]:
     """全量回归计时报告；强制 --deselect <HARNESS_TEST_FILENAME>（由模块路径派生）；硬阻断 PANIC (> TIER2_PANIC_S)。"""
     logs: list[str] = []
@@ -406,19 +524,24 @@ def run_tier2_benchmark(
         logs.append(f"Tier-2 run failed with exit code {code}:\n{out.strip()}")
         return False, elapsed, logs
 
-    verdict = classify_tier2_samples([elapsed])
-    if verdict == "PANIC":
+    state_p = (repo_root / baseline_path) if baseline_path else (repo_root / BASELINE_STATE_PATH)
+    active_baseline = load_tier2_baseline(state_p)
+    warn_line = active_baseline * TIER2_WARN_MULTIPLIER
+    panic_line = active_baseline * TIER2_PANIC_MULTIPLIER
+
+    verdict = classify_tier2(elapsed, baseline=active_baseline, panic_streak=1)
+    if verdict == "panic" or elapsed > TIER2_PANIC_S:
         logs.append(
             f"Tier-2 panic threshold exceeded: took {elapsed:.2f}s > panic threshold {TIER2_PANIC_S:.1f}s (PANIC, exit 1)"
         )
         return False, elapsed, logs
-    elif verdict == "WARN":
+    elif elapsed > active_baseline:
         logs.append(
-            f"Tier-2 baseline warning: took {elapsed:.2f}s > warn envelope {TIER2_WARN_S:.1f}s (WARN, exit 0)"
+            f"Tier-2 baseline warning: took {elapsed:.2f}s > warn envelope {active_baseline:.1f}s (WARN, exit 0)"
         )
     else:
         logs.append(
-            f"Tier-2 baseline OK: took {elapsed:.2f}s <= warn envelope {TIER2_WARN_S:.1f}s"
+            f"Tier-2 baseline OK: took {elapsed:.2f}s <= warn envelope {warn_line:.1f}s"
         )
 
     return True, elapsed, logs

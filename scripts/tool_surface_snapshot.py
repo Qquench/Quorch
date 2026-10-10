@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Final, Literal
 
 SERVER_PY_REL: Final[str] = "plugins/quench-dev-tasks/server/server.py"
-SNAPSHOT_JSON_REL: Final[str] = "docs/architecture/tool_surface_snapshot_v122.json"
+SNAPSHOT_JSON_REL: Final[str] = "docs/architecture/tool_surface_snapshot.json"
 
 
 @dataclass(frozen=True)

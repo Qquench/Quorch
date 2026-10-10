@@ -95,17 +95,9 @@ class FakeReviewerClient:
 
 @pytest.mark.anyio
 async def test_tool_is_registered_with_full_schema():
-    """断言 dev_reviewer_consult 在 FastMCP 实例中注册完备，元数据与中英双语 docstring 健全。"""
+    """断言 dev_reviewer_consult 已作为提示垫片退役，不再注册于 FastMCP 表面。"""
     tool = await server.mcp.get_tool("dev_reviewer_consult")
-    assert tool is not None
-    assert tool.name == "dev_reviewer_consult"
-    assert tool.description is not None
-    assert "Directly consult the senior architecture Reviewer" in tool.description
-    assert "免任务单地直接咨询资深架构 Reviewer" in tool.description
-
-    params = tool.parameters.get("properties", {}) if hasattr(tool, "parameters") and isinstance(tool.parameters, dict) else {}
-    for required_arg in ("workspace_root", "query", "context_files", "mode", "max_hops", "session_id"):
-        assert required_arg in params, f"Missing parameter '{required_arg}' in tool schema"
+    assert tool is None
 
 
 @pytest.mark.anyio

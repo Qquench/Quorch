@@ -25,10 +25,23 @@ from _hygiene.rules import (
     RULE_SCOPE,
 )
 from _hygiene.scanner import ArchitectureHygieneScanner
-from capture_isolated_scope import (
-    LEGACY_RULE_MAP,
-    canonical_bytes,
-)
+
+LEGACY_RULE_MAP: Final[dict[str, str]] = {
+    f"plugins/quench-dev-tasks/server/tests/test_{r}.py": r
+    for r in (
+        "lease_symbol_removal",
+        "touch_outcome_truthiness",
+        "vendor_literal_in_core",
+        "api_bypass",
+    )
+}
+
+
+def canonical_bytes(raw: bytes) -> bytes:
+    """BOM strip (utf-8-sig) + CRLF->LF 归一化。"""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    return raw.replace(b"\r\n", b"\n")
 
 
 @pytest.fixture(scope="module")

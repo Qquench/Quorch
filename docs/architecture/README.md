@@ -214,7 +214,7 @@ Quench enforces a bifurcated test execution contract designed for fast developer
 4. **Duration Baseline Freeze & Variance Gate (`scripts/check_test_duration_baselines.py`)**:
    - Enforces timing budgets, variance stability, and regression envelopes (TR-3 / TR-4):
      - **Tier-1 Baseline**: 1 warmup + 3 measured iterations; hard-fail threshold **≤ 8.0s**, target warning threshold **≤ 5.0s**, ultra-fast aspirational goal **≤ 3.0s**.
-     - **Tier-2 Budget Envelope & Panic Line (TR-4)**: Dual-gate regression envelope with **≤ 65.0s WARN** (operating budget, exit 0) and **≤ 110.0s PANIC** hard blocking line (exit 1, strictly lower than v1.20 historical baseline 114s).
+     - **Tier-2 Dynamic Budget Envelope & Panic Line (单向下移 + 双向假红防护)**: Dynamic convergence envelope with single-directional ratcheting: $\text{Baseline}_{\text{next}} = \max(\text{TIER2\_ABSOLUTE\_FLOOR\_S}, \min(\text{Baseline}_{\text{prev}}, \text{robust\_estimate}))$, $\text{TIER2\_WARN\_S} = \text{Baseline}_{\text{next}} \times 1.15$, $\text{TIER2\_PANIC\_S} = \text{Baseline}_{\text{next}} \times 1.30$. Enforces 30s safety floor (`TIER2_ABSOLUTE_FLOOR_S = 30.0`), in-run 3-sample confirmation (`RATCHET_CONFIRM_ROUNDS = 3`), bidirectional false-red guard (`PANIC_DOWNGRADE_STREAK = 2`), and optional fail-safe sidecar (`.agents/bench/tier2_baseline.json`).
      - **Sample Variance Guard**: Sample Coefficient of Variation ($CV = \sigma / \mu \le 15\%$ with $ddof=1$ sample Bessel correction) with bounded 1-round retry (`MAX_CV_RETRY_ROUNDS = 1`).
      - **Dual-Layer Anti-Reentrancy Protection**: Subprocess isolation with `QUENCH_TEST_DURATION_BENCH_ACTIVE=quench-bench-v1` magic-value environment guard plus `--tier2` runner `--deselect` on contract test harness, preventing recursive test invocation or timing self-pollution.
      - **Self-Repository Anchor**: Validates workspace root contains core Quench marker files (`docs/architecture/README.md` and `.agents/quench_stack.yaml`), failing closed in untrusted directories.
@@ -264,7 +264,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `hooks/context_injector.py` | T1 | PostToolUse context enrichment | Read-only; non-blocking |
 | `scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |
 | `scripts/check_test_tiering_invariants.py` | T1 | Physical test tiering gate invariant scanner asserting H ∩ Tier-1 = ∅ and collection integrity | Clean subprocess invocation with sanitized environment |
-| `scripts/check_test_duration_baselines.py` | T1 | Test suite timing baseline & variance benchmark gate ($CV \le 15\%$, 8s hard fail / 5s warn, Tier-2 65s warn / 110s panic envelope) | 1 warmup + 3 measured iterations, ddof=1, reentrancy-safe subprocess runner |
+| `scripts/check_test_duration_baselines.py` | T1 | Test suite timing baseline & variance benchmark gate ($CV \le 15\%$, 8s hard fail / 5s warn, Tier-2 1.15x warn / 1.30x panic dynamic envelope with 30s floor) | 1 warmup + 3 measured iterations, ddof=1, reentrancy-safe subprocess runner |
 | `scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
 | `scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
 | `scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |

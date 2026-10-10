@@ -35,11 +35,9 @@ import server
 
 @pytest.mark.anyio
 async def test_dev_reviewer_consult_tool_registered():
-    """断言 dev_reviewer_consult 工具已在 FastMCP 服务中成功注册且元数据完备。"""
+    """断言 dev_reviewer_consult 工具已作为提示垫片退役，不再注册于 FastMCP 表面。"""
     tool = await server.mcp.get_tool("dev_reviewer_consult")
-    assert tool is not None
-    assert tool.name == "dev_reviewer_consult"
-    assert "Reviewer" in tool.description or "架构" in tool.description
+    assert tool is None
 
 
 def test_sanitize_session_id_validation():

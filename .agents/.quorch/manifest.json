@@ -957,6 +957,28 @@
       "git_head_sha": "302a5c87926bd8e46a295944221b36b151c7b78f",
       "git_index_mtime": 1791591455.600501,
       "released": true
+    },
+    "2026-10-10_v1.23_step23.b_legacy_residue_retirement_and_dynamic_envelope::23.4": {
+      "task_id": "2026-10-10_v1.23_step23.b_legacy_residue_retirement_and_dynamic_envelope::23.4",
+      "md_sha256": "a4c337598a55d76ca42210b2eaf8d26f8ea22dacd2f630c74ad63141e6328e26",
+      "generation": 1,
+      "holder_token": "token_1791595524276_13176",
+      "last_heartbeat_monotonic_ns": 586172234000000,
+      "last_heartbeat_wall_utc": "2026-10-10T01:48:19.012881+00:00",
+      "git_head_sha": "f53cf565930a3bf254cb11f47b459e72ab86e2ba",
+      "git_index_mtime": 1791596540.6931617,
+      "released": true
+    },
+    "2026-10-10_v1.23_step23.b_legacy_residue_retirement_and_dynamic_envelope::23.5": {
+      "task_id": "2026-10-10_v1.23_step23.b_legacy_residue_retirement_and_dynamic_envelope::23.5",
+      "md_sha256": "143ad7d8f694c69232c2b3a7209044fb4a493252b3bb8aaedf5ea23297a54d35",
+      "generation": 1,
+      "holder_token": "token_1791596906502_13176",
+      "last_heartbeat_monotonic_ns": 589714921000000,
+      "last_heartbeat_wall_utc": "2026-10-10T02:47:21.704269+00:00",
+      "git_head_sha": "f53cf565930a3bf254cb11f47b459e72ab86e2ba",
+      "git_index_mtime": 1791596540.6931617,
+      "released": true
     }
   }
 }

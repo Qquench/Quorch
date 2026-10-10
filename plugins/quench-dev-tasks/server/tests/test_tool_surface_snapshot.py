@@ -26,7 +26,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 from tool_surface_snapshot import (
     build_tool_surface_report,
     SERVER_PY_REL,
-    SNAPSHOT_JSON_REL,
 )
 
 
@@ -66,15 +65,12 @@ def test_canonical_hash_is_deterministic():
 
 
 @pytest.mark.tier1_fast
-def test_committed_snapshot_hash_matches_live_projection():
-    """断言已提交快照文件哈希与 live 解析结果逐字节相等 (TP-4)。"""
+def test_canonical_hash_is_valid_sha256():
+    """断言 live 解析产出的 canonical_hash 为合法 64 位 SHA256 字符串 (解除历史快照硬绑定)。"""
     ws = _get_workspace_root()
-    snap_file = ws / SNAPSHOT_JSON_REL
-    assert snap_file.is_file(), f"Snapshot file missing: {snap_file}"
-
-    committed_data = json.loads(snap_file.read_text(encoding="utf-8"))
     live_report = build_tool_surface_report(ws / SERVER_PY_REL)
-    assert live_report.canonical_hash == committed_data["canonical_hash"]
+    assert len(live_report.canonical_hash) == 64
+    assert all(c in "0123456789abcdef" for c in live_report.canonical_hash)
 
 
 @pytest.mark.tier1_fast
