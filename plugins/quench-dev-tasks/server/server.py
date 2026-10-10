@@ -117,7 +117,7 @@ from manifest import (
     get_baseline_path,
 )
 
-from manifest_lease import reclaim_stale_task
+from manifest_lease import reclaim_stale_task, probe_lease_health, HealthVerdict
 
 mcp = FastMCP("quench-dev-tasks")
 
@@ -1510,6 +1510,39 @@ def _issue_checkout_lease(workspace_root: str, task_file: str, task_id: str, ses
     return holder_token, new_gen
 
 
+def _auto_reclaim_stale_leases(workspace_root: str) -> list[str]:
+    """Auto-detect and reclaim stale zombie leases in the workspace before checkout.
+    Uses probe_lease_health and reclaim_stale_task under Markdown -> Manifest lock ordering with generation CAS.
+    """
+    reclaimed_ids: list[str] = []
+    try:
+        m = load_manifest(workspace_root)
+    except Exception:
+        return reclaimed_ids
+
+    for namespaced_id, record in list(m.records.items()):
+        if not record.released:
+            try:
+                evidence = probe_lease_health(workspace_root, task_id=namespaced_id)
+                if evidence.verdict == HealthVerdict.STALE_SUSPECT:
+                    ok, reason = reclaim_stale_task(
+                        workspace_root,
+                        task_id=namespaced_id,
+                        expected_generation=record.generation,
+                        expected_holder_token=record.holder_token,
+                        force=False,
+                    )
+                    if ok and reason == "reclaimed":
+                        reclaimed_ids.append(namespaced_id)
+                        _append_hook_log(
+                            workspace_root,
+                            f"[AUTO-RECLAIM] Stale lease for task '{namespaced_id}' auto-reclaimed during checkout (gen={record.generation}->{record.generation+1})",
+                        )
+            except Exception:
+                pass
+    return reclaimed_ids
+
+
 @mcp.tool()
 def dev_tasks_checkout(
     workspace_root: str,
@@ -1538,6 +1571,9 @@ def dev_tasks_checkout(
         config = load_project_config(workspace_root)
     except Exception as e:
         return {"error": f"Configuration error / 配置错误: {e}"}
+
+    # 自动探查并回收超时僵尸租约 (复用 reclaim_stale_task，遵循 Markdown -> Manifest 锁序与 generation CAS)
+    _auto_reclaim_stale_leases(workspace_root)
 
     dev_tasks_dir = config.resolve_path("dev_tasks_dir")
     if task_file:
@@ -2979,7 +3015,6 @@ async def dev_reviewer_cancel(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool()
 async def dev_reviewer_consult(
     workspace_root: str,
     query: str,

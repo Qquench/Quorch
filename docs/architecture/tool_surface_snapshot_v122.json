@@ -1,5 +1,5 @@
 {
-  "canonical_hash": "4fa698fe768fe13bcbc875c4857dddd80f06ec3e97cc9ac1755e0c8a58f414b1",
+  "canonical_hash": "0fbb14300eb127b8df928d984e0caba4c03048ad3142b51431fcecc6bc39d251",
   "duplicate_param_signatures": [],
   "entries": [
     {
@@ -27,57 +27,6 @@
         }
       ],
       "qualified_name": "_mcp_sym_server_dot_dev_reviewer_cancel_",
-      "return_annotation": "dict[str, Any]"
-    },
-    {
-      "decorator_form": "called",
-      "is_async": true,
-      "name": "_mcp_sym_dev_reviewer_consult_",
-      "params": [
-        {
-          "annotation": "str",
-          "default": "<required>",
-          "kind": "pos_or_kw",
-          "name": "workspace_root"
-        },
-        {
-          "annotation": "str",
-          "default": "<required>",
-          "kind": "pos_or_kw",
-          "name": "query"
-        },
-        {
-          "annotation": "list[str] | None",
-          "default": "None",
-          "kind": "pos_or_kw",
-          "name": "context_files"
-        },
-        {
-          "annotation": "str",
-          "default": "'critique'",
-          "kind": "pos_or_kw",
-          "name": "mode"
-        },
-        {
-          "annotation": "int",
-          "default": "1",
-          "kind": "pos_or_kw",
-          "name": "max_hops"
-        },
-        {
-          "annotation": "str | None",
-          "default": "None",
-          "kind": "pos_or_kw",
-          "name": "session_id"
-        },
-        {
-          "annotation": "Context",
-          "default": "None",
-          "kind": "pos_or_kw",
-          "name": "ctx"
-        }
-      ],
-      "qualified_name": "_mcp_sym_server_dot_dev_reviewer_consult_",
       "return_annotation": "dict[str, Any]"
     },
     {
@@ -625,5 +574,5 @@
     }
   ],
   "skipped_dynamic": 0,
-  "total_tools": 17
+  "total_tools": 16
 }

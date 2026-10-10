@@ -938,25 +938,25 @@
     },
     "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.2": {
       "task_id": "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.2",
-      "md_sha256": "0c21791d5243f0171bb2ed8f27d70f006d598cb1423638ee5a25f406dce5f4e0",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 1285009765000000,
-      "last_heartbeat_wall_utc": "2026-10-09T14:05:40.335133+00:00",
-      "git_head_sha": "3edef0f1bf20942b7367e2e5fee8c51a9fa8dce9",
-      "git_index_mtime": 1791554344.0960224,
-      "released": false
+      "md_sha256": "fbbaec8d19e116f176198d26f56c79b1d089864be2b19e4f1448600ad5ca7cc0",
+      "generation": 1,
+      "holder_token": "token_1791590807727_22196",
+      "last_heartbeat_monotonic_ns": 580741765000000,
+      "last_heartbeat_wall_utc": "2026-10-10T00:17:48.542352+00:00",
+      "git_head_sha": "302a5c87926bd8e46a295944221b36b151c7b78f",
+      "git_index_mtime": 1791591455.600501,
+      "released": true
     },
     "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.3": {
       "task_id": "2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling::23.3",
-      "md_sha256": "0c21791d5243f0171bb2ed8f27d70f006d598cb1423638ee5a25f406dce5f4e0",
-      "generation": 0,
-      "holder_token": "",
-      "last_heartbeat_monotonic_ns": 1285009781000000,
-      "last_heartbeat_wall_utc": "2026-10-09T14:05:40.345135+00:00",
-      "git_head_sha": "3edef0f1bf20942b7367e2e5fee8c51a9fa8dce9",
-      "git_index_mtime": 1791554344.0960224,
-      "released": false
+      "md_sha256": "fbbaec8d19e116f176198d26f56c79b1d089864be2b19e4f1448600ad5ca7cc0",
+      "generation": 1,
+      "holder_token": "token_1791591480556_13176",
+      "last_heartbeat_monotonic_ns": 581643093000000,
+      "last_heartbeat_wall_utc": "2026-10-10T00:32:49.882248+00:00",
+      "git_head_sha": "302a5c87926bd8e46a295944221b36b151c7b78f",
+      "git_index_mtime": 1791591455.600501,
+      "released": true
     }
   }
 }

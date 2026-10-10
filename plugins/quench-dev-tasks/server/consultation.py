@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Ad-hoc architecture consultation module for Quench.
 
-Provides dev_reviewer_consult engine integration without requiring DevTask lifecycle.
+Provides ad-hoc architecture review engine primitives and sandbox guards without requiring DevTask lifecycle.
 Maintains byte-stable Prompt Cache prefix, sandboxed context slice extraction,
 real-time reasoning stream persistence, and strict anti-roleplaying degradation cards.
 """

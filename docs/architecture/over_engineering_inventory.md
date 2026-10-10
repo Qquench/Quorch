@@ -24,7 +24,7 @@
 
 ---
 
-## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 141 项)
+## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 142 项)
 
 | 符号 | 定义模块 |
 | :--- | :--- |
@@ -159,6 +159,7 @@
 | `_ASSERTION_MARKERS` | `plugins/quench-dev-tasks/server/server.py` |
 | `__getattr__` | `plugins/quench-dev-tasks/server/server.py` |
 | `_append_hook_log` | `plugins/quench-dev-tasks/server/server.py` |
+| `_auto_reclaim_stale_leases` | `plugins/quench-dev-tasks/server/server.py` |
 | `_degraded_card` | `plugins/quench-dev-tasks/server/server.py` |
 | `_extract_task_detail` | `plugins/quench-dev-tasks/server/server.py` |
 | `_issue_checkout_lease` | `plugins/quench-dev-tasks/server/server.py` |
@@ -196,13 +197,13 @@
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 49 | 28 | 33 |
 | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 34 | 22 | 41 |
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
-| `plugins/quench-dev-tasks/server/server.py` | 43 | 31 | 78 |
+| `plugins/quench-dev-tasks/server/server.py` | 44 | 31 | 80 |
 | `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
 | `plugins/quench-dev-tasks/server/workspace_lease.py` | 5 | 9 | 10 |
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 427 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 428 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -346,7 +347,7 @@
 | `FencedTokenError` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py` | NONE |
 | `FileFingerprint` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | NONE |
 | `MANIFEST_REL_PATH` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py` | NONE |
-| `Manifest` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py` | `CHANGELOG.md`, `docs/architecture/README.md`, `docs/architecture/manifest_compaction_contract.md` |
+| `Manifest` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `docs/architecture/README.md`, `docs/architecture/manifest_compaction_contract.md` |
 | `ManifestConflictError` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py` | `CHANGELOG.md` |
 | `ManifestIntegrityError` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py` | `CHANGELOG.md` |
 | `ManifestMetrics` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py` | NONE |
@@ -357,22 +358,22 @@
 | `ReconciliationReport` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | NONE |
 | `RetryableManifestError` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py` | `CHANGELOG.md` |
 | `T` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | NONE | NONE |
-| `TaskRecord` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py` | NONE |
+| `TaskRecord` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | NONE |
 | `_get_git_head_commit` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | NONE | NONE |
 | `_get_git_metadata` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | NONE |
 | `_get_git_tracked_files` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | NONE | NONE |
 | `_lock_local` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | NONE | NONE |
 | `_resolve_namespaced_id` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | NONE | NONE |
 | `_safe_baseline_filename` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | NONE | NONE |
-| `atomic_replace_manifest` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py` | NONE |
+| `atomic_replace_manifest` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | NONE |
 | `capture_baseline` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md` |
 | `commit_lease` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py` | `CHANGELOG.md` |
 | `compare_and_swap` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py` | `CHANGELOG.md` |
 | `compute_manifest_metrics` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py` | NONE |
-| `compute_normalized_md_hash` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py` | NONE |
+| `compute_normalized_md_hash` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | NONE |
 | `get_baseline_path` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | NONE |
 | `load_baseline_snapshot` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md` |
-| `load_manifest` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | NONE |
+| `load_manifest` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_bounds.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | NONE |
 | `mutate_manifest_under_lock` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py` | `CHANGELOG.md` |
 | `reconcile_workspace` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py` | `docs/architecture/manifest_compaction_contract.md` |
 | `reconcile_workspace_against_whitelist` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md`, `docs/architecture/README.md`, `docs/roadmap/README.md` |
@@ -380,7 +381,7 @@
 | `release_lease` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | `CHANGELOG.md` |
 | `save_baseline_snapshot` | `plugins/quench-dev-tasks/server/manifest.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | NONE |
 | `touch_heartbeat` | `plugins/quench-dev-tasks/server/manifest.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_dual_process_cas.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | `CHANGELOG.md` |
-| `HealthVerdict` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | NONE |
+| `HealthVerdict` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | NONE |
 | `LeaseContractError` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py` | NONE |
 | `MAX_TTL` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py` | NONE |
 | `ProbeEvidence` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | NONE |
@@ -388,7 +389,7 @@
 | `_extract_affected_files_from_task` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | NONE | NONE |
 | `extract_session_id_from_holder_token` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py` | NONE |
 | `is_workspace_actively_modifying` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py` | `CHANGELOG.md` |
-| `probe_lease_health` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py` | `CHANGELOG.md`, `docs/architecture/README.md` |
+| `probe_lease_health` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `docs/architecture/README.md` |
 | `reclaim_stale_task` | `plugins/quench-dev-tasks/server/manifest_lease.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py` | `CHANGELOG.md`, `docs/architecture/README.md` |
 | `touch_lease_heartbeat` | `plugins/quench-dev-tasks/server/manifest_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_lease_heartbeat_external.py` | `CHANGELOG.md` |
 | `FileVerdictAuditSink` | `plugins/quench-dev-tasks/server/observability_policy.py` | NONE | NONE | NONE |
@@ -572,6 +573,7 @@
 | `_append_hook_log` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_atomic_write_json` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 | `_audit_test_changes` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py` | NONE |
+| `_auto_reclaim_stale_leases` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_check_audit_gate` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `_degraded_card` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_extract_task_detail` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
@@ -587,7 +589,7 @@
 | `_validate_session_id` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 | `check_shell_write_isolation` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_shell_write_bypass.py` | NONE |
 | `dev_reviewer_cancel` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_reviewer_consult` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/configuration.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_reviewer_consult` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/configuration.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_reviewer_poll` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_reviewer_submit` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_tasks_archive` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/cli.py` | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/manifest_compaction_contract.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
@@ -636,12 +638,11 @@
 
 ---
 
-## 5. MCP 工具契约快照 (MCP Tool Surface Snapshot, 共 17 个工具)
+## 5. MCP 工具契约快照 (MCP Tool Surface Snapshot, 共 16 个工具)
 
 | 工具名称 | 注册名称 | 参数列表 (名称与默认值) | 返回类型契约 |
 | :--- | :--- | :--- | :--- |
 | `dev_reviewer_cancel` | `dev_reviewer_cancel` | `workspace_root, job_id, session_id` | `dict[str, Any]` |
-| `dev_reviewer_consult` | `dev_reviewer_consult` | `workspace_root, query, context_files=None, mode='critique', max_hops=1, session_id=None, ctx=None` | `dict[str, Any]` |
 | `dev_reviewer_poll` | `dev_reviewer_poll` | `workspace_root, job_id, session_id, wait_max_s=0, raw_text=True` | `Union[str, dict[str, Any]]` |
 | `dev_reviewer_submit` | `dev_reviewer_submit` | `workspace_root, query, context_files=None, mode='evaluate', max_hops=1, session_id=None, idempotency_key=None` | `dict[str, Any]` |
 | `dev_tasks_archive` | `dev_tasks_archive` | `workspace_root, task_file` | `Dict[str, Any]` |
@@ -686,11 +687,11 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 222
+- 样本总量: 207
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 222
+- `unknown`: 207
 <!-- END TELEMETRY -->
 
 <!-- QUENCH-DELTA-BEGIN:v1.21 -->
@@ -705,7 +706,7 @@
 | 资产对象 | 相对路径 | SHA256 校验和 | 说明 |
 | :--- | :--- | :--- | :--- |
 | 冻结基线 (v1.20) | `docs/architecture/over_engineering_inventory_v120_frozen.md` | `24824781d41eec82b8cc5f303d75433c288d8782c418a0c0e86decead2427426` | 纯静态冻结归档 |
-| 当前纯投影 (v1.21) | `docs/architecture/over_engineering_inventory.md` | `c27792c6a991cadeb2730256ba9eb5a0f84756c936cc2394827155b0f78ddfce` | 剥离 Delta 段后的纯投影哈希 |
+| 当前纯投影 (v1.21) | `docs/architecture/over_engineering_inventory.md` | `311abba88be68219a5e2a31ae0fdca3fa80cec0bd089bb98779491ba67b022d1` | 剥离 Delta 段后的纯投影哈希 |
 
 ---
 
@@ -862,13 +863,14 @@
 
 ---
 
-### 10.4 新暴露候选清单 (Emerged Candidates, 共 3 项)
+### 10.4 新暴露候选清单 (Emerged Candidates, 共 4 项)
 
 | 符号 | 定义模块 | 消费者数 | 承载不变量 | 公理映射 | 建议裁决 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `norm_path_pure` | `plugins/quench-dev-tasks/server/log_naming.py` | 0 | NONE | NONE | `REGISTER_ONLY` |
 | `T` | `plugins/quench-dev-tasks/server/manifest.py` | 0 | NONE | NONE | `REGISTER_ONLY` |
 | `is_record_orphaned` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | 0 | NONE | NONE | `REGISTER_ONLY` |
+| `_auto_reclaim_stale_leases` | `plugins/quench-dev-tasks/server/server.py` | 0 | NONE | NONE | `REGISTER_ONLY` |
 
 ---
 

@@ -48,7 +48,7 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 │  • Independent daemon process (server.py)                        │
 │  • Cross-platform path safety (path_guard.py)                    │
 │  • Handle isolation & stdout purity contract                     │
-│  • 17 registered MCP tool endpoints                              │
+│  • 16 registered MCP tool endpoints                              │
 └─────────────────────────┬────────────────────────────────────────┘
                           │ in-process calls
 ┌─────────────────────────▼────────────────────────────────────────┐
@@ -154,10 +154,7 @@ Latency target: **< 50ms** per hook invocation.
 Quench establishes a unified asynchronous Reviewer execution path, converging all heavy reasoning onto a background worker daemon:
 
 1. **Unified Asynchronous Long-Running Jobs (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**:
-   Decouples architectural reasoning into detached background worker jobs with pre-flight fail-closed sandbox checks, context budget caps, durable `JobRecord` tracking, and strict tri-state discriminated union return contracts:
-
-2. **Non-Blocking Consultation Guidance (`dev_reviewer_consult`)**:
-   Returns an actionable, non-blocking guidance card recommending the `dev_reviewer_submit -> dev_reviewer_poll` workflow with taskless code examples, eliminating same-turn blocking.
+   Decouples architectural reasoning into detached background worker jobs with pre-flight fail-closed sandbox checks, context budget caps, durable `JobRecord` tracking, and strict tri-state discriminated union return contracts (prompt shim retired in v1.23, converging FastMCP surface to 16 tools):
 
 ```
 [Runner / Caller]
@@ -255,7 +252,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, unified async job state machine, tri-state union contract, 1KB non-terminal snapshot, raw_text projection, cancellation, log pin & retention quota | Durable atomic writes; memory-leak-free |
 | `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease guard, TTL + generation CAS takeover, touch checkpoint contract | FileLock-backed; pure TTL timeout & generation CAS |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
-| `consultation.py` | T4 | `dev_reviewer_consult` guidance logic; `assert_read_only_sandbox`; `assemble_reviewer_context` | Read-only guard enforced before any context injection |
+| `consultation.py` | T4 | Reviewer sandbox guards (`assert_read_only_sandbox`) & context slice assembly (`assemble_reviewer_context`) | Read-only guard enforced before any context injection |
 | `manifest_lease.py` | T3 | Lease management, liveness probing (`probe_lease_health`), and CAS stale task reclamation (`reclaim_stale_task`) | Strict lock ordering (Markdown -> Manifest); generation CAS |
 | `log_naming.py` | T4 | Reviewer log naming, rotation, and zero-stat GC primitives (`gc_by_filename_order`, `enforce_unified_log_quota`) | Zero-stat contract; strict slug sanitization; deterministic quota |
 | `path_guard.py` | T2 | Cross-platform path safety; traversal defenses | Called on every tool invocation involving file paths |

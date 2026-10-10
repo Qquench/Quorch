@@ -379,7 +379,6 @@ def test_registered_tools_count_and_list():
         "dev_tasks_archive",
         "dev_tasks_set_bypass",
         "dev_tasks_export_handoff_card",
-        "dev_reviewer_consult",
         "dev_reviewer_submit",
         "dev_reviewer_poll",
         "dev_reviewer_cancel",
@@ -390,7 +389,7 @@ def test_registered_tools_count_and_list():
     # 核心 dev_tasks_* 前缀工具总数
     dev_task_tools = [t for t in tool_names if t.startswith("dev_tasks_")]
     assert len(dev_task_tools) >= 12
-    assert len(tools) >= 15
+    assert len(tools) == 16
 
 
 def test_reviewer_tools_signature_defaults_and_contracts():
@@ -514,6 +513,108 @@ async def test_reviewer_poll_dirty_wait_max_s(tmp_path):
     res_none = await server.dev_reviewer_poll(ws, rec.job_id, "none_test", wait_max_s=None)
     assert isinstance(res_none, str)
     assert res_none.startswith("[Reviewer thinking:")
+
+
+def test_checkout_auto_reclaims_stale_lease(tmp_path):
+    """断言 dev_tasks_checkout 在领单前自动识别并内聚回收超时僵尸租约，且 generation CAS 递增防 ABA。"""
+    import time
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    (agents_dir / ".quorch").mkdir()
+
+    import yaml
+    config_data = {
+        "project_name": "CheckoutAutoReclaimTest",
+        "dev_tasks_dir": "docs/dev_tasks",
+        "archive_dir": "docs/dev_tasks/archive",
+        "changelog_path": "CHANGELOG.md",
+        "test_dir": "tests",
+        "test_runner": "pytest",
+        "reaper_policy": {
+            "heartbeat_silence_threshold_seconds": 900,
+            "affected_files_mtime_threshold_seconds": 600,
+        },
+    }
+    with open(agents_dir / "quench_stack.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(config_data, f)
+
+    tasks_dir = ws / "docs" / "dev_tasks"
+    tasks_dir.mkdir(parents=True)
+    task_file = tasks_dir / "2026-10-10_auto_reclaim.md"
+    content = """# Spec
+
+### 任务 1.1 🔨 执行中 — 超时待回收任务
+#### 【涉及文件】
+```
+[MODIFY] src/app.py
+```
+#### 【缺陷根因与修改目标】
+测试 checkout 内聚自动回收
+#### 【目标签名与类型契约】
+无
+#### 【分步改造指引】
+无
+#### 【防御与边缘校验】
+无
+#### 【DoD 验证命令】
+```bash
+pytest
+```
+"""
+    task_file.write_text(content, encoding="utf-8")
+
+    src_dir = ws / "src"
+    src_dir.mkdir()
+    app_py = src_dir / "app.py"
+    app_py.write_text("# code\n", encoding="utf-8")
+
+    # 推进 mtime 至超时区域 (> 600s)
+    old_time = time.time() - 1200
+    os.utime(str(app_py), (old_time, old_time))
+
+    # 构造心跳超时僵尸租约 (generation=1, holder_token=token_stale_abc)
+    from datetime import datetime, timezone, timedelta
+    from manifest import Manifest, TaskRecord, atomic_replace_manifest, load_manifest, compute_normalized_md_hash
+
+    stale_wall = (datetime.now(timezone.utc) - timedelta(seconds=1500)).isoformat()
+    namespaced_id = "2026-10-10_auto_reclaim::1.1"
+    m = Manifest(
+        schema_version="1.0",
+        records={
+            namespaced_id: TaskRecord(
+                task_id=namespaced_id,
+                md_sha256=compute_normalized_md_hash(content),
+                generation=1,
+                holder_token="token_stale_abc",
+                last_heartbeat_monotonic_ns=0,
+                last_heartbeat_wall_utc=stale_wall,
+                git_head_sha="head",
+                git_index_mtime=0.0,
+                released=False,
+            )
+        },
+    )
+    atomic_replace_manifest(str(ws), m)
+
+    # 验证领单前探针判定为 STALE_SUSPECT
+    from manifest_lease import probe_lease_health, HealthVerdict
+    ev = probe_lease_health(str(ws), task_id=namespaced_id)
+    assert ev.verdict == HealthVerdict.STALE_SUSPECT
+
+    # 执行 checkout 领单：内部自动触发超时回收并重新签发租约
+    res = server.dev_tasks_checkout(workspace_root=str(ws), task_id="1.1")
+    assert "error" not in res
+    assert res["status"] == "🔨 执行中"
+    assert res["task_id"] == "1.1"
+
+    # 验证 generation 严格自增 (1 -> 2[reclaimed] -> 3[checked out])，防止 ABA
+    m_after = load_manifest(str(ws))
+    rec_after = m_after.records[namespaced_id]
+    assert rec_after.generation >= 2
+    assert rec_after.holder_token != "token_stale_abc"
+    assert rec_after.released is False
 
 
 

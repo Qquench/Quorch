@@ -1,6 +1,8 @@
 import os
+from pathlib import Path
 import subprocess
 import sys
+from typing import Final
 import pytest
 
 # Ensure scripts directory is in sys.path
@@ -17,6 +19,19 @@ from rules_exporter import RulesExporter, DEFAULT_FALLBACK_RULES
 
 PYTHON_EXE = sys.executable
 EXPORTER_SCRIPT = os.path.join(SCRIPTS_DIR, "rules_exporter.py")
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+
+DOC_SIZE_LIMITS: Final[dict[str, int]] = {
+    "plugins/quench-dev-tasks/rules/dev-tasks-discipline.md": 9000,
+}
+
+
+def _doc_utf8_lf_bytes(path: Path | str) -> int:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = REPO_ROOT / resolved
+    content = resolved.read_text(encoding="utf-8")
+    return len(content.replace("\r\n", "\n").encode("utf-8"))
 
 
 def test_resolve_discipline_path_default():
@@ -120,3 +135,37 @@ def test_rules_exporter_cli(tmp_path):
 
     assert os.path.isfile(os.path.join(proj_dir, ".cursorrules"))
     assert os.path.isfile(os.path.join(proj_dir, ".cursor", "rules", "quench-dev-tasks.mdc"))
+
+
+def test_doc_size_budget_ratchet() -> None:
+    """测试核心规则与入口卡片文档体积受限在促缩硬上限之内（UTF-8 LF 归一化）。"""
+    for rel_path, limit in DOC_SIZE_LIMITS.items():
+        doc_path = REPO_ROOT / rel_path
+        assert doc_path.is_file(), f"Document missing: {doc_path}"
+        actual_bytes = _doc_utf8_lf_bytes(doc_path)
+        assert (
+            actual_bytes <= limit
+        ), f"Document {rel_path} exceeds size limit: {actual_bytes} bytes > {limit} bytes"
+
+
+def test_discipline_rules_zero_delete_symbols_preserved() -> None:
+    """物理断言六核心字段双语标题与 INV-1~INV-9 符号名在精简后完好存在（Zero-Delete 不变量）。"""
+    discipline_path = REPO_ROOT / "plugins" / "quench-dev-tasks" / "rules" / "dev-tasks-discipline.md"
+    assert discipline_path.is_file()
+    content = discipline_path.read_text(encoding="utf-8")
+
+    six_fields = (
+        ("【任务目标】", "Objective"),
+        ("【上下文与现状】", "Context & Status"),
+        ("【涉及文件】", "Touched Files"),
+        ("【改动计划】", "Implementation Plan"),
+        ("【单测断言】", "Unit Test Assertions"),
+        ("【交付物与验证】", "Deliverables & Verification"),
+    )
+    for zh, en in six_fields:
+        assert zh in content, f"Zero-delete violation: {zh} missing from discipline rules"
+        assert en in content, f"Zero-delete violation: {en} missing from discipline rules"
+
+    for i in range(1, 10):
+        inv_marker = f"INV-{i}"
+        assert inv_marker in content, f"Zero-delete violation: {inv_marker} missing from discipline rules"

@@ -4,7 +4,7 @@
 """Test suite for ToolSurface snapshot extraction & mechanical triplet dedup gate.
 
 Enforces:
-1. Exactly 17 registered MCP tools matching architecture declarations.
+1. Exactly 16 registered MCP tools matching architecture declarations.
 2. 100% uniqueness of registered tool names (zero channel collision).
 3. Deterministic canonical hash matching committed snapshot file (TP-4).
 4. Negative assertion: zero duplicate parameter signatures (drives step22.4 COLLAPSE).
@@ -40,10 +40,10 @@ def _get_workspace_root() -> Path:
 
 @pytest.mark.tier1_fast
 def test_tool_count_matches_architecture_declaration():
-    """断言工具总数与 docs/architecture/README.md 声明的 17 个 MCP 端点完全一致。"""
+    """断言工具总数与 docs/architecture/README.md 声明的 16 个 MCP 端点完全一致。"""
     ws = _get_workspace_root()
     report = build_tool_surface_report(ws / SERVER_PY_REL)
-    assert len(report.entries) == 17, f"Expected 17 tools, got {len(report.entries)}"
+    assert len(report.entries) == 16, f"Expected 16 tools, got {len(report.entries)}"
 
 
 @pytest.mark.tier1_fast
