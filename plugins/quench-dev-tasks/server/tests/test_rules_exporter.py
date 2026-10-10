@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Final
 import pytest
 
 # Ensure scripts directory is in sys.path
@@ -21,17 +20,7 @@ PYTHON_EXE = sys.executable
 EXPORTER_SCRIPT = os.path.join(SCRIPTS_DIR, "rules_exporter.py")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
-DOC_SIZE_LIMITS: Final[dict[str, int]] = {
-    "plugins/quench-dev-tasks/rules/dev-tasks-discipline.md": 9000,
-}
 
-
-def _doc_utf8_lf_bytes(path: Path | str) -> int:
-    resolved = Path(path)
-    if not resolved.is_absolute():
-        resolved = REPO_ROOT / resolved
-    content = resolved.read_text(encoding="utf-8")
-    return len(content.replace("\r\n", "\n").encode("utf-8"))
 
 
 def test_resolve_discipline_path_default():
@@ -137,15 +126,7 @@ def test_rules_exporter_cli(tmp_path):
     assert os.path.isfile(os.path.join(proj_dir, ".cursor", "rules", "quench-dev-tasks.mdc"))
 
 
-def test_doc_size_budget_ratchet() -> None:
-    """测试核心规则与入口卡片文档体积受限在促缩硬上限之内（UTF-8 LF 归一化）。"""
-    for rel_path, limit in DOC_SIZE_LIMITS.items():
-        doc_path = REPO_ROOT / rel_path
-        assert doc_path.is_file(), f"Document missing: {doc_path}"
-        actual_bytes = _doc_utf8_lf_bytes(doc_path)
-        assert (
-            actual_bytes <= limit
-        ), f"Document {rel_path} exceeds size limit: {actual_bytes} bytes > {limit} bytes"
+
 
 
 def test_discipline_rules_zero_delete_symbols_preserved() -> None:
@@ -169,3 +150,19 @@ def test_discipline_rules_zero_delete_symbols_preserved() -> None:
     for i in range(1, 10):
         inv_marker = f"INV-{i}"
         assert inv_marker in content, f"Zero-delete violation: {inv_marker} missing from discipline rules"
+
+
+def test_robust_baseline_edge_cases() -> None:
+    """断言 robust_baseline 严格锚定 statistics.median 并在非法/边界样本时 fail-closed。"""
+    import sys
+    scripts_dir = REPO_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from check_test_duration_baselines import robust_baseline
+
+    assert robust_baseline([10.0, 20.0, 30.0]) == 20.0
+    assert robust_baseline([5.0, 100.0, 5.0, 6.0]) == 5.5
+    for invalid in ([float("nan")], [0.0], [-1.0], [float("inf")], []):
+        with pytest.raises(ValueError):
+            robust_baseline(invalid)
+

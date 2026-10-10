@@ -20,11 +20,11 @@ RULES_PATH = PLUGIN_DIR / "rules" / "dev-tasks-discipline.md"
 SKILL_PATH = PLUGIN_DIR / "skills" / "dev-tasks-review" / "SKILL.md"
 
 REQUIRED_RULE_TOKENS: tuple[str, ...] = (
-    "角色扮演", "dev_reviewer_consult", "dev_tasks_refine_spec",
+    "角色扮演", "dev_reviewer_submit", "dev_tasks_refine_spec",
     "degraded", "reviewer_not_configured", "自证偏见",
 )
 REQUIRED_SKILL_TOKENS: tuple[str, ...] = (
-    "dev_reviewer_consult", "dev_tasks_refine_spec", "dev_tasks_escalate", "degraded",
+    "dev_reviewer_submit", "dev_tasks_refine_spec", "dev_tasks_escalate", "degraded",
 )
 FORBIDDEN_PHRASES: tuple[str, ...] = (
     "由你扮演 Reviewer", "可以模拟 Reviewer", "自行扮演", "无需外部模型即可审查",

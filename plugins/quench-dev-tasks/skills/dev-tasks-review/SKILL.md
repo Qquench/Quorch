@@ -112,13 +112,13 @@ When the agile runner model calls `dev_tasks_escalate` to awaken the Reviewer:
 ## 5. Review Channel Triage & Degraded Fallback (审查分流与降级卡片)
 
 ### 统一审查通路 (Unified Review Channels)
-1. 自由问答 / 灵感评估 / 方案权衡 / 架构只读诊断 → 统一异步主通路：调用 `dev_reviewer_submit` 提交任务，通过 `dev_reviewer_poll(raw_text=True)` 轮询单行心跳进度及获取终态结果，需止损时调用 `dev_reviewer_cancel`（无需任何 DevTask；`dev_reviewer_consult` 提供非阻塞引导卡）；
+1. 自由问答 / 灵感评估 / 方案权衡 / 架构只读诊断 → 统一异步主通路：调用 `dev_reviewer_submit` 提交任务，通过 `dev_reviewer_poll(raw_text=True)` 轮询单行心跳进度及获取终态结果，需止损时调用 `dev_reviewer_cancel`（无需任何 DevTask）；
 2. 已有草案但六字段不达标 / 需拆分 / 需重估可行性 → `dev_tasks_refine_spec`；
 3. 执行中反复失败 / 需要架构层面重新裁决 → `dev_tasks_escalate`；
 4. 引擎不可用或异常终态 → 统一输出 `degraded` 降级卡片（`findings == ""`）并停机，**不得**在本会话内自行给出审查结论。
 
 ### 显式降级卡片样例 (Degraded Card Example)
-当 `dev_reviewer_poll` 或 `dev_reviewer_consult` 返回降级响应时，必须如实转呈给开发者，严禁由当前执行模型就地伪装 Reviewer 输出假评审：
+当 `dev_reviewer_poll` 返回降级响应时，必须如实转呈给开发者，严禁由当前执行模型就地伪装 Reviewer 输出假评审：
 
 ```json
 {

@@ -64,7 +64,7 @@ While AI-assisted coding tools have transformed modern software development, eng
 - **Vendor-Neutral Reviewer Engine (`ReviewerClient`)**: Fully pluggable architecture powered by declarative `PROVIDER_PRESETS` supporting OpenAI, DeepSeek (with Prompt Cache detection), offline Ollama, vLLM, generic proxy endpoints, native IDE subagents, and graceful manual fallback—guaranteed by an automated source-level neutrality scan gate.
 - **Asynchronous Reviewer Job System (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**: Decouples long-running architecture reasoning into detached background worker jobs with durable persistence, deterministic cancellation, 1KB non-terminal snapshot bounds, and `wait_max_s` long polling.
 - **Clean Raw-Text Heartbeat Projection**: Eliminates JSON notification clutter in IDE contexts by projecting non-terminal heartbeat lines (`[Reviewer thinking: 1,234 tokens | 12.3s]`) via `raw_text=True`, keeping token footprints minimal and conversations clean.
-- **Ad-Hoc Architecture Consultation (`dev_reviewer_consult`)**: Dedicated tool for spontaneous design critique, trade-off evaluation, brainstorming, and contract auditing without requiring DevTask workflows, featuring read-only sandbox guards and byte-level stable prompt prefix caching.
+- **Ad-Hoc Architecture Consultation (`dev_reviewer_submit` / `dev_reviewer_poll`)**: Dedicated async workflow for spontaneous design critique, trade-off evaluation, brainstorming, and contract auditing without requiring DevTask workflows, featuring read-only sandbox guards and byte-level stable prompt prefix caching.
 - **Strict Single-Egress Invariant & AST Enforcement**: CI and development environments enforce zero ad-hoc provider API script bypasses via `scripts/check_no_api_bypass.py`, ensuring all upstream model traffic funnels through `ReviewerClient`.
 - **Strict Anti-Roleplaying Protocol**: Forbids in-context impersonation of the Reviewer by executor models, enforcing explicit structured degraded fallback cards with empty findings whenever the external engine is unavailable.
 - **AST Codebase Explorer & Spec Refiner (`dev_tasks_refine_spec`)**: Extracts precise AST symbols and call-chains without dumping whole codebases, automatically upgrading draft specifications into hardened six-field contracts.
@@ -112,7 +112,7 @@ This creates:
 
 ## 🛠️ MCP Tools & Capabilities
 
-The `quench-dev-tasks` MCP Server provides a comprehensive suite of 17 specialized tools:
+The `quench-dev-tasks` MCP Server provides a comprehensive suite of 16 specialized tools:
 
 | Category | Tool | Purpose | Typical Invocation |
 | :--- | :--- | :--- | :--- |
@@ -127,8 +127,7 @@ The `quench-dev-tasks` MCP Server provides a comprehensive suite of 17 specializ
 | | `dev_tasks_reclaim` | Reclaim crashed or timed-out stale tasks safely with CAS fencing | Recovering orphaned tasks across processes |
 | **Drafting & Feasibility**| `dev_tasks_refine_spec` | Refine a task spec with AST codebase symbol analysis & Reviewer reasoning | Upgrading draft tasks into executable contracts |
 | | `dev_tasks_promote_draft`| Lint physical feasibility (path defenses, dry-run) and promote draft to pending | Promoting verified drafts to the execution queue |
-| **Reviewer Consultation** | `dev_reviewer_consult` | Synchronous direct Reviewer consultation (critique / evaluate / brainstorm / audit) | Spontaneous architectural inquiry, trade-off analysis |
-| | `dev_reviewer_submit` | Submit asynchronous Reviewer consultation job with detached background execution | Long-running architectural reasoning jobs |
+| **Reviewer Consultation** | `dev_reviewer_submit` | Submit asynchronous Reviewer consultation job with detached background execution | Long-running architectural reasoning jobs |
 | | `dev_reviewer_poll` | Poll async Reviewer job status and retrieve results with raw-text progress | Checking background reasoning progress & verdict |
 | | `dev_reviewer_cancel` | Deterministically cancel an in-flight async Reviewer job | Aborting unwanted or stuck reasoning jobs |
 | **Governance & Escape** | `dev_tasks_set_bypass` | Activate time-bounded, session-locked fast-track bypass | Light touch edits (e.g. documentation, typos) |

@@ -24,7 +24,7 @@
 
 ---
 
-## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 142 项)
+## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 141 项)
 
 | 符号 | 定义模块 |
 | :--- | :--- |
@@ -159,7 +159,6 @@
 | `_ASSERTION_MARKERS` | `plugins/quench-dev-tasks/server/server.py` |
 | `__getattr__` | `plugins/quench-dev-tasks/server/server.py` |
 | `_append_hook_log` | `plugins/quench-dev-tasks/server/server.py` |
-| `_auto_reclaim_stale_leases` | `plugins/quench-dev-tasks/server/server.py` |
 | `_degraded_card` | `plugins/quench-dev-tasks/server/server.py` |
 | `_extract_task_detail` | `plugins/quench-dev-tasks/server/server.py` |
 | `_issue_checkout_lease` | `plugins/quench-dev-tasks/server/server.py` |
@@ -573,7 +572,7 @@
 | `_append_hook_log` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_atomic_write_json` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 | `_audit_test_changes` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py` | NONE |
-| `_auto_reclaim_stale_leases` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
+| `_auto_reclaim_stale_leases` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md` |
 | `_check_audit_gate` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py` | NONE |
 | `_degraded_card` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_extract_task_detail` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
@@ -588,10 +587,10 @@
 | `_resolve_task_file_path` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_validate_session_id` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 | `check_shell_write_isolation` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_shell_write_bypass.py` | NONE |
-| `dev_reviewer_cancel` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_reviewer_consult` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/configuration.md`, `docs/future_roadmap_ideas.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_reviewer_poll` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_reviewer_submit` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_reviewer_cancel` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_reviewer_consult` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `docs/roadmap/README.md` |
+| `dev_reviewer_poll` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/configuration.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_reviewer_submit` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/configuration.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_tasks_archive` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/cli.py` | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/manifest_compaction_contract.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_tasks_checkout` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_tasks_complete` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
@@ -687,11 +686,11 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 217
+- 样本总量: 225
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 217
+- `unknown`: 225
 <!-- END TELEMETRY -->
 
 <!-- QUENCH-DELTA-BEGIN:v1.21 -->

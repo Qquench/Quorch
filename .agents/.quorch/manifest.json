@@ -979,6 +979,28 @@
       "git_head_sha": "f53cf565930a3bf254cb11f47b459e72ab86e2ba",
       "git_index_mtime": 1791596540.6931617,
       "released": true
+    },
+    "2026-10-10_v1.23.1_minimal_slimming_patch::2026-10-10_v1.23.1_minimal_slimming_patch": {
+      "task_id": "2026-10-10_v1.23.1_minimal_slimming_patch::2026-10-10_v1.23.1_minimal_slimming_patch",
+      "md_sha256": "b3b2573e20b6d3995762078682c0112e1ef4d4b844b1ec5af911cd34df54d3c3",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 591989015000000,
+      "last_heartbeat_wall_utc": "2026-10-10T03:25:15.803674+00:00",
+      "git_head_sha": "b89f08431f432451e23c4a3c3090e6f4eee85e02",
+      "git_index_mtime": 1791602709.8333228,
+      "released": false
+    },
+    "2026-10-10_v1.23.1_minimal_slimming_patch::23.6": {
+      "task_id": "2026-10-10_v1.23.1_minimal_slimming_patch::23.6",
+      "md_sha256": "b3b2573e20b6d3995762078682c0112e1ef4d4b844b1ec5af911cd34df54d3c3",
+      "generation": 1,
+      "holder_token": "token_1791602735224_13176",
+      "last_heartbeat_monotonic_ns": 593604015000000,
+      "last_heartbeat_wall_utc": "2026-10-10T03:52:10.800266+00:00",
+      "git_head_sha": "b89f08431f432451e23c4a3c3090e6f4eee85e02",
+      "git_index_mtime": 1791602709.8333228,
+      "released": true
     }
   }
 }

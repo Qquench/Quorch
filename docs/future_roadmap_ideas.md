@@ -127,7 +127,7 @@ Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、�
 在此背景下，Quorch 服务端若继续强耦合主动出站 HTTP API 客户端，将导致逻辑冗余并割裂开发者已付费的 IDE 内置配额。需要推演系统从“代理执行编排者”向“纯粹任务治理微内核（Pure Governance Kernel）”的彻底解耦路径。
 
 ### 2. Why not now? (为什么当期不做)
-- 当前 Stage 5 首要目标是实现厂商中立性（OpenAI 兼容协议标准化）与 `dev_reviewer_consult` 即席咨询支持，现有基于 API 的外部 Reviewer 通路已通过 167 项完整测试验证，稳定性最高。
+- 当前 Stage 5 首要目标是实现厂商中立性（OpenAI 兼容协议标准化）与异步架构审查支持，现有基于 API 的外部 Reviewer 通路已通过 167 项完整测试验证，稳定性最高。
 - 剥离或降级出站调用逻辑属于协议拓扑维度的根本性架构演进，需先沉淀完备的子代理指令契约与租约回收机制，避免激进破坏当期交付节奏。
 
 ### 3. Key Architecture & Preconditions (核心构想与前置条件)
@@ -167,7 +167,7 @@ Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、�
     - 最新思考流片段摘要预览（CoT preview window，自动滚动展示最近 3 行思考动态）；
     - 状态指示器（🟢 思考中 / 🔵 工具调用中 / 🟡 子进程扩展中 / ✅ 审核完成）。
 - **IDE 终端自动附着联动 (IDE Terminal Split Hook)**:
-  - 在发起 `dev_reviewer_consult` 或规划前，由 Agent 或 Hook 命令一键在 IDE 底部或侧边拉起一个专属观察终端（Split Terminal）并自动运行 `quorch reviewer watch`，无需开发者手动编写命令。
+  - 在发起 `dev_reviewer_submit` 或规划前，由 Agent 或 Hook 命令一键在 IDE 底部或侧边拉起一个专属观察终端（Split Terminal）并自动运行 `quorch reviewer watch`，无需开发者手动编写命令。
 - **前置依赖**: 轻量级终端流式格式化支持（零繁重依赖），跨平台文件变动监听机制。
 
 

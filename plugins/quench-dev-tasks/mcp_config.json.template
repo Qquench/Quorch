@@ -21,8 +21,7 @@
         "dev_tasks_set_bypass": { "eager": true },
         "dev_reviewer_submit": { "eager": true },
         "dev_reviewer_poll": { "eager": true },
-        "dev_reviewer_cancel": { "eager": true },
-        "dev_reviewer_consult": { "eager": true }
+        "dev_reviewer_cancel": { "eager": true }
       }
     }
   }

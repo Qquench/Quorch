@@ -147,18 +147,22 @@ When external reasoning models stream Chain-of-Thought thoughts, Quench automati
 
 ---
 
-## 7. Ad-Hoc Architecture Consultation (`dev_reviewer_consult`)
+## 7. Ad-Hoc Architecture Consultation (`dev_reviewer_submit` / `dev_reviewer_poll`)
 
-For spontaneous technical discussions, trade-off evaluations, or red-team audits without binding to a DevTask lifecycle, agents and users can invoke `dev_reviewer_consult`:
+For spontaneous technical discussions, trade-off evaluations, or red-team audits without binding to a DevTask lifecycle, agents and users can invoke `dev_reviewer_submit` and poll via `dev_reviewer_poll`:
 
 ```python
-dev_reviewer_consult(
+job = dev_reviewer_submit(
     workspace_root=".",
     query="Evaluate state machine concurrency risks under multi-tab access",
     context_files=["server/state_machine.py:40-120"],
     mode="critique",      # "critique" | "evaluate" | "brainstorm" | "audit"
-    max_hops=1,          # Multi-turn context extension rounds (0-3)
     session_id=None,     # Log file correlation identifier
+)
+res = dev_reviewer_poll(
+    workspace_root=".",
+    job_id=job["job"]["job_id"],
+    raw_text=True,
 )
 ```
 

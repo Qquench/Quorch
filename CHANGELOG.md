@@ -3,6 +3,14 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-10] 2026-10-10_v1.23.1_minimal_slimming_patch.md
+
+- **Task 23.6**: v1.23.1 极简收敛补丁：硬上限解耦、估计量定锚与退役残留清零 (Minimal Slimming Patch & Hard Limit Decoupling)
+  - 解耦文档机械硬字节上限（取消 `test_doc_size_budget_ratchet` 9000B/3500B 断言并清理孤儿 `from typing import Final` 引用，反膨胀全面由审查纪律与 Git 审计链 A6 承接，留存 v1.23.1 时点基线快照：`dev-tasks-discipline.md`: 8,335 字节，`AGENTS.md`: 2,752 字节）；
+  - 实证耗时估计量严格定锚 `statistics.median` 并补齐 fail-closed 边界单测验证；
+  - 发现式彻底清零活跃引导、技能规则、配置模板中已退役的 `dev_reviewer_consult` 词条残留，全仓工具面统一标定为 16 个；
+  - 源码实证 `_auto_reclaim_stale_leases` 在取锁前安全执行与无死锁保证。
+
 ## [2026-10-10] 2026-10-10_v1.23_step23.b_legacy_residue_retirement_and_dynamic_envelope.md
 
 - **Task 23.4**: 历史化石资产归档、扫描器冻结基线解耦与悬空引用归零 (Legacy Residue Retirement & Scanner Decoupling)

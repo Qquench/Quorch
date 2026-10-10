@@ -86,7 +86,7 @@ Pre-commit guard blocks commits modifying out-of-scope files or without an activ
 当用户提出审查、评估、二审、复盘、挑刺、红队意图时，必须判定为审查类意图，受本纪律管辖。
 
 ### ② 唯一合法通道 (Mandatory External Channels)
-- 异步主通路：`dev_reviewer_submit` 提交并由 `dev_reviewer_poll` 获取结果（`dev_reviewer_consult` 提供非阻塞引导卡）；
+- 异步主通路：`dev_reviewer_submit` 提交并由 `dev_reviewer_poll` 轮询获取结果（需止损时调用 `dev_reviewer_cancel`）；
 - 规约打磨：`dev_tasks_refine_spec`；
 - 执行受阻：`dev_tasks_escalate`。
 
@@ -98,7 +98,7 @@ Pre-commit guard blocks commits modifying out-of-scope files or without an activ
 - Stdio channel purity (INV-4): `stdout` 保留给 JSON-RPC，服务端零 `print()`。
 
 ### ④ 引擎缺失时的显式降级 (Mandatory Degraded Card)
-当 `dev_reviewer_poll` 或 `dev_reviewer_consult` 返回 `status="degraded"` 或 `degraded_reason="reviewer_not_configured"` 时，必须转呈降级卡，明确告知开发者审查引擎离线，当前会话实现模型不得代行审查职责。
+当 `dev_reviewer_poll` 返回 `status="degraded"` 或 `degraded_reason="reviewer_not_configured"` 时，必须转呈降级卡，明确告知开发者审查引擎离线，当前会话实现模型不得代行审查职责。
 
 ---
 

@@ -1,7 +1,7 @@
 # Quench-DevTasks MCP Service Architecture & Specification (DevTasks Orchestrator Spec)
 
 > **Version**: v1.10 (Implemented & Verified)  
-> **Implementation Status**: ✔️ Fully implemented and verified with automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, unified async consultation pipeline `dev_reviewer_submit`/`poll`/`cancel`, non-blocking guidance card `dev_reviewer_consult`, single-egress AST gate, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
+> **Implementation Status**: ✔️ Fully implemented and verified with automated unit tests (covering Google Antigravity, Cursor cross-tool adapters, vendor-neutral ReviewerClient engine & `PROVIDER_PRESETS` registry, source-level neutrality scan gate, unified async consultation pipeline `dev_reviewer_submit`/`poll`/`cancel`, single-egress AST gate, anti-roleplaying governance, RotatingFileSink observability, Draft task state & physical feasibility lint gate, and unified CLI)  
 > **Source Specification**: `dev_tasks_mcp_specification.md`  
 > **Workflow Reference**: [DevTasks Workflow Specification](plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md)  
 > **Role & Purpose**: General-purpose development task governance and dual-model orchestration MCP server for engineering repositories.
@@ -16,7 +16,7 @@ This MCP service mechanizes and enforces the **"Dual-Model Task Governance Workf
 ### 1.2 Dual-Model Division of Labor: Strategic Reviewer + Everyday Runner
 Quench separates software development cognitive load into two complementary operational tiers:
 - **Agile Runner (Everyday Executor)**: Resident in the primary IDE session, handling 80%+ of routine tasks (status inspections, file modifications, test executions) without expending flagship reasoning budgets.
-- **Strategic Reviewer (On-Demand Architect)**: Activated only via explicit instruction (e.g. `dev_reviewer_consult`) or automated escalation for multi-module planning, architectural impasse resolution, and quality auditing. Sleeps immediately upon task decomposition.
+- **Strategic Reviewer (On-Demand Architect)**: Activated only via explicit instruction (e.g. `dev_reviewer_submit`) or automated escalation for multi-module planning, architectural impasse resolution, and quality auditing. Sleeps immediately upon task decomposition.
 
 > 📖 **Architectural SSOT**: For the deep cognitive model division and system vision, see [docs/architecture/README.md §1](docs/architecture/README.md#1-system-vision--core-problem).
 
@@ -104,7 +104,6 @@ To prevent hallucinated file paths and unverified commands from entering the for
 To address the "roleplaying loophole" and remove the requirement of task sheets for spontaneous architectural exploration:
 - **Strict Anti-Roleplaying Invariant**: In-context impersonation of the Reviewer by the everyday executor model is strictly forbidden. When the external Reviewer engine is unconfigured or offline, tools MUST return a structured degraded card with **`findings == ""`**. Never fabricate critique text.
 - **Unified Asynchronous Consultation (`dev_reviewer_submit` / `dev_reviewer_poll`)**: Exposes read-only consultation supporting 4 modes (`critique`, `evaluate`, `brainstorm`, `audit`) without modifying tasks or creating files, converging all heavy reasoning onto the detached async job daemon.
-- **Non-Blocking Guidance Card (`dev_reviewer_consult`)**: Replaced same-turn blocking execution with a lightweight guidance card pointing callers to `dev_reviewer_submit -> dev_reviewer_poll` with taskless code examples.
 - **Pre-Flight Fail-Closed Read-Only Sandbox Guard**: Enforces workspace path sandbox boundaries (INV-6), line range window slices, and context budget cap (INV-8, declaratively configurable via `quench_stack.yaml` up to 200,000 chars) before file allocation, while idempotency cache hits bypass re-assembly.
 - **Byte-Level Stable Prompt Prefix Caching**: System prompt prefixes are generated with thread-safe caching (`_PREFIX_CACHE`), maximizing upstream LLM Prompt Cache hit rates.
 
@@ -131,7 +130,7 @@ The DevTasks state machine defines strict valid transitions enforced by `state_m
 
 ## 4. MCP Tools Specification
 
-The server exposes 17 atomic FastMCP tools:
+The server exposes 16 atomic FastMCP tools:
 
 1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status.
@@ -143,13 +142,12 @@ The server exposes 17 atomic FastMCP tools:
 8. **`dev_tasks_promote_draft`**: Validates physical feasibility of a draft task and promotes it to formal `[Pending]` state.
 9. **`dev_tasks_archive`**: Retires closed tasks to `archive/` and increments the changelog.
 10. **`dev_tasks_set_bypass`**: Manages temporary time-bound bypass tokens with strict audit logging.
-11. **`dev_reviewer_consult`**: Architectural consultation guidance tool returning a non-blocking actionable guidance card recommending `dev_reviewer_submit -> dev_reviewer_poll` with taskless code examples, eliminating same-turn blocking.
-12. **`dev_tasks_heartbeat`**: Refreshes the active lease heartbeat for current or specified tasks, supporting multi-session isolation.
-13. **`dev_tasks_reclaim`**: CAS-guaranteed zombie task reclamation with dual-process contention safety and monotonic generation increments.
-14. **`dev_tasks_export_handoff_card`**: Generates a standard markdown Reviewer handoff card for a task.
-15. **`dev_reviewer_submit`**: Submits an asynchronous long-running Reviewer consultation job with pre-flight fail-closed sandbox checks & context truncation, detached background worker execution, persistent `JobRecord`, and default `mode: str = "evaluate"`.
-16. **`dev_reviewer_poll`**: Polls asynchronous Reviewer job status and retrieves results. Enforces strict tri-state discriminated union return contract (`state` discriminator: A. COMPLETED, B. FAILED/CANCELLED/ORPHANED with degraded findings="", C. QUEUED/RUNNING/CANCELLED_PENDING_REAP with 1KB snapshot and retry-after). Supports `raw_text: bool = True` default returning a single-line canonical string (`[Reviewer thinking: ...s | ... tokens]`) in non-terminal states and directly returning findings Markdown (or standardized degradation card) in terminal states, eliminating JSON popup clutter in IDE chat windows, while `raw_text=False` returns the full contract dictionary. Supports `wait_max_s` (0-25s) long polling with monotonic deadline and sleep lower bound (0.05s) to eliminate busy waiting hot-spin loops, returning in-band canonical heartbeat strings on poll boundary.
-17. **`dev_reviewer_cancel`**: Deterministically cancels an in-flight async Reviewer job, aborting network transfer and retaining token accounting.
+11. **`dev_tasks_heartbeat`**: Refreshes the active lease heartbeat for current or specified tasks, supporting multi-session isolation.
+12. **`dev_tasks_reclaim`**: CAS-guaranteed zombie task reclamation with dual-process contention safety and monotonic generation increments.
+13. **`dev_tasks_export_handoff_card`**: Generates a standard markdown Reviewer handoff card for a task.
+14. **`dev_reviewer_submit`**: Submits an asynchronous long-running Reviewer consultation job with pre-flight fail-closed sandbox checks & context truncation, detached background worker execution, persistent `JobRecord`, and default `mode: str = "evaluate"`.
+15. **`dev_reviewer_poll`**: Polls asynchronous Reviewer job status and retrieves results. Enforces strict tri-state discriminated union return contract (`state` discriminator: A. COMPLETED, B. FAILED/CANCELLED/ORPHANED with degraded findings="", C. QUEUED/RUNNING/CANCELLED_PENDING_REAP with 1KB snapshot and retry-after). Supports `raw_text: bool = True` default returning a single-line canonical string (`[Reviewer thinking: ...s | ... tokens]`) in non-terminal states and directly returning findings Markdown (or standardized degradation card) in terminal states, eliminating JSON popup clutter in IDE chat windows, while `raw_text=False` returns the full contract dictionary. Supports `wait_max_s` (0-25s) long polling with monotonic deadline and sleep lower bound (0.05s) to eliminate busy waiting hot-spin loops, returning in-band canonical heartbeat strings on poll boundary.
+16. **`dev_reviewer_cancel`**: Deterministically cancels an in-flight async Reviewer job, aborting network transfer and retaining token accounting.
 
 ---
 
@@ -157,7 +155,7 @@ The server exposes 17 atomic FastMCP tools:
 
 > 📖 **Full Module Architecture & Topology**: For the complete 4-tier module mapping, call constraint hierarchy, and physical isolation layers, see [docs/architecture/README.md §5](docs/architecture/README.md#5-source-code-mapping-module-topology).
 
-All 17 FastMCP tools and 9 core invariants are verified across the codebase by the automated test suite (572+ tests):
+All 16 FastMCP tools and 9 core invariants are verified across the codebase by the automated test suite (572+ tests):
 
 | Verification Category | Primary Test Suites | Enforced Invariants & Key Mechanisms |
 | :--- | :--- | :--- |
