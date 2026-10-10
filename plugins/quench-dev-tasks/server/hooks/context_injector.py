@@ -9,6 +9,8 @@ import sys
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 server_dir = os.path.dirname(current_dir)
+if os.path.normpath(os.path.join(server_dir, "..", "scripts")) not in sys.path:
+    sys.path.insert(0, os.path.normpath(os.path.join(server_dir, "..", "scripts")))
 if server_dir not in sys.path:
     sys.path.insert(0, server_dir)
 
@@ -39,6 +41,13 @@ def main():
             return
 
         workspace_root = workspace_paths[0]
+
+        # 跨仓库静默自愈：若上游模板有更新，立即重新渲染 mcp_config.json 与 hooks.json
+        try:
+            __import__("config_sync").auto_heal_configs(workspace_root=workspace_root)
+        except Exception:
+            pass
+
         config_path = os.path.join(workspace_root, ".agents", "quench_stack.yaml")
         if not os.path.isfile(config_path):
             print(json.dumps({}))

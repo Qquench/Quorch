@@ -388,12 +388,29 @@ def diagnose_environment(project_root: str) -> dict:
         issues.append(f"缺少关键 Python 依赖库: {', '.join(missing_deps)}")
         suggestions.append(f"在当前运行环境中执行: pip install {' '.join(missing_deps)}")
 
+    # 8. 检查并自动自愈插件本体 MCP 配置 (mcp_config.json)
+    mcp_config_valid = True
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_dir = os.path.dirname(script_dir)
+    try:
+        from config_sync import auto_heal_configs
+        ws_root = root if os.path.isfile(os.path.join(root, ".agents", "hooks.json")) else None
+        healed, affected = auto_heal_configs(plugin_dir=plugin_dir, workspace_root=ws_root)
+        mcp_path = os.path.join(plugin_dir, "mcp_config.json")
+        if not os.path.isfile(mcp_path):
+            mcp_config_valid = False
+            issues.append("插件目录缺少 mcp_config.json 配置")
+            suggestions.append("运行 'python scripts/install.py' 或重新初始化生成 mcp_config.json")
+    except Exception:
+        mcp_config_valid = False
+
     return {
         "is_git_repo": is_git_repo,
         "has_quench_stack": has_quench_stack,
         "has_plugins_json": has_plugins_json,
         "has_hooks_json": has_hooks_json,
         "hooks_json_valid": hooks_json_valid,
+        "mcp_config_valid": mcp_config_valid,
         "python_valid": python_valid,
         "dependencies_ready": dependencies_ready,
         "issues": issues,
@@ -413,6 +430,7 @@ def print_diagnostic_report(diag: dict, project_root: str) -> None:
         "⚠️ 存在但配置失效" if diag.get("has_hooks_json") else "❌ 缺失 (生命周期拦截未生效)"
     )
     print(f"• 生命周期 Hooks:   {hooks_status}")
+    print(f"• FastMCP 服务配置: {'✅ 已就绪 (mcp_config.json 自动同步)' if diag.get('mcp_config_valid') else '❌ 异常'}")
     print(f"• Python 运行环境:  {'✅ 合格 (>= 3.8)' if diag['python_valid'] else '❌ 版本过低'}")
     print(f"• 关键依赖库就绪:   {'✅ 全部就绪 (fastmcp, yaml, filelock)' if diag['dependencies_ready'] else '❌ 缺失部分依赖'}")
     print("-" * 60)
@@ -529,6 +547,16 @@ def init_project(
     plugin_dir = os.path.dirname(script_dir)
     plugins_parent_dir = os.path.dirname(plugin_dir)
     template_path = os.path.join(plugin_dir, "templates", "quench_stack.yaml")
+
+    # 跨仓库静默自愈：若上游模板更新，立即自动重新渲染 mcp_config.json 与 hooks.json
+    try:
+        from config_sync import auto_heal_configs
+        ws_root = root if ide in ("antigravity", "all") else None
+        healed, affected = auto_heal_configs(plugin_dir=plugin_dir, workspace_root=ws_root)
+        if healed:
+            print(f"🔧 [自动自愈] 检测到上游配置模板更新，已自动同步更新: {', '.join(os.path.basename(f) for f in affected)}")
+    except Exception:
+        pass
 
     if not os.path.isfile(template_path):
         print(

@@ -338,11 +338,9 @@ def test_hooks_json_command_format(tmp_path):
         data = json.load(f)
     cmd = data["quench-file-guard"]["PreToolUse"][0]["hooks"][0]["command"]
 
-    # 验证标准格式：各路径独立带引号，最外层不额外嵌套无用的 ""
-    assert not cmd.startswith('""')
-    assert not cmd.endswith('""')
-    assert cmd.startswith('"')
-    assert cmd.endswith('"')
-    # 验证包含 python 解释器和脚本路径两个独立双引号段落
-    assert cmd.count('"') >= 4
+    # 验证格式：命令由解释器和脚本路径组成（无内嵌双引号以规避 Antigravity 2.x Go 进程 \" 转义缺陷）
+    assert "file_scope_guard.py" in cmd
+    tokens = cmd.split(" ")
+    assert len(tokens) >= 2
+    assert not cmd.startswith('"')
 

@@ -3206,4 +3206,11 @@ def __getattr__(name: str) -> Any:
 
 
 if __name__ == "__main__":
+    try:
+        _scripts_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+        if _scripts_dir not in sys.path:
+            sys.path.insert(0, _scripts_dir)
+        __import__("config_sync").auto_heal_configs()
+    except Exception:
+        pass
     mcp.run()

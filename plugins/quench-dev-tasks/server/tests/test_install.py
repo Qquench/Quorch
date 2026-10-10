@@ -63,7 +63,7 @@ def test_render_configs_success(mock_plugin_env):
         hooks_data = json.load(f)
 
     guard_cmd = hooks_data["quench-file-guard"]["PreToolUse"][0]["hooks"][0]["command"]
-    assert f'"{python_exe}"' in guard_cmd
+    assert python_exe in guard_cmd
 
 
 def test_render_configs_missing_template(tmp_path):

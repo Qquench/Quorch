@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"{{PYTHON_EXECUTABLE}}\" \"{{FILE_GUARD_SCRIPT_PATH}}\"",
+            "command": "{{PYTHON_EXECUTABLE}} {{FILE_GUARD_SCRIPT_PATH}}",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "\"{{PYTHON_EXECUTABLE}}\" \"{{CONTEXT_INJECTOR_SCRIPT_PATH}}\"",
+        "command": "{{PYTHON_EXECUTABLE}} {{CONTEXT_INJECTOR_SCRIPT_PATH}}",
         "timeout": 5
       }
     ]

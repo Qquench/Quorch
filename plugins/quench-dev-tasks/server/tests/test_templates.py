@@ -61,9 +61,8 @@ def test_template_required_placeholders():
     assert "{{PYTHON_EXECUTABLE}}" in hooks_content
     assert "{{FILE_GUARD_SCRIPT_PATH}}" in hooks_content
     assert "{{CONTEXT_INJECTOR_SCRIPT_PATH}}" in hooks_content
-    # hooks.json 中的命令必须用双引号包裹占位符，支持含空格路径
-    assert r'\"{{PYTHON_EXECUTABLE}}\"' in hooks_content
-    assert r'\"{{FILE_GUARD_SCRIPT_PATH}}\"' in hooks_content
+    # hooks.json 中的命令占位符（为避免 Antigravity 2.x Windows Go 进程转义 \" 导致崩溃，不加内层双引号）
+    assert f"{{{{PYTHON_EXECUTABLE}}}} {{{{FILE_GUARD_SCRIPT_PATH}}}}" in hooks_content
 
 
 def test_render_with_unix_paths():
@@ -95,7 +94,7 @@ def test_render_with_unix_paths():
     )
     hooks_obj = json.loads(hooks_rendered)
     cmd = hooks_obj["quench-file-guard"]["PreToolUse"][0]["hooks"][0]["command"]
-    assert f'"{python_exe}" "{guard_script}"' == cmd
+    assert f"{python_exe} {guard_script}" == cmd
 
 
 def test_render_windows_backslash_safety():
@@ -140,7 +139,7 @@ def test_render_windows_backslash_safety():
     )
     hooks_obj = json.loads(safe_hooks)
     guard_cmd = hooks_obj["quench-file-guard"]["PreToolUse"][0]["hooks"][0]["command"]
-    expected_cmd = f'"{win_python}" "{win_guard}"'
+    expected_cmd = f"{win_python} {win_guard}"
     assert guard_cmd == expected_cmd
 
 
