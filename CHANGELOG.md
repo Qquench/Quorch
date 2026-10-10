@@ -16,6 +16,12 @@ Unlike real-time specification documents (which reflect only the active design),
 - **Task 23.4**: 历史化石资产归档、扫描器冻结基线解耦与悬空引用归零 (Legacy Residue Retirement & Scanner Decoupling)
 - **Task 23.5**: Tier-2 动态性能信封单向下移收敛与双向假红防护 (Dynamic Envelope Convergence & False-Red Guards)
 
+## [2026-10-10] 2026-10-10_v1.23_step23.a_foundation_compaction_and_fossil_decoupling.md
+
+- **Task 23.1**: 化石门禁完全退役、自锁解锁与 v1.22 路线图归档
+- **Task 23.2**: 规则文档促缩硬断言与机械性条款下沉
+- **Task 23.3**: MCP 提示垫片退役与超时租约内聚回收 (17 -> 16)
+
 ## [2026-10-09] 2026-10-09_v1.22_step22.5_rebaseline_and_milestone_exit.md
 
 - **Task 22.5**: v1.22 全量再基线收尾与里程碑退出检查 (Rebaseline & Milestone Exit Gate)
