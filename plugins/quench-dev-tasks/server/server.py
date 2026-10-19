@@ -2925,13 +2925,14 @@ async def dev_reviewer_poll(
     job_id: str,
     session_id: str,
     wait_max_s: int = 0,
-    raw_text: bool = True,
+    raw_text: bool = False,
 ) -> Union[str, dict[str, Any]]:
     """Poll status or result of a background Reviewer task.
     Enforces 1KB non-terminal snapshot contract.
 
     轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。
-    支持 raw_text=True 纯文本单行心跳输出与终态直出 Markdown，支持 wait_max_s 服务端长轮询。
+    默认 raw_text=False 返回结构化 1KB 极简快照与终态折叠字典（防大文本刷屏）；
+    可选 raw_text=True 纯文本单行心跳输出与终态直出 Markdown，支持 wait_max_s 服务端长轮询。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {

@@ -61,7 +61,9 @@ async def test_b1_terminal_short_circuit(tmp_path):
     await task
     duration = time.monotonic() - start
 
-    assert res == "### Strategic Finding\n- All good."
+    assert isinstance(res, dict)
+    assert res.get("state") == "COMPLETED"
+    assert (res.get("result") or {}).get("findings") == "### Strategic Finding\n- All good."
     assert duration <= 1.0  # 远小于 10 秒
 
 
@@ -116,8 +118,9 @@ async def test_b3_concurrent_cancellation_projection(tmp_path):
     duration = time.monotonic() - start
 
     assert duration <= 1.0
-    assert "### [Reviewer Consultation Degraded]" in res
-    assert "CANCELLED" in res
+    assert isinstance(res, dict)
+    assert res.get("state") == "CANCELLED"
+    assert res.get("degraded_reason") == "cancelled"
 
 
 @pytest.mark.anyio
@@ -152,7 +155,7 @@ def test_b5_pure_signature_and_no_ctx():
     assert param_names == ["workspace_root", "job_id", "session_id", "wait_max_s", "raw_text"]
     assert "ctx" not in param_names
     assert sig.parameters["wait_max_s"].default == 0
-    assert sig.parameters["raw_text"].default is True
+    assert sig.parameters["raw_text"].default is False
 
 
 @pytest.mark.anyio

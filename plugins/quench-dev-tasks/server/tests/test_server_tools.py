@@ -393,44 +393,44 @@ def test_registered_tools_count_and_list():
 
 
 def test_reviewer_tools_signature_defaults_and_contracts():
-    """断言 dev_reviewer_submit 默认 mode='evaluate'，dev_reviewer_poll 默认 raw_text=True。"""
+    """断言 dev_reviewer_submit 默认 mode='evaluate'，dev_reviewer_poll 默认 raw_text=False。"""
     import inspect
     sig_submit = inspect.signature(server.dev_reviewer_submit)
     assert sig_submit.parameters["mode"].default == "evaluate"
 
     sig_poll = inspect.signature(server.dev_reviewer_poll)
-    assert sig_poll.parameters["raw_text"].default is True
+    assert sig_poll.parameters["raw_text"].default is False
 
 
 @pytest.mark.anyio
 async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
-    """断言 dev_reviewer_poll 在终态时 raw_text=True 直出 Markdown，raw_text=False 返回契约 dict。"""
+    """断言 dev_reviewer_poll 默认 raw_text=False 返回契约 dict，显式 raw_text=True 直出 Markdown。"""
     from reviewer_jobs import ReviewerJobSupervisor, JobState, _durable_write_json, POLL_TERMINAL_FIELDS
 
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
     rec = supervisor.submit({"query": "q", "session_id": "poll_tool_test"})
 
-    # 1. 非终态默认 raw_text=True 返回心跳字符串
-    non_term_res = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="poll_tool_test",
-    )
-    assert isinstance(non_term_res, str)
-    assert non_term_res.startswith("[Reviewer thinking:")
-
-    # 2. 非终态显式 raw_text=False 返回 6 字段字典
+    # 1. 非终态默认 raw_text=False 返回 6 字段字典（防止大卡片展开）
     non_term_dict = await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
         session_id="poll_tool_test",
-        raw_text=False,
     )
     assert isinstance(non_term_dict, dict)
     assert non_term_dict["state"] == "QUEUED"
 
-    # 3. 终态 COMPLETED: 默认 raw_text=True 直接返回 Markdown findings
+    # 2. 非终态显式 raw_text=True 返回心跳字符串
+    non_term_res = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="poll_tool_test",
+        raw_text=True,
+    )
+    assert isinstance(non_term_res, str)
+    assert non_term_res.startswith("[Reviewer thinking:")
+
+    # 3. 终态 COMPLETED: 默认 raw_text=False 严格返回完整结构化字典，且绝无 reasoning 泄露
     res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
     _durable_write_json(res_path, {"verdict": "PASS", "findings": "### Strategic Finding\n- All good.", "usage": {"total_tokens": 120}})
     supervisor._cas_transition(
@@ -441,25 +441,25 @@ async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
         updates={"result_ref": str(res_path)},
     )
 
-    term_res_text = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="poll_tool_test",
-    )
-    assert term_res_text == "### Strategic Finding\n- All good."
-
-    # 4. 终态 COMPLETED: raw_text=False 严格返回完整结构化字典，且绝无 reasoning 泄露
     term_res_dict = await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
         session_id="poll_tool_test",
-        raw_text=False,
     )
     assert isinstance(term_res_dict, dict)
     assert set(term_res_dict.keys()) == POLL_TERMINAL_FIELDS
     assert term_res_dict["state"] == "COMPLETED"
     assert "reasoning" not in term_res_dict["result"]
     assert "raw_reasoning" not in term_res_dict["result"]
+
+    # 4. 终态 COMPLETED: 显式 raw_text=True 直接返回 Markdown findings
+    term_res_text = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="poll_tool_test",
+        raw_text=True,
+    )
+    assert term_res_text == "### Strategic Finding\n- All good."
 
 
 @pytest.mark.anyio
@@ -478,7 +478,7 @@ async def test_reviewer_poll_schema_unchanged():
         "raw_text",
     }
     assert params["properties"]["wait_max_s"]["default"] == 0
-    assert params["properties"]["raw_text"]["default"] is True
+    assert params["properties"]["raw_text"]["default"] is False
     assert params["required"] == ["workspace_root", "job_id", "session_id"]
 
 
@@ -511,8 +511,8 @@ async def test_reviewer_poll_dirty_wait_max_s(tmp_path):
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
     rec = supervisor.submit({"query": "q", "session_id": "none_test"})
     res_none = await server.dev_reviewer_poll(ws, rec.job_id, "none_test", wait_max_s=None)
-    assert isinstance(res_none, str)
-    assert res_none.startswith("[Reviewer thinking:")
+    assert isinstance(res_none, dict)
+    assert res_none["state"] == "QUEUED"
 
 
 def test_checkout_auto_reclaims_stale_lease(tmp_path):
