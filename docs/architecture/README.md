@@ -48,7 +48,7 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 │  • Independent daemon process (server.py)                        │
 │  • Cross-platform path safety (path_guard.py)                    │
 │  • Handle isolation & stdout purity contract                     │
-│  • 16 registered MCP tool endpoints                              │
+│  • 16 registered MCP tool endpoints (tool_surface_constants)     │
 └─────────────────────────┬────────────────────────────────────────┘
                           │ in-process calls
 ┌─────────────────────────▼────────────────────────────────────────┐
@@ -182,9 +182,9 @@ dev_reviewer_poll()                     dev_reviewer_poll(raw_text=False)
 (Direct Markdown or 1KB snapshot)        (40k char budget cap dict)
 ```
 
-- **Clean Raw-Text Projection**: `dev_reviewer_poll` defaults to `raw_text=True`, returning a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returning findings Markdown (or standardized degradation card) upon completion, eliminating JSON code-card clutter in IDE chat windows. Setting `raw_text=False` returns the full structured verdict dictionary.
+- **Clean Raw-Text Projection**: `dev_reviewer_poll` defaults to `raw_text=False` (returning a structured contract dictionary and 1KB non-terminal snapshot to prevent large Markdown dumps in UI; code is authoritative, JSON snapshot is derived mirror evidence). Passing `raw_text=True` returns a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returns findings Markdown upon completion.
 - **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
-- **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops.
+- **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (defaults to 0, range 0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops.
 
 ### 3.4 Task Contract & Bilingual Headings SSOT
 
@@ -266,9 +266,13 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `scripts/check_test_tiering_invariants.py` | T1 | Physical test tiering gate invariant scanner asserting H ∩ Tier-1 = ∅ and collection integrity | Clean subprocess invocation with sanitized environment |
 | `scripts/check_test_duration_baselines.py` | T1 | Test suite timing baseline & variance benchmark gate ($CV \le 15\%$, 8s hard fail / 5s warn, Tier-2 1.15x warn / 1.30x panic dynamic envelope with 30s floor) | 1 warmup + 3 measured iterations, ddof=1, reentrancy-safe subprocess runner |
 | `scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
-| `scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
+| `plugins/quench-dev-tasks/scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
 | `scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |
 | `adapters/` | T4 | Per-vendor HTTP adapter implementations | Each adapter: stateless, vendor-isolated |
+| `tool_surface_constants.py` | T2 | Single Source of Truth for tool names, counts, versions, and MISSING sentinel | Zero third-party dependencies; immutable frozensets |
+| `ide_schema_export.py` | T2 | Pure functions for schema canonicalization, validation, envelope parsing & CLI | Zero dependencies on fastmcp/yaml/subprocess |
+| `scripts/export_ide_schemas.py` | T1 | Thin CLI entrypoint spawning child process to introspect live schemas | Enforces byte-level determinism, PYTHONDONTWRITEBYTECODE=1 |
+| `scripts/_introspect_schemas_child.py` | T1 | Sandboxed child probe redirecting stdout to private fd before server import | Prevents stdio channel pollution (INV-4) |
 
 ### Call Constraint Summary
 
@@ -280,12 +284,20 @@ server.py → reviewer_engine.py (ReviewerClient factory)
 server.py → manifest.py        (task CRUD)
 server.py → code_explorer.py   (AST slice for refine_spec)
 server.py → reporting.py       (handoff card rendering & CHANGELOG append)
+server.py → tool_surface_constants.py (SSOT tool constants)
 
 reviewer_engine.py → adapters/* (vendor-specific HTTP)
 reviewer_engine.py → log_naming.py (session log paths)
 
 hooks/* → path_guard.py  (path safety)
 hooks/* → project_config.py (stack config read)
+
+scripts/export_ide_schemas.py → scripts/_introspect_schemas_child.py (subprocess)
+scripts/export_ide_schemas.py → ide_schema_export.py (run_cli)
+scripts/_introspect_schemas_child.py → server.py (mcp.list_tools)
+scripts/_introspect_schemas_child.py → tool_surface_constants.py
+ide_schema_export.py → tool_surface_constants.py
+ide_schema_export.py → path_guard.py (assert_dir_contained)
 ```
 
 ---

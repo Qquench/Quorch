@@ -15,7 +15,14 @@ TIER1_TARGET_REL_FILES: Final[tuple[str, ...]] = (
     "test_agents_md_sync.py",
     "test_anti_roleplay_discipline_contract.py",
     "test_forgery_prevention_contract.py",
+    "test_ide_schema_export.py",
 )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    config.addinivalue_line("markers", "slow: heavy cross-platform CLI integration cases")
+    config.addinivalue_line("markers", "tier1_fast: fast gate Tier-1 tests")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

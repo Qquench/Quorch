@@ -24,7 +24,7 @@
 
 ---
 
-## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 141 项)
+## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 163 项)
 
 | 符号 | 定义模块 |
 | :--- | :--- |
@@ -84,6 +84,20 @@
 | `is_whitelist_matched` | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` |
 | `matches_pattern` | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` |
 | `server_dir` | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` |
+| `CR` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `ENVELOPE_MAX_BYTES` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `EXIT_INVALID` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `EnvelopeError` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `LF` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `SNAPSHOT_FILENAME` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `SchemaExportError` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `SentinelLeakError` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `_REPO_ROOT` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `_VOLATILE_SCHEMA_KEYS` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `_atomic_write` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `_strip_volatile_keys` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `assert_no_sentinel_leak` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
+| `validate_schema_doc` | `plugins/quench-dev-tasks/server/ide_schema_export.py` |
 | `LOG_FILENAME_REGEX` | `plugins/quench-dev-tasks/server/log_naming.py` |
 | `QuotaResult` | `plugins/quench-dev-tasks/server/log_naming.py` |
 | `_WINDOWS_RESERVED_NAMES` | `plugins/quench-dev-tasks/server/log_naming.py` |
@@ -104,6 +118,7 @@
 | `_NUL_BYTE_RE` | `plugins/quench-dev-tasks/server/path_guard.py` |
 | `_WIN_RESERVED_NAMES` | `plugins/quench-dev-tasks/server/path_guard.py` |
 | `_glob_to_regex` | `plugins/quench-dev-tasks/server/path_guard.py` |
+| `is_reparse_point_or_symlink` | `plugins/quench-dev-tasks/server/path_guard.py` |
 | `CRITICAL_CODE_MANIFESTS` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `DEFAULT_AFFECTED_FILES_MTIME_THRESHOLD_SECONDS` | `plugins/quench-dev-tasks/server/project_config.py` |
 | `DEFAULT_HEARTBEAT_SILENCE_THRESHOLD_SECONDS` | `plugins/quench-dev-tasks/server/project_config.py` |
@@ -169,10 +184,17 @@
 | `StateMachineError` | `plugins/quench-dev-tasks/server/state_machine.py` |
 | `VALID_TRANSITIONS` | `plugins/quench-dev-tasks/server/state_machine.py` |
 | `_normalize_status` | `plugins/quench-dev-tasks/server/state_machine.py` |
+| `CTX_PARAM_ALIASES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
+| `TOOL_ALLOWS_CTX` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
+| `_get_param_info` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
+| `_missing_singleton` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
+| `get_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
+| `has_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
+| `iter_param_names` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
 
 ---
 
-## 3. 服务端生产模块概览 (Server Production Modules, 共 23 个模块)
+## 3. 服务端生产模块概览 (Server Production Modules, 共 25 个模块)
 
 | 模块路径 | 定义符号数 | 导入模块数 | 导入符号数 |
 | :--- | :--- | :--- | :--- |
@@ -186,11 +208,12 @@
 | `plugins/quench-dev-tasks/server/consultation.py` | 46 | 20 | 48 |
 | `plugins/quench-dev-tasks/server/hooks/context_injector.py` | 3 | 7 | 5 |
 | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` | 24 | 15 | 14 |
+| `plugins/quench-dev-tasks/server/ide_schema_export.py` | 22 | 10 | 14 |
 | `plugins/quench-dev-tasks/server/log_naming.py` | 25 | 9 | 9 |
 | `plugins/quench-dev-tasks/server/manifest.py` | 39 | 20 | 20 |
 | `plugins/quench-dev-tasks/server/manifest_lease.py` | 11 | 15 | 22 |
 | `plugins/quench-dev-tasks/server/observability_policy.py` | 7 | 9 | 10 |
-| `plugins/quench-dev-tasks/server/path_guard.py` | 13 | 9 | 5 |
+| `plugins/quench-dev-tasks/server/path_guard.py` | 15 | 11 | 6 |
 | `plugins/quench-dev-tasks/server/project_config.py` | 55 | 18 | 17 |
 | `plugins/quench-dev-tasks/server/reporting.py` | 3 | 6 | 6 |
 | `plugins/quench-dev-tasks/server/reviewer_engine.py` | 49 | 28 | 33 |
@@ -198,11 +221,12 @@
 | `plugins/quench-dev-tasks/server/schema_validator.py` | 9 | 10 | 12 |
 | `plugins/quench-dev-tasks/server/server.py` | 44 | 31 | 80 |
 | `plugins/quench-dev-tasks/server/state_machine.py` | 24 | 9 | 10 |
+| `plugins/quench-dev-tasks/server/tool_surface_constants.py` | 14 | 2 | 4 |
 | `plugins/quench-dev-tasks/server/workspace_lease.py` | 5 | 9 | 10 |
 
 ---
 
-## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 428 项符号)
+## 4. 消费者依赖图谱 (Consumer Dependency Graph, 共 466 项符号)
 
 | 符号 | 定义模块 | 业务消费者 (`consumed_by`) | 测试引用 (`test_refs`) | 文档提及 (`doc_refs`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -316,6 +340,28 @@
 | `safe_clean_corrupted_bypass` | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_file_scope_guard.py` | NONE |
 | `server_dir` | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` | NONE | NONE | NONE |
 | `verify_session_integrity` | `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_file_scope_guard.py` | NONE |
+| `CR` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `ENVELOPE_BEGIN` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `ENVELOPE_END` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `ENVELOPE_MAX_BYTES` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `EXIT_DRIFT` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_asset_inventory.py` | NONE |
+| `EXIT_INVALID` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `EXIT_OK` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_asset_inventory.py` | NONE |
+| `EnvelopeError` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `LF` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `SNAPSHOT_FILENAME` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `SchemaExportError` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `SentinelLeakError` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `_REPO_ROOT` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `_VOLATILE_SCHEMA_KEYS` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `_atomic_write` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `_strip_volatile_keys` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `assert_no_sentinel_leak` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
+| `canonicalize_schemas` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `export_ide_schemas` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | `docs/architecture/README.md` |
+| `parse_envelope` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `scripts/export_ide_schemas.py` | NONE | NONE |
+| `run_cli` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `scripts/export_ide_schemas.py` | NONE | `docs/architecture/README.md` |
+| `validate_schema_doc` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE | NONE |
 | `ActiveLogRegistry` | `plugins/quench-dev-tasks/server/log_naming.py` | `plugins/quench-dev-tasks/server/reviewer_engine.py`, `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_cache_telemetry.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py` | `CHANGELOG.md` |
 | `HEADER_VERSION` | `plugins/quench-dev-tasks/server/log_naming.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_log_naming.py` | NONE |
 | `InvalidSlugError` | `plugins/quench-dev-tasks/server/log_naming.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_log_naming.py` | NONE |
@@ -398,16 +444,18 @@
 | `VerdictAuditSink` | `plugins/quench-dev-tasks/server/observability_policy.py` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/tests/test_observability_policy.py` | `CHANGELOG.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md` |
 | `make_verdict_sink` | `plugins/quench-dev-tasks/server/observability_policy.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/tests/test_forgery_prevention_contract.py`, `plugins/quench-dev-tasks/server/tests/test_observability_policy.py` | NONE |
 | `resolve_observability_policy` | `plugins/quench-dev-tasks/server/observability_policy.py` | `plugins/quench-dev-tasks/server/reviewer_engine.py` | `plugins/quench-dev-tasks/server/tests/test_observability_policy.py` | NONE |
-| `PathTraversalError` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/schema_validator.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_path_guard.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | `docs/ci_incident_tracker_and_compatibility_guide.md` |
+| `PathTraversalError` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/ide_schema_export.py`, `plugins/quench-dev-tasks/server/schema_validator.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_consultation_context_guard.py`, `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_path_guard.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | `docs/ci_incident_tracker_and_compatibility_guide.md` |
 | `SubsetCheckResult` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | NONE |
 | `_DRIVE` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | NONE | NONE |
 | `_MULTI_DOT` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | NONE | NONE |
 | `_NUL_BYTE_RE` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | NONE | NONE |
 | `_WIN_RESERVED_NAMES` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | NONE | NONE |
 | `_glob_to_regex` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | NONE | NONE |
+| `assert_dir_contained` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `docs/architecture/README.md` |
 | `canonicalize_path` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md` |
 | `check_whitelist_subset` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | NONE |
 | `comparison_key` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md` |
+| `is_reparse_point_or_symlink` | `plugins/quench-dev-tasks/server/path_guard.py` | NONE | NONE | NONE |
 | `is_within_whitelist` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/manifest.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py` | `CHANGELOG.md` |
 | `sanitize_workspace_path` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/consultation.py`, `plugins/quench-dev-tasks/server/schema_validator.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_path_guard.py` | `docs/ci_incident_tracker_and_compatibility_guide.md` |
 | `to_workspace_relative_path` | `plugins/quench-dev-tasks/server/path_guard.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_path_guard.py` | NONE |
@@ -523,7 +571,7 @@
 | `DegradedReason` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `JOB_ID_PATTERN` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | NONE | NONE |
 | `JobProgress` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
-| `JobRecord` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md` |
+| `JobRecord` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | `CHANGELOG.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json` |
 | `JobState` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_anti_roleplay_discipline_contract.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_log_quota_cross_process.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_log_retention_semantics.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_poll_progress.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `MAX_NONTERMINAL_SNAPSHOT_BYTES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_snapshot_contract.py` | NONE |
 | `PIN_RELEASABLE_STATES` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs_log_quota.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_unified_async.py` | NONE |
@@ -587,24 +635,24 @@
 | `_resolve_task_file_path` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | NONE |
 | `_validate_session_id` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `plugins/quench-dev-tasks/rules/coding-standards.md` |
 | `check_shell_write_isolation` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_shell_write_bypass.py` | NONE |
-| `dev_reviewer_cancel` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_reviewer_cancel` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
 | `dev_reviewer_consult` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `docs/roadmap/README.md` |
-| `dev_reviewer_poll` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/configuration.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_reviewer_submit` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/configuration.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_archive` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/cli.py` | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/manifest_compaction_contract.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_checkout` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_complete` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_confirm` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_escalate` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_export_handoff_card` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_handoff_card.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_heartbeat` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py` | `README.md`, `dev_tasks_mcp_specification.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_promote_draft` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_draft_lint.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/FAQ.md`, `docs/architecture/README.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_propose` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_draft_lint.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/agents/reviewer/agent.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_reclaim` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_refine_spec` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `README.md`, `dev_tasks_mcp_specification.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_set_bypass` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `README.md`, `dev_tasks_mcp_specification.md`, `docs/FAQ.md`, `docs/configuration.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `dev_tasks_status` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/cli.py` | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_draft_lint.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_observability.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/manifest_compaction_contract.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
-| `mcp` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `docs/FAQ.md` |
+| `dev_reviewer_poll` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/configuration.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_reviewer_submit` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/configuration.md`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_archive` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/cli.py` | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/ide_tool_schemas.json`, `docs/architecture/manifest_compaction_contract.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_checkout` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas_lease_probe.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_complete` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_confirm` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_escalate` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_handoff_protocol.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py`, `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_export_handoff_card` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_handoff_card.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_heartbeat` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_heartbeat_renewal.py` | `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_promote_draft` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_draft_lint.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/FAQ.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_propose` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_audit_gate.py`, `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_draft_lint.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_lease.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/README.md`, `docs/architecture/ide_tool_schemas.json`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/agents/reviewer/agent.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_reclaim` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/ide_tool_schemas.json`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_refine_spec` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_spec_refine.py` | `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/ide_tool_schemas.json`, `docs/future_roadmap_ideas.md`, `docs/guides/external-executor-onboarding.md`, `docs/roadmap/README.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-review/SKILL.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_set_bypass` | `plugins/quench-dev-tasks/server/server.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `README.md`, `dev_tasks_mcp_specification.md`, `docs/FAQ.md`, `docs/architecture/ide_tool_schemas.json`, `docs/configuration.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `dev_tasks_status` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/cli.py` | `plugins/quench-dev-tasks/server/tests/test_dod_guard.py`, `plugins/quench-dev-tasks/server/tests/test_draft_lint.py`, `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_observability.py`, `plugins/quench-dev-tasks/server/tests/test_server_tools.py` | `CHANGELOG.md`, `README.md`, `dev_tasks_mcp_specification.md`, `docs/architecture/ide_tool_schemas.json`, `docs/architecture/manifest_compaction_contract.md`, `docs/guides/external-executor-onboarding.md`, `plugins/quench-dev-tasks/rules/dev-tasks-discipline.md`, `plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md` |
+| `mcp` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE | `CHANGELOG.md`, `docs/FAQ.md`, `docs/architecture/README.md` |
 | `ALL_STATUSES` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | NONE | NONE |
 | `EMOJI_STATUS_OPTIONS` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | NONE | NONE |
 | `InvalidTransitionError` | `plugins/quench-dev-tasks/server/state_machine.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_manifest_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
@@ -629,6 +677,20 @@
 | `get_status_summary` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `parse_task_file` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `transition_task` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
+| `CTX_PARAM_ALIASES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `EXPECTED_TOOL_NAMES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `META_ALLOWED_KEYS` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE |
+| `MISSING` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `docs/architecture/README.md` |
+| `SCHEMA_META_KEY` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `SNAPSHOT_SCHEMA_VERSION` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `TOOL_ALLOWS_CTX` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `TOOL_COUNT` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `dev_tasks_mcp_specification.md` |
+| `_MissingSentinel` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE |
+| `_get_param_info` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `_missing_singleton` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `get_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `has_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `iter_param_names` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
 | `LeaseGenerationLostError` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py` | NONE |
 | `LeaseTouchOutcome` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | NONE |
 | `WorkspaceLeaseGuard` | `plugins/quench-dev-tasks/server/workspace_lease.py` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md` |
@@ -642,7 +704,7 @@
 | 工具名称 | 注册名称 | 参数列表 (名称与默认值) | 返回类型契约 |
 | :--- | :--- | :--- | :--- |
 | `dev_reviewer_cancel` | `dev_reviewer_cancel` | `workspace_root, job_id, session_id` | `dict[str, Any]` |
-| `dev_reviewer_poll` | `dev_reviewer_poll` | `workspace_root, job_id, session_id, wait_max_s=0, raw_text=True` | `Union[str, dict[str, Any]]` |
+| `dev_reviewer_poll` | `dev_reviewer_poll` | `workspace_root, job_id, session_id, wait_max_s=0, raw_text=False` | `Union[str, dict[str, Any]]` |
 | `dev_reviewer_submit` | `dev_reviewer_submit` | `workspace_root, query, context_files=None, mode='evaluate', max_hops=1, session_id=None, idempotency_key=None` | `dict[str, Any]` |
 | `dev_tasks_archive` | `dev_tasks_archive` | `workspace_root, task_file` | `Dict[str, Any]` |
 | `dev_tasks_checkout` | `dev_tasks_checkout` | `workspace_root, task_file=None, task_id=None, session_id=None` | `Dict[str, Any]` |
@@ -686,11 +748,11 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 225
+- 样本总量: 269
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 225
+- `unknown`: 269
 <!-- END TELEMETRY -->
 
 <!-- QUENCH-DELTA-BEGIN:v1.21 -->

@@ -9,10 +9,12 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import stat
 import sys
 import unicodedata
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Optional, Sequence
 
 _NUL_BYTE_RE: Final = re.compile(r"\x00")
@@ -359,4 +361,49 @@ def check_whitelist_subset(
         violating_paths=tuple(sorted(violating)),
         normalized_whitelist=norm_whitelist,
     )
+
+
+def is_reparse_point_or_symlink(p: str | os.PathLike[str]) -> bool:
+    """Detect if path is a symlink or Windows reparse point (junction/mount point)."""
+    try:
+        st = os.lstat(p)
+        if stat.S_ISLNK(st.st_mode):
+            return True
+        if sys.platform == "win32" and hasattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT"):
+            if getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
+def assert_dir_contained(
+    base_dir: str | os.PathLike[str],
+    target_dir: str | os.PathLike[str],
+) -> Path:
+    """Verify target_dir is strictly contained within base_dir.
+
+    Resolves both paths, verifies no escaping symlink/junction, and returns resolved target_dir as Path.
+    Raises PathTraversalError if target_dir escapes base_dir.
+    """
+    base_resolved = Path(base_dir).resolve()
+    target_resolved = Path(target_dir).resolve()
+
+    try:
+        target_resolved.relative_to(base_resolved)
+    except ValueError:
+        raise PathTraversalError(f"Directory {target_resolved} escapes base {base_resolved}")
+
+    # Inspect each segment from target up to base for escaping symlink/reparse points
+    curr = target_resolved
+    while curr != base_resolved and curr != curr.parent:
+        if is_reparse_point_or_symlink(curr):
+            real_curr = curr.resolve()
+            try:
+                real_curr.relative_to(base_resolved)
+            except ValueError:
+                raise PathTraversalError(f"Symlink/reparse point {curr} escapes base {base_resolved}")
+        curr = curr.parent
+
+    return target_resolved
 

@@ -130,7 +130,7 @@ The DevTasks state machine defines strict valid transitions enforced by `state_m
 
 ## 4. MCP Tools Specification
 
-The server exposes 16 atomic FastMCP tools:
+The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_COUNT`; code is authoritative, JSON snapshot is derived mirror evidence):
 
 1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status.

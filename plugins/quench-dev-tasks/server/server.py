@@ -3023,7 +3023,7 @@ async def dev_reviewer_consult(
     mode: str = "critique",
     max_hops: int = 1,
     session_id: str | None = None,
-    ctx: Context = None,
+    ctx: Any = None,
 ) -> dict[str, Any]:
     """Directly consult the senior architecture Reviewer (recommends unified async submit/poll).
     免任务单地直接咨询资深架构 Reviewer。
