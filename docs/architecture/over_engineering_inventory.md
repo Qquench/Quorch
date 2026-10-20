@@ -24,7 +24,7 @@
 
 ---
 
-## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 163 项)
+## 2. 潜在删除/重构候选清单 (Removal Candidates, 共 158 项)
 
 | 符号 | 定义模块 |
 | :--- | :--- |
@@ -184,13 +184,8 @@
 | `StateMachineError` | `plugins/quench-dev-tasks/server/state_machine.py` |
 | `VALID_TRANSITIONS` | `plugins/quench-dev-tasks/server/state_machine.py` |
 | `_normalize_status` | `plugins/quench-dev-tasks/server/state_machine.py` |
-| `CTX_PARAM_ALIASES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
-| `TOOL_ALLOWS_CTX` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
 | `_get_param_info` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
 | `_missing_singleton` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
-| `get_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
-| `has_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
-| `iter_param_names` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` |
 
 ---
 
@@ -677,20 +672,20 @@
 | `get_status_summary` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `parse_task_file` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/hooks/context_injector.py`, `plugins/quench-dev-tasks/server/hooks/file_scope_guard.py`, `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
 | `transition_task` | `plugins/quench-dev-tasks/server/state_machine.py` | `plugins/quench-dev-tasks/server/manifest_lease.py`, `plugins/quench-dev-tasks/server/server.py` | `plugins/quench-dev-tasks/server/tests/test_external_runner_scope_reconciliation.py`, `plugins/quench-dev-tasks/server/tests/test_reclaim_cas.py`, `plugins/quench-dev-tasks/server/tests/test_state_machine.py` | NONE |
-| `CTX_PARAM_ALIASES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
-| `EXPECTED_TOOL_NAMES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `CTX_PARAM_ALIASES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | `plugins/quench-dev-tasks/server/tests/_tool_surface_expectations.py` | NONE |
+| `EXPECTED_TOOL_NAMES` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | `plugins/quench-dev-tasks/server/tests/_tool_surface_expectations.py`, `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | NONE |
 | `META_ALLOWED_KEYS` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE |
-| `MISSING` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `docs/architecture/README.md` |
-| `SCHEMA_META_KEY` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | NONE | NONE |
+| `MISSING` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | `docs/architecture/README.md` |
+| `SCHEMA_META_KEY` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | NONE |
 | `SNAPSHOT_SCHEMA_VERSION` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py`, `scripts/_introspect_schemas_child.py` | NONE | NONE |
-| `TOOL_ALLOWS_CTX` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
-| `TOOL_COUNT` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | `dev_tasks_mcp_specification.md` |
+| `TOOL_ALLOWS_CTX` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | `plugins/quench-dev-tasks/server/tests/_tool_surface_expectations.py`, `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | NONE |
+| `TOOL_COUNT` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | `plugins/quench-dev-tasks/server/tests/_tool_surface_expectations.py`, `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | `dev_tasks_mcp_specification.md` |
 | `_MissingSentinel` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | `plugins/quench-dev-tasks/server/ide_schema_export.py` | NONE | NONE |
 | `_get_param_info` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
 | `_missing_singleton` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
-| `get_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
-| `has_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
-| `iter_param_names` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | NONE | NONE |
+| `get_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | NONE |
+| `has_default` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | NONE |
+| `iter_param_names` | `plugins/quench-dev-tasks/server/tool_surface_constants.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_tool_surface_contract.py` | NONE |
 | `LeaseGenerationLostError` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py` | NONE |
 | `LeaseTouchOutcome` | `plugins/quench-dev-tasks/server/workspace_lease.py` | NONE | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | NONE |
 | `WorkspaceLeaseGuard` | `plugins/quench-dev-tasks/server/workspace_lease.py` | `plugins/quench-dev-tasks/server/reviewer_jobs.py` | `plugins/quench-dev-tasks/server/tests/test_crashed_worker_ttl_recovery.py`, `plugins/quench-dev-tasks/server/tests/test_dual_source_reconcile.py`, `plugins/quench-dev-tasks/server/tests/test_lease_takeover_fencing.py`, `plugins/quench-dev-tasks/server/tests/test_reviewer_jobs.py`, `plugins/quench-dev-tasks/server/tests/test_touch_outcome_no_truthiness.py`, `plugins/quench-dev-tasks/server/tests/test_workspace_lease.py` | `CHANGELOG.md` |
@@ -748,11 +743,11 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 269
+- 样本总量: 271
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 269
+- `unknown`: 271
 <!-- END TELEMETRY -->
 
 <!-- QUENCH-DELTA-BEGIN:v1.21 -->

@@ -182,9 +182,9 @@ dev_reviewer_poll()                     dev_reviewer_poll(raw_text=False)
 (Direct Markdown or 1KB snapshot)        (40k char budget cap dict)
 ```
 
-- **Clean Raw-Text Projection**: `dev_reviewer_poll` defaults to `raw_text=False` (returning a structured contract dictionary and 1KB non-terminal snapshot to prevent large Markdown dumps in UI; code is authoritative, JSON snapshot is derived mirror evidence). Passing `raw_text=True` returns a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returns findings Markdown upon completion.
+- **Clean Raw-Text Projection**: `dev_reviewer_poll` returns a structured contract dictionary and 1KB non-terminal snapshot by default (code is authoritative, JSON snapshot is derived mirror evidence; see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)). Passing `raw_text=True` returns a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returns findings Markdown upon completion.
 - **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
-- **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (defaults to 0, range 0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops.
+- **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (range 0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops (see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)).
 
 ### 3.4 Task Contract & Bilingual Headings SSOT
 

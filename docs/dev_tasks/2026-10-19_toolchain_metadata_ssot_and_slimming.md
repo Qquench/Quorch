@@ -258,7 +258,7 @@ python scripts/check_test_tiering_invariants.py
 
 ---
 
-### 任务 1.3 ✅ 已确认 — Skill 文档去形参字面量瘦身并加防漂移物理锚点
+### 任务 1.3 ✔️ 已完成 — Skill 文档去形参字面量瘦身并加防漂移物理锚点
 
 #### 【涉及文件】
 ```
