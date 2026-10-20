@@ -304,7 +304,7 @@ pytest plugins/quench-dev-tasks/server/tests/test_onboarding_doc_contract.py -q
 
 ---
 
-### 任务 1.4 ✅ 已确认 — 规格 SSOT 参数默认值运行时锚定测试（规格 → 快照 → 运行时 三级一致性）
+### 任务 1.4 ✔️ 已完成 — 规格 SSOT 参数默认值运行时锚定测试（规格 → 快照 → 运行时 三级一致性）
 
 #### 【涉及文件】
 ```

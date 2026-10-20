@@ -17,6 +17,7 @@ TIER1_TARGET_REL_FILES: Final[tuple[str, ...]] = (
     "test_forgery_prevention_contract.py",
     "test_ide_schema_export.py",
     "test_tool_surface_contract.py",
+    "test_spec_param_defaults_contract.py",
 )
 
 

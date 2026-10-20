@@ -145,9 +145,83 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
 11. **`dev_tasks_heartbeat`**: Refreshes the active lease heartbeat for current or specified tasks, supporting multi-session isolation.
 12. **`dev_tasks_reclaim`**: CAS-guaranteed zombie task reclamation with dual-process contention safety and monotonic generation increments.
 13. **`dev_tasks_export_handoff_card`**: Generates a standard markdown Reviewer handoff card for a task.
-14. **`dev_reviewer_submit`**: Submits an asynchronous long-running Reviewer consultation job with pre-flight fail-closed sandbox checks & context truncation, detached background worker execution, persistent `JobRecord`, and default `mode: str = "evaluate"`.
-15. **`dev_reviewer_poll`**: Polls asynchronous Reviewer job status and retrieves results. Enforces strict tri-state discriminated union return contract (`state` discriminator: A. COMPLETED, B. FAILED/CANCELLED/ORPHANED with degraded findings="", C. QUEUED/RUNNING/CANCELLED_PENDING_REAP with 1KB snapshot and retry-after). Supports `raw_text: bool = False` default returning a compact 1KB non-terminal snapshot and structured contract dictionary in terminal states (preventing large Markdown dumps in UI), while optional `raw_text=True` returns a single-line canonical string (`[Reviewer thinking: ...s | ... tokens]`) in non-terminal states and directly returns findings Markdown in terminal states. Supports `wait_max_s` (0-25s) long polling with monotonic deadline and sleep lower bound (0.05s) to eliminate busy waiting hot-spin loops.
+14. **`dev_reviewer_submit`**: Submits an asynchronous long-running Reviewer consultation job with pre-flight fail-closed sandbox checks & context truncation, detached background worker execution, persistent `JobRecord`, and configurable consultation mode (see §4.1).
+15. **`dev_reviewer_poll`**: Polls asynchronous Reviewer job status and retrieves results. Enforces strict tri-state discriminated union return contract (`state` discriminator: A. COMPLETED, B. FAILED/CANCELLED/ORPHANED with degraded findings="", C. QUEUED/RUNNING/CANCELLED_PENDING_REAP with 1KB snapshot and retry-after). Returns a compact 1KB non-terminal snapshot and structured contract dictionary in terminal states by default (preventing large Markdown dumps in UI), while optional raw-text projection returns a single-line canonical string (`[Reviewer thinking: ...s | ... tokens]`) in non-terminal states and directly returns findings Markdown in terminal states. Supports long polling with monotonic deadline and sleep lower bound (0.05s) to eliminate busy waiting hot-spin loops (see §4.1).
 16. **`dev_reviewer_cancel`**: Deterministically cancels an in-flight async Reviewer job, aborting network transfer and retaining token accounting.
+
+### 4.1 Parameter Defaults SSOT Reference (Machine-Readable Contract)
+
+<!-- QUENCH-PARAM-DEFAULTS-BEGIN -->
+```json
+{
+  "dev_reviewer_cancel": {},
+  "dev_reviewer_poll": {
+    "raw_text": false,
+    "wait_max_s": 0
+  },
+  "dev_reviewer_submit": {
+    "context_files": null,
+    "idempotency_key": null,
+    "max_hops": 1,
+    "mode": "evaluate",
+    "session_id": null
+  },
+  "dev_tasks_archive": {},
+  "dev_tasks_checkout": {
+    "session_id": null,
+    "task_file": null,
+    "task_id": null
+  },
+  "dev_tasks_complete": {
+    "generation": null,
+    "holder_token": null,
+    "test_evidence": ""
+  },
+  "dev_tasks_confirm": {
+    "action": "confirm",
+    "session_id": null
+  },
+  "dev_tasks_escalate": {
+    "context_files": null
+  },
+  "dev_tasks_export_handoff_card": {
+    "include_context": false
+  },
+  "dev_tasks_heartbeat": {
+    "holder_token": null,
+    "session_id": null,
+    "task_id": null,
+    "workspace_root": "."
+  },
+  "dev_tasks_promote_draft": {},
+  "dev_tasks_propose": {},
+  "dev_tasks_reclaim": {
+    "expected_generation": 0,
+    "expected_holder_token": "",
+    "force": false,
+    "task_id": "",
+    "workspace_root": "."
+  },
+  "dev_tasks_refine_spec": {
+    "context_files": null,
+    "max_hops": 1,
+    "persist": false
+  },
+  "dev_tasks_set_bypass": {
+    "action": "enable",
+    "category": "ui_styling",
+    "custom_patterns": null,
+    "duration_hours": 4,
+    "reason": "",
+    "session_id": null,
+    "user_authorized": false
+  },
+  "dev_tasks_status": {
+    "include_drafts": false
+  }
+}
+```
+<!-- QUENCH-PARAM-DEFAULTS-END -->
 
 ---
 
