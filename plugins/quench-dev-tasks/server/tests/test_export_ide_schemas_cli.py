@@ -145,3 +145,140 @@ def test_cli_absent_directory_returns_exit_2() -> None:
     assert res_check.returncode == 2, f"Expected exit code 2, got {res_check.returncode}"
     # Must remain non-existent (strictly read-only)
     assert not non_existent.exists()
+
+
+@pytest.mark.slow
+def test_cli_cache_dir_reparse_point_rejected(tmp_path: Path) -> None:
+    link_dir = _REPO_ROOT / "docs" / "architecture" / ".test_reparse_cache"
+    target_dir = tmp_path / "actual_target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if sys.platform == "win32":
+            import _winapi
+            _winapi.CreateJunction(str(target_dir), str(link_dir))
+        else:
+            link_dir.symlink_to(target_dir, target_is_directory=True)
+    except (OSError, PermissionError, NotImplementedError, AttributeError):
+        pytest.skip("Creating symlink / junction not supported in this test environment")
+
+    try:
+        res = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--check", "--cache-dir", str(link_dir)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert res.returncode == 2, f"Expected exit code 2 on reparse point, got {res.returncode}. stderr: {res.stderr}"
+        assert not (target_dir / "ide_tool_schemas.json").exists()
+    finally:
+        if link_dir.exists():
+            if sys.platform == "win32":
+                try:
+                    os.rmdir(link_dir)
+                except Exception:
+                    pass
+            else:
+                try:
+                    link_dir.unlink()
+                except Exception:
+                    pass
+
+
+@pytest.mark.slow
+def test_cli_cache_dir_permission_denied_maps_to_exit_2(tmp_path: Path) -> None:
+    ro_dir = _REPO_ROOT / "docs" / "architecture" / ".test_readonly_dir"
+    ro_dir.mkdir(parents=True, exist_ok=True)
+    target_file = ro_dir / "ide_tool_schemas.json"
+
+    try:
+        target_file.write_text("{}", encoding="utf-8")
+        if sys.platform == "win32":
+            os.chmod(target_file, stat.S_IREAD)
+            os.chmod(ro_dir, stat.S_IREAD)
+        else:
+            os.chmod(ro_dir, 0o555)
+
+        res_write = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--write", "--cache-dir", str(ro_dir)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert res_write.returncode == 2, f"Expected exit code 2, got {res_write.returncode}. stderr: {res_write.stderr}"
+        stderr = res_write.stderr or ""
+        assert "Traceback (most recent call last)" not in stderr
+        assert "Error" in stderr or "Permission" in stderr or "拒绝访问" in stderr
+
+    finally:
+        try:
+            if sys.platform == "win32":
+                os.chmod(target_file, stat.S_IWRITE | stat.S_IREAD)
+                os.chmod(ro_dir, stat.S_IWRITE | stat.S_IREAD)
+            else:
+                os.chmod(ro_dir, 0o755)
+            if target_file.exists():
+                target_file.unlink()
+            if ro_dir.exists():
+                ro_dir.rmdir()
+        except Exception:
+            pass
+
+
+@pytest.mark.slow
+def test_cli_isolated_pythonpath_does_not_pollute_probe() -> None:
+    polluted_env = dict(os.environ)
+    polluted_env["PYTHONPATH"] = "invalid_nonexistent_path_that_should_not_crash_isolated_probe"
+
+    res = subprocess.run(
+        [sys.executable, str(_SCRIPT_PATH), "--check"],
+        cwd=str(_REPO_ROOT),
+        env=polluted_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert res.returncode == 0, f"Check failed under polluted PYTHONPATH: {res.stderr}"
+
+
+@pytest.mark.slow
+def test_cli_repeated_write_is_strictly_idempotent(tmp_path: Path) -> None:
+    test_cache_dir = _REPO_ROOT / "docs" / "architecture" / ".test_idempotent_cache"
+    test_cache_dir.mkdir(parents=True, exist_ok=True)
+    target_file = test_cache_dir / "ide_tool_schemas.json"
+
+    try:
+        res1 = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--write", "--cache-dir", str(test_cache_dir)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert res1.returncode == 0, f"First write failed: {res1.stderr}"
+        assert target_file.is_file()
+        st1 = target_file.stat()
+        bytes1 = target_file.read_bytes()
+
+        res2 = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--write", "--cache-dir", str(test_cache_dir)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert res2.returncode == 0, f"Second write failed: {res2.stderr}"
+        bytes2 = target_file.read_bytes()
+
+        assert bytes1 == bytes2
+        st2 = target_file.stat()
+        assert st2.st_size == st1.st_size
+    finally:
+        if target_file.exists():
+            target_file.unlink()
+        if test_cache_dir.exists():
+            test_cache_dir.rmdir()
+

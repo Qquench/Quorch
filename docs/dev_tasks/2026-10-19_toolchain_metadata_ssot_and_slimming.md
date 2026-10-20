@@ -511,7 +511,7 @@ python scripts/check_test_tiering_invariants.py
 
 ---
 
-### 任务 1.8 ✅ 已确认 — CLI 跨平台沙箱边界与文件系统异常映射加固
+### 任务 1.8 ✔️ 已完成 — CLI 跨平台沙箱边界与文件系统异常映射加固
 
 #### 【涉及文件】
 ```
