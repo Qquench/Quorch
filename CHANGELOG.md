@@ -3,6 +3,18 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-20] 2026-10-19_toolchain_metadata_ssot_and_slimming.md
+
+- **Task 1.1**: （终审修订版 · 原位替换）— 工具面常量源 + 派生快照 + 原子幂等导出
+- **Task 1.2**: （终审修订版 · 原位替换）— 工具面契约单测单点收敛（AST 提取器 + 三态默认值归一化双向比对 + 删除 B5 的物理差分证明）
+- **Task 1.3**: Skill 文档去形参字面量瘦身并加防漂移物理锚点
+- **Task 1.4**: 规格 SSOT 参数默认值运行时锚定测试（规格 → 快照 → 运行时 三级一致性）
+- **Task 1.5**: Snapshot 漂移门禁接线与跨平台字节确定性（pre-commit + gitattributes）
+- **Task 1.6**: 规格 SSOT 标记块损坏容错与非合规输入阻断测试
+- **Task 1.7**: 缺失哨兵跨导入路径物理单例锚定（守卫的守卫）
+- **Task 1.8**: CLI 跨平台沙箱边界与文件系统异常映射加固
+- **Task 1.9**: 工具链重构全链路验收、测试分级基线与资产盘点门禁
+
 ## [2026-10-19] 2026-10-19_toolchain_metadata_ssot_and_slimming.md
 
 - （无独立任务条目或全部跳过）
