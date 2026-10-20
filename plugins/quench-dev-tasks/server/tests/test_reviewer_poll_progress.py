@@ -5,7 +5,7 @@ Locks in:
 - B2: No busy waiting (sleep >= 0.05s floor, bounded poll count, no sleep(0) tight spin)
 - B3: Concurrent cancellation yields CANCELLED projection in <= 1.0s
 - B4: asyncio.CancelledError passthrough (never swallowed by except Exception)
-- B5: Pure 5-parameter signature (no ctx parameter, inputSchema pure)
+- B5: [已收敛至 test_tool_surface_contract.py]
 - B6: Non-terminal wait returns format_heartbeat_line when raw_text=True
 - B7: Zero wait (wait_max_s=0) immediate return without sleep
 """
@@ -146,16 +146,6 @@ async def test_b4_cancelled_error_passthrough(tmp_path):
     # 且后台 worker 的状态仍保持非终态存活，未被连带销毁
     poll_res = supervisor.poll(rec.job_id, session_id="b4_test", raw_text=False)
     assert poll_res["state"] not in POLL_TERMINAL_STATES
-
-
-def test_b5_pure_signature_and_no_ctx():
-    """B5: 断言 dev_reviewer_poll 签名纯净，不包含 ctx 形参，位置参数严格 5 项。"""
-    sig = inspect.signature(server.dev_reviewer_poll)
-    param_names = list(sig.parameters.keys())
-    assert param_names == ["workspace_root", "job_id", "session_id", "wait_max_s", "raw_text"]
-    assert "ctx" not in param_names
-    assert sig.parameters["wait_max_s"].default == 0
-    assert sig.parameters["raw_text"].default is False
 
 
 @pytest.mark.anyio
