@@ -360,7 +360,7 @@ python scripts/asset_inventory.py
 
 ---
 
-### 任务 1.5 ✅ 已确认 — Snapshot 漂移门禁接线与跨平台字节确定性（pre-commit + gitattributes）
+### 任务 1.5 ✔️ 已完成 — Snapshot 漂移门禁接线与跨平台字节确定性（pre-commit + gitattributes）
 
 #### 【涉及文件】
 ```

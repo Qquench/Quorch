@@ -16,6 +16,7 @@ the active task's affected files whitelist.
 from __future__ import annotations
 
 import argparse
+import enum
 import fnmatch
 import glob
 import json
@@ -24,7 +25,8 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Final, List, Optional, Sequence, Tuple
 
 if sys.version_info >= (3, 7):
     try:
@@ -54,6 +56,63 @@ UNMANAGED_DIRS = (
 UNMANAGED_META_FILES = {
     "changelog.md", "readme.md", "license", "license.md", "license.txt",
 }
+
+
+class SchemaCheckOutcome(enum.Enum):
+    SKIP = "skip"          # 变更集未命中：零子进程，<50ms
+    PASS = "pass"          # rc == 0
+    DRIFT = "drift"        # rc == 1 → 阻断
+    UNVERIFIABLE = "unverifiable"  # rc == 2 / TimeoutExpired → 阻断（fail-closed）
+    GUARD_ERROR = "guard_error"    # 仅变更集获取失败 → fail-open
+
+
+SCHEMA_TRIGGER_PATHS: Final[frozenset[str]] = frozenset({
+    "plugins/quench-dev-tasks/server/server.py",
+    "plugins/quench-dev-tasks/server/tool_surface_constants.py",
+    "scripts/export_ide_schemas.py",
+    "docs/architecture/ide_tool_schemas.json",
+})
+
+
+def should_run_schema_check(changed_paths: Sequence[str]) -> bool:
+    """Determine if any of the changed paths intersect with SCHEMA_TRIGGER_PATHS."""
+    if not changed_paths:
+        return False
+    normalized_triggers = {p.replace("\\", "/").strip().lstrip("./") for p in SCHEMA_TRIGGER_PATHS}
+    for p in changed_paths:
+        norm = p.replace("\\", "/").strip().lstrip("./")
+        if norm in normalized_triggers:
+            return True
+    return False
+
+
+def evaluate_schema_check(
+    changed_paths: Optional[Sequence[str]], *, repo_root: Path
+) -> SchemaCheckOutcome:
+    """Evaluate IDE tool schemas drift gate. Fail-closed on drift/error, fail-open only on missing staged files."""
+    if changed_paths is None:
+        return SchemaCheckOutcome.GUARD_ERROR
+
+    if not should_run_schema_check(changed_paths):
+        return SchemaCheckOutcome.SKIP
+
+    try:
+        res = subprocess.run(
+            [sys.executable, "scripts/export_ide_schemas.py", "--check"],
+            cwd=str(repo_root),
+            capture_output=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return SchemaCheckOutcome.PASS
+        elif res.returncode == 1:
+            return SchemaCheckOutcome.DRIFT
+        else:
+            return SchemaCheckOutcome.UNVERIFIABLE
+    except subprocess.TimeoutExpired:
+        return SchemaCheckOutcome.UNVERIFIABLE
+    except Exception:
+        return SchemaCheckOutcome.UNVERIFIABLE
 
 
 def _extract_yaml_field(content: str, field: str) -> Optional[str]:
@@ -335,6 +394,28 @@ def main() -> int:
     except Exception:
         pass
 
+    # 获取暂存区文件
+    try:
+        staged_files = get_staged_files(workspace_root)
+    except Exception:
+        staged_files = None
+
+    # 执行 Schema 漂移硬门禁判定（独立硬门禁，不受 is_antigravity_environment 豁免）
+    schema_outcome = evaluate_schema_check(staged_files, repo_root=Path(workspace_root))
+    if schema_outcome == SchemaCheckOutcome.DRIFT:
+        print("\n" + "=" * 65, file=sys.stderr)
+        print("🛑 \033[91m[Quench Guard] Git Commit 物理拦截：IDE Tool Schema 快照与代码漂移！\033[0m", file=sys.stderr)
+        print("=" * 65, file=sys.stderr)
+        print("💡 解决指引: 请运行 `python scripts/export_ide_schemas.py --write` 更新快照，确认无误后暂存再提交。\n", file=sys.stderr)
+        return 1
+    elif schema_outcome == SchemaCheckOutcome.UNVERIFIABLE:
+        print("\n" + "=" * 65, file=sys.stderr)
+        print("🛑 \033[91m[Quench Guard] Git Commit 物理拦截：Schema 校验失败或超时（Fail-Closed 阻断）！\033[0m", file=sys.stderr)
+        print("=" * 65, file=sys.stderr)
+        return 1
+    elif schema_outcome == SchemaCheckOutcome.GUARD_ERROR:
+        print("⚠️ [Quench Guard] 无法获取暂存区文件，Schema 门禁降级放行（Fail-Open）。", file=sys.stderr)
+
     # 查找执行中任务
     active_task = find_active_task(dev_tasks_dir)
     if not active_task:
@@ -352,8 +433,6 @@ def main() -> int:
         )
         return 0
 
-    # 获取暂存区文件
-    staged_files = get_staged_files(workspace_root)
     if not staged_files:
         return 0
 

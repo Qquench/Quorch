@@ -185,6 +185,7 @@ dev_reviewer_poll()                     dev_reviewer_poll(raw_text=False)
 - **Clean Raw-Text Projection**: `dev_reviewer_poll` returns a structured contract dictionary and 1KB non-terminal snapshot by default (code is authoritative, JSON snapshot is derived mirror evidence; see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)). Passing `raw_text=True` returns a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returns findings Markdown upon completion.
 - **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
 - **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (range 0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops (see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)).
+- **Snapshot Drift Gate Policy**: CI strictly executes `python scripts/export_ide_schemas.py --check` (read-only verification); `--write` is strictly reserved for local developer execution upon intentional changes, and any snapshot diff requires Reviewer approval. Pre-commit guard monitors `SCHEMA_TRIGGER_PATHS` (`plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/tool_surface_constants.py`, `scripts/export_ide_schemas.py`, `docs/architecture/ide_tool_schemas.json`) and blocks drift fail-closed.
 
 ### 3.4 Task Contract & Bilingual Headings SSOT
 
