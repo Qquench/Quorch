@@ -417,7 +417,7 @@ python scripts/export_ide_schemas.py --check
 python scripts/check_test_tiering_invariants.py
 python scripts/asset_inventory.py
 ```
-### 任务 1.6 ✅ 已确认 — 规格 SSOT 标记块损坏容错与非合规输入阻断测试
+### 任务 1.6 ✔️ 已完成 — 规格 SSOT 标记块损坏容错与非合规输入阻断测试
 
 #### 【涉及文件】
 ```

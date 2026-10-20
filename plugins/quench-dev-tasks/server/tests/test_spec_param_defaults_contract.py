@@ -40,12 +40,25 @@ class DefaultDiff:
     kind: Literal["mismatch", "missing_in_snapshot", "not_documented"]
 
 
+class SpecFormatError(Exception):
+    """Raised when the machine-readable defaults block in specification is missing or corrupted."""
+    pass
+
+
 def extract_documented_defaults(spec_markdown: str) -> dict[str, dict[str, JSONLiteral]]:
     """Extract documented defaults dictionary from the QUENCH-PARAM-DEFAULTS marker block."""
+    begin_count = spec_markdown.count(DEFAULTS_BLOCK_BEGIN)
+    end_count = spec_markdown.count(DEFAULTS_BLOCK_END)
+
+    if begin_count == 0 or end_count == 0:
+        raise SpecFormatError(f"Missing QUENCH-PARAM-DEFAULTS marker: begin={begin_count}, end={end_count}")
+    if begin_count > 1 or end_count > 1:
+        raise SpecFormatError(f"Duplicate QUENCH-PARAM-DEFAULTS markers: begin={begin_count}, end={end_count}")
+
     begin_idx = spec_markdown.find(DEFAULTS_BLOCK_BEGIN)
     end_idx = spec_markdown.find(DEFAULTS_BLOCK_END)
-    if begin_idx == -1 or end_idx == -1 or end_idx < begin_idx:
-        raise ValueError("Missing or disordered QUENCH-PARAM-DEFAULTS markers in spec")
+    if end_idx < begin_idx:
+        raise SpecFormatError("Disordered QUENCH-PARAM-DEFAULTS markers in spec")
 
     block = spec_markdown[begin_idx + len(DEFAULTS_BLOCK_BEGIN) : end_idx].strip()
     if block.startswith("```"):
@@ -59,17 +72,17 @@ def extract_documented_defaults(spec_markdown: str) -> dict[str, dict[str, JSONL
     try:
         data = json.loads(block)
     except Exception as exc:
-        raise ValueError(f"Malformed JSON in QUENCH-PARAM-DEFAULTS block: {exc}") from exc
+        raise SpecFormatError(f"Malformed JSON in QUENCH-PARAM-DEFAULTS block: {exc}") from exc
 
     if not isinstance(data, dict):
-        raise ValueError("QUENCH-PARAM-DEFAULTS root must be a JSON object")
+        raise SpecFormatError("QUENCH-PARAM-DEFAULTS root must be a JSON object")
 
     for tool_name, params in data.items():
         if not isinstance(tool_name, str) or not isinstance(params, dict):
-            raise ValueError(f"Invalid tool mapping in QUENCH-PARAM-DEFAULTS for {tool_name}")
+            raise SpecFormatError(f"Invalid tool mapping in QUENCH-PARAM-DEFAULTS for {tool_name}")
         for param_name in params:
             if not isinstance(param_name, str):
-                raise ValueError(f"Invalid parameter name in {tool_name}")
+                raise SpecFormatError(f"Invalid parameter name in {tool_name}")
 
     return data
 
@@ -181,13 +194,38 @@ def test_single_sentinel_identity_and_missing_detection(
     assert diff.snapshot is _MISSING
 
 
-def test_extract_documented_defaults_fail_closed_on_malformed_spec() -> None:
-    """Verify that extract_documented_defaults fails closed on missing or corrupted blocks."""
-    with pytest.raises(ValueError, match="Missing or disordered"):
-        extract_documented_defaults("No markers here")
+def test_spec_defaults_block_missing_tags_raises() -> None:
+    """Verify that missing BEGIN or END marker raises SpecFormatError."""
+    with pytest.raises(SpecFormatError, match="Missing QUENCH-PARAM-DEFAULTS"):
+        extract_documented_defaults(f"content without begin\n{DEFAULTS_BLOCK_END}")
+    with pytest.raises(SpecFormatError, match="Missing QUENCH-PARAM-DEFAULTS"):
+        extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n{{}}\n")
+    with pytest.raises(SpecFormatError, match="Missing QUENCH-PARAM-DEFAULTS"):
+        extract_documented_defaults("no tags at all")
 
-    with pytest.raises(ValueError, match="Malformed JSON"):
+
+def test_spec_defaults_block_duplicate_tags_raises() -> None:
+    """Verify that duplicate BEGIN or END markers raise SpecFormatError."""
+    with pytest.raises(SpecFormatError, match="Duplicate QUENCH-PARAM-DEFAULTS"):
+        extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n{DEFAULTS_BLOCK_BEGIN}\n{{}}\n{DEFAULTS_BLOCK_END}")
+    with pytest.raises(SpecFormatError, match="Duplicate QUENCH-PARAM-DEFAULTS"):
+        extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n{{}}\n{DEFAULTS_BLOCK_END}\n{DEFAULTS_BLOCK_END}")
+
+
+def test_spec_defaults_block_invalid_json_raises() -> None:
+    """Verify that invalid JSON within markers raises SpecFormatError."""
+    with pytest.raises(SpecFormatError, match="Malformed JSON"):
         extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n{{not json\n{DEFAULTS_BLOCK_END}")
+    with pytest.raises(SpecFormatError, match="Malformed JSON"):
+        extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n```json\n{{invalid: 123}}\n```\n{DEFAULTS_BLOCK_END}")
 
-    with pytest.raises(ValueError, match="root must be a JSON object"):
+
+def test_spec_defaults_block_top_level_non_dict_raises() -> None:
+    """Verify that top-level non-dict JSON or invalid mappings raise SpecFormatError."""
+    with pytest.raises(SpecFormatError, match="root must be a JSON object"):
         extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n[1, 2, 3]\n{DEFAULTS_BLOCK_END}")
+    with pytest.raises(SpecFormatError, match="root must be a JSON object"):
+        extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n\"string\"\n{DEFAULTS_BLOCK_END}")
+    with pytest.raises(SpecFormatError, match="Invalid tool mapping"):
+        extract_documented_defaults(f"{DEFAULTS_BLOCK_BEGIN}\n{{\"dev_tasks_status\": [1, 2]}}\n{DEFAULTS_BLOCK_END}")
+
