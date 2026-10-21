@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import errno
 import json
 import os
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Dict, Final, List, Literal, Optional, Tuple
 
 # 跨平台控制台 UTF-8 编码防御
 if sys.version_info >= (3, 7):
@@ -42,6 +44,131 @@ REQUIRED_DEPENDENCIES = [
     ("pytest", "pytest"),
 ]
 
+ProbeVerdict = Literal["ok", "advisory", "blocked"]
+PREFLIGHT_PROBE_ATTEMPTS: Final[int] = 3
+PREFLIGHT_PROBE_BACKOFF_S: Final[float] = 0.05
+MAX_PATH_WARN_CHARS: Final[int] = 200
+MAX_PATH_BLOCK_CHARS: Final[int] = 250
+_LOG_ARTIFACT_RESERVE_CHARS: Final[int] = 40  # 跨层日志引用字符上限；派生于 8+1+3+1+20+4=37，取 40
+_PROBE_PREFIX: Final[str] = ".quench_preflight_"
+_PROBE_REMOVE_RETRY_S: Final[float] = 0.01
+
+
+def _is_enoent(err: OSError) -> bool:
+    """判定异常是否表示文件不存在（含 Windows WinError 2/3 语义映射）。"""
+    if isinstance(err, FileNotFoundError):
+        return True
+    if getattr(err, "winerror", None) in (2, 3):
+        return True
+    return getattr(err, "errno", None) == errno.ENOENT
+
+
+def classify_probe_error(err: OSError) -> ProbeVerdict:
+    """分类探测产生的 OSError。
+
+    优先级：
+    1. winerror 判定（仅当 winerror 不为 None 时）：
+       - winerror in (32, 33) -> 'advisory'（文件正在被其他进程使用 / 共享冲突）
+       - winerror == 5 -> 'blocked'（拒绝访问，权限不足）
+       - 其它 winerror -> 'blocked'（fail-closed）
+    2. errno 判定：
+       - ENOENT -> 'blocked'（TOCTOU 场景，目录已不存在）
+       - in (EACCES, EPERM, EROFS, ENOSPC, EIO, ENOTDIR) -> 'blocked'
+       - 其它（含 None 或未知 errno）-> 'blocked'
+    """
+    winerror = getattr(err, "winerror", None)
+    if winerror is not None:
+        if winerror in (32, 33):
+            return "advisory"
+        return "blocked"
+
+    err_no = getattr(err, "errno", None)
+    if err_no == errno.ENOENT:
+        return "blocked"
+    if err_no in (
+        errno.EACCES,
+        errno.EPERM,
+        errno.EROFS,
+        errno.ENOSPC,
+        errno.EIO,
+        errno.ENOTDIR,
+    ):
+        return "blocked"
+
+    return "blocked"
+
+
+def probe_directory_writability(target_dir: str) -> Tuple[ProbeVerdict, str]:
+    """探测目标目录的可写性与基本文件创建能力。
+
+    采用带特定前缀的临时哨兵文件试探写入，杜绝原地更名重命名副作用。
+    最多尝试 PREFLIGHT_PROBE_ATTEMPTS 轮：
+    - 若成功创建、写入并清理，返回 ("ok", "目录可写性探测通过")
+    - 若捕获 blocked 级错误，立即返回 ("blocked", 错误详情) 不重试
+    - 若捕获 advisory 级错误，退避后重试，耗尽后返回 ("advisory", 错误详情)
+    - 若清理删除时遇 ENOENT/WinError 2/3，视为目标文件已不存在，判定为 ok，不产生 residue
+    - 若重试后仍删除失败且非 ENOENT，降级返回 ("advisory", f"哨兵文件删除失败: {rm_err}; residue={probe_path}")
+    """
+    last_advisory_msg = ""
+    for attempt in range(PREFLIGHT_PROBE_ATTEMPTS):
+        fd: Optional[int] = None
+        probe_path: Optional[str] = None
+        residue_confirmed: bool = False
+        try:
+            fd, probe_path = tempfile.mkstemp(prefix=_PROBE_PREFIX, dir=target_dir)
+            assert fd is not None
+            local_fd: int = fd
+            fd = None  # 所有权转移，防双 close
+            try:
+                if os.write(local_fd, b"\x00") != 1:
+                    raise OSError(errno.EIO, "probe short write")
+            finally:
+                os.close(local_fd)
+
+            # 清理哨兵文件，容错重试 1 次
+            try:
+                os.remove(probe_path)
+                probe_path = None
+                return "ok", "目录可写性探测通过"
+            except OSError as first_err:
+                if _is_enoent(first_err):
+                    probe_path = None
+                    return "ok", "目录可写性探测通过"
+                time.sleep(_PROBE_REMOVE_RETRY_S)
+                try:
+                    os.remove(probe_path)
+                    probe_path = None
+                    return "ok", "目录可写性探测通过"
+                except OSError as rm_err:
+                    if _is_enoent(rm_err):
+                        probe_path = None
+                        return "ok", "目录可写性探测通过"
+                    residue_confirmed = True
+                    return (
+                        "advisory",
+                        f"哨兵文件删除失败: {rm_err}; residue={probe_path}",
+                    )
+        except OSError as e:
+            verdict = classify_probe_error(e)
+            if verdict == "blocked":
+                return "blocked", f"目录无法写入或受阻: {e}"
+            last_advisory_msg = f"目录存在轻微竞争或锁定: {e}"
+            if attempt < PREFLIGHT_PROBE_ATTEMPTS - 1:
+                time.sleep(PREFLIGHT_PROBE_BACKOFF_S)
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if probe_path is not None and not residue_confirmed:
+                try:
+                    os.remove(probe_path)
+                except OSError:
+                    pass
+
+    return "advisory", last_advisory_msg or "目录可写性探测超时"
+
 
 def get_repo_root() -> str:
     """获取代码仓库根目录绝对路径"""
@@ -55,8 +182,10 @@ def get_plugin_dir(repo_root: Optional[str] = None) -> str:
     return os.path.normpath(os.path.join(root, "plugins", "quench-dev-tasks"))
 
 
-def get_backup_path(repo_root: Optional[str] = None) -> str:
+def get_backup_path(repo_root: Optional[str] = None, override: Optional[str] = None) -> str:
     """获取快照备份文件路径"""
+    if override:
+        return os.path.normpath(os.path.abspath(override))
     root = repo_root or get_repo_root()
     return os.path.normpath(os.path.join(root, ".agents", ".quench_path_backup.json"))
 
@@ -171,13 +300,19 @@ def render_configs(plugin_dir: str, python_exe: str) -> Tuple[str, str]:
     return out_mcp_path, out_hooks_path
 
 
-def run_preflight(plugin_dir: str, backup_path: str) -> Tuple[bool, List[str]]:
+def run_preflight(
+    plugin_dir: str,
+    backup_path: str,
+    *,
+    repo_root: Optional[str] = None,
+    log_dir: Optional[str] = None,
+) -> Tuple[bool, List[str]]:
     """执行安装前 Pre-flight 检查。
 
     检查项：
-    1. 目录/文件句柄锁定探测（os.rename 原地试探 + 可选 psutil 诊断）；
-    2. Windows MAX_PATH 长度审计（>200 警告，>250 阻断）；
-    3. 备份快照写入到 .agents/.quench_path_backup.json。
+    1. Windows MAX_PATH 长度审计（>200 警告，>250 阻断）；
+    2. 目录存在性校验与目录可写性探测（带前缀临时哨兵文件）；
+    3. 备份快照写入到 backup_path。
 
     Returns:
         (passed: bool, messages: list[str])
@@ -185,17 +320,30 @@ def run_preflight(plugin_dir: str, backup_path: str) -> Tuple[bool, List[str]]:
     messages: List[str] = []
     passed = True
     p_dir = os.path.normpath(plugin_dir)
-    repo_root = os.path.normpath(os.path.join(p_dir, "..", ".."))
+    r_root = (
+        os.path.normpath(repo_root)
+        if repo_root
+        else os.path.normpath(os.path.join(p_dir, "..", ".."))
+    )
+    l_dir = (
+        os.path.normpath(log_dir)
+        if log_dir
+        else os.path.normpath(os.path.join(r_root, ".agents", "logs"))
+    )
 
-    # 1. MAX_PATH 长度审计（检查最深目录层级）
-    path_len = max(len(os.path.abspath(p_dir)), len(os.path.abspath(repo_root)))
+    # (a) MAX_PATH 长度审计（检查最深目录层级与日志保留空间）
+    path_len = max(
+        len(os.path.abspath(p_dir)),
+        len(os.path.abspath(r_root)),
+        len(os.path.abspath(l_dir)) + 1 + _LOG_ARTIFACT_RESERVE_CHARS,
+    )
     if sys.platform == "win32":
-        if path_len > 250:
+        if path_len > MAX_PATH_BLOCK_CHARS:
             passed = False
             messages.append(
                 f"❌ [MAX_PATH 阻断] 当前安装路径长度 ({path_len} 字符) 接近 Windows 260 MAX_PATH 限制，请移至更浅目录！"
             )
-        elif path_len > 200:
+        elif path_len > MAX_PATH_WARN_CHARS:
             messages.append(
                 f"⚠️ [MAX_PATH 警告] 当前安装路径长度为 {path_len} 字符（建议小于 200 字符，以防嵌套文件超限）。"
             )
@@ -204,29 +352,22 @@ def run_preflight(plugin_dir: str, backup_path: str) -> Tuple[bool, List[str]]:
     else:
         messages.append(f"✅ 平台路径检查通过 ({sys.platform})")
 
-    # 2. 句柄占用探测
-    is_locked = False
-    lock_err_detail = ""
-    if os.path.exists(p_dir):
-        try:
-            # 原地重命名测试：若文件夹被其他排他性进程锁定，Windows 下会抛出 PermissionError
-            os.rename(p_dir, p_dir)
-        except PermissionError as e:
-            is_locked = True
-            lock_err_detail = str(e)
-        except OSError as e:
-            # WinError 5 (拒绝访问) 或 WinError 32 (另一个程序正在使用此文件)
-            if getattr(e, "winerror", 0) in (5, 32):
-                is_locked = True
-                lock_err_detail = str(e)
-
-    if is_locked:
+    # (b) 目录存在性校验
+    if not os.path.isdir(p_dir):
         passed = False
-        messages.append(f"❌ [目录句柄锁定] 目录被外部进程锁定占用，无法执行安装或更名: {lock_err_detail}")
+        messages.append(f"❌ [目录可写性探测] plugin directory missing: {p_dir}")
     else:
-        messages.append("✅ 目录句柄占用检测通过（无排他进程锁定）")
+        # (c) 目录可写性探测
+        verdict, probe_msg = probe_directory_writability(p_dir)
+        if verdict == "blocked":
+            passed = False
+            messages.append(f"❌ [目录可写性探测] {probe_msg}")
+        elif verdict == "advisory":
+            messages.append(f"⚠️ [目录可写性探测] {probe_msg}")
+        else:
+            messages.append(f"✅ [目录可写性探测] {probe_msg}")
 
-    # 3. 备份快照写入
+    # (d) 备份快照写入
     try:
         backup_dir = os.path.dirname(backup_path)
         os.makedirs(backup_dir, exist_ok=True)
@@ -414,12 +555,24 @@ def main() -> int:
         action="store_true",
         help="自动将 Quench Git Pre-commit Guard 部署至目标项目的 .git/hooks/pre-commit",
     )
+    parser.add_argument(
+        "--repo-root",
+        type=str,
+        default=None,
+        help="显式指定代码仓库根目录绝对路径（用于测试隔离）",
+    )
+    parser.add_argument(
+        "--backup-path",
+        type=str,
+        default=None,
+        help="显式指定快照备份文件绝对路径（用于测试隔离）",
+    )
 
     args = parser.parse_args()
 
-    repo_root = get_repo_root()
+    repo_root = os.path.abspath(args.repo_root) if args.repo_root else get_repo_root()
     plugin_dir = get_plugin_dir(repo_root)
-    backup_path = get_backup_path(repo_root)
+    backup_path = get_backup_path(repo_root, override=args.backup_path)
     python_exe = detect_python_executable(repo_root)
 
     print("=" * 65)
@@ -439,7 +592,7 @@ def main() -> int:
     # 2. 模式：仅 Pre-flight 检查
     if args.preflight:
         print("🩺 正在执行 Pre-flight 安全预检...")
-        passed, msgs = run_preflight(plugin_dir, backup_path)
+        passed, msgs = run_preflight(plugin_dir, backup_path, repo_root=repo_root)
         for msg in msgs:
             print(f"  {msg}")
         print("-" * 65)
@@ -458,11 +611,11 @@ def main() -> int:
 
     # 4. 默认全量安装流程
     print("📋 [步骤 1/4] 执行 Pre-flight 预检与配置快照备份...")
-    passed, msgs = run_preflight(plugin_dir, backup_path)
+    passed, msgs = run_preflight(plugin_dir, backup_path, repo_root=repo_root)
     for msg in msgs:
         print(f"  {msg}")
     if not passed:
-        print("❌ Pre-flight 预检失败，安装终止。请解除句柄占用后重试。", file=sys.stderr)
+        print("❌ Pre-flight 预检失败，安装终止。请解除阻断问题后重试。", file=sys.stderr)
         return 1
 
     print("\n📦 [步骤 2/4] 检查核心运行依赖...")

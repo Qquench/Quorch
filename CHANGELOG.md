@@ -3,6 +3,12 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-21] 2026-10-21_ci_parity_and_preflight_fix.md
+
+- **Task 1.1**: TP-3 覆盖扩张授权下沉为文件级并派生 token 投影（R1 修订）
+- **Task 1.2**: Pre-flight 探测去副作用化、三态门禁定级与跨平台纯测试隔离（R2 修订）
+- **Task 1.3**: Preflight Probe 健壮性补强、ENOENT 幂等清理语义、AST 门禁方法论钉扎与文档锚点闭合（1.3-R10 终审版）
+
 ## [2026-10-21] 2026-10-20_reviewer_task_revision_deadlock_and_hook_guard.md
 
 - **Task 1.1**: 修复 Hook 任务状态误杀：header 精准提取 + 多维差分 + 入口穷举（INV-2 加固）

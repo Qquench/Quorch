@@ -1122,6 +1122,61 @@
       "git_head_sha": "7c78f9d55f2a5e9af978a0a5b5e6404220c87ac8",
       "git_index_mtime": 1792465336.3503463,
       "released": true
+    },
+    "2026-10-21_ci_parity_and_preflight_fix::1.1": {
+      "task_id": "2026-10-21_ci_parity_and_preflight_fix::1.1",
+      "md_sha256": "39272b125debf71e7c7c526fc5b0f6eb56f27e27ca633a92309f0c4df5481589",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 420749343000000,
+      "last_heartbeat_wall_utc": "2026-10-21T03:57:41.654592+00:00",
+      "git_head_sha": "5aa9d814765debf501052bf34f94de5d53ff9ac9",
+      "git_index_mtime": 1792553568.337949,
+      "released": true
+    },
+    "2026-10-21_ci_parity_and_preflight_fix::1.2": {
+      "task_id": "2026-10-21_ci_parity_and_preflight_fix::1.2",
+      "md_sha256": "39272b125debf71e7c7c526fc5b0f6eb56f27e27ca633a92309f0c4df5481589",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 420749375000000,
+      "last_heartbeat_wall_utc": "2026-10-21T03:57:41.700592+00:00",
+      "git_head_sha": "5aa9d814765debf501052bf34f94de5d53ff9ac9",
+      "git_index_mtime": 1792553568.337949,
+      "released": true
+    },
+    "2026-10-21_dev_reviewer_poll_slimming_and_prompt_surface::1.1": {
+      "task_id": "2026-10-21_dev_reviewer_poll_slimming_and_prompt_surface::1.1",
+      "md_sha256": "2a0f31675e84cd2df296c611a30df616032c5ce8aefa83ea9da1051f7ef7f36a",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 427143171000000,
+      "last_heartbeat_wall_utc": "2026-10-21T05:44:15.486415+00:00",
+      "git_head_sha": "5aa9d814765debf501052bf34f94de5d53ff9ac9",
+      "git_index_mtime": 1792560805.2772422,
+      "released": true
+    },
+    "2026-10-21_dev_reviewer_poll_slimming_and_prompt_surface::1.2": {
+      "task_id": "2026-10-21_dev_reviewer_poll_slimming_and_prompt_surface::1.2",
+      "md_sha256": "2a0f31675e84cd2df296c611a30df616032c5ce8aefa83ea9da1051f7ef7f36a",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 427143203000000,
+      "last_heartbeat_wall_utc": "2026-10-21T05:44:15.524406+00:00",
+      "git_head_sha": "5aa9d814765debf501052bf34f94de5d53ff9ac9",
+      "git_index_mtime": 1792560805.2772422,
+      "released": true
+    },
+    "2026-10-21_ci_parity_and_preflight_fix::1.3": {
+      "task_id": "2026-10-21_ci_parity_and_preflight_fix::1.3",
+      "md_sha256": "0fc34d64e558f17fe585149c3890b4fe2c97263960db4adab7d85ad8d862bd85",
+      "generation": 1,
+      "holder_token": "token_1792561456040_5196",
+      "last_heartbeat_monotonic_ns": 427758140000000,
+      "last_heartbeat_wall_utc": "2026-10-21T05:54:30.456777+00:00",
+      "git_head_sha": "5aa9d814765debf501052bf34f94de5d53ff9ac9",
+      "git_index_mtime": 1792560805.2772422,
+      "released": true
     }
   }
 }

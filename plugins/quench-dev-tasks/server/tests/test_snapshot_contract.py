@@ -235,3 +235,8 @@ def test_i18n_progress_formatting_default_en_and_zh():
     assert format_progress(prog, env={"LC_ALL": "", "LC_MESSAGES": "", "LANG": ""}) == "Thinking (assembling) · 1m 5s · idle 4s"
     # 入参 locale 优先于环境变量
     assert format_progress(prog, locale="en", env={"LC_ALL": "zh_CN"}) == "Thinking (assembling) · 1m 5s · idle 4s"
+
+
+def test_max_log_ref_chars_within_40_literal():
+    """断言 MAX_LOG_REF_CHARS 处于合法字面量区间 (0 < MAX_LOG_REF_CHARS <= 40)。"""
+    assert 0 < MAX_LOG_REF_CHARS <= 40

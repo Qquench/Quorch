@@ -271,3 +271,128 @@ def test_no_stale_reentry_guard_value_in_docs():
 
     assert violations == []
 
+
+# Preflight Probe 健壮性与常量 AST 静态门禁
+
+
+def test_is_enoent_confined_to_unlink_branches_ast():
+    """AST 门禁：_is_enoent 必须在 scripts/install.py 恰好定义 1 次，并在 probe_directory_writability 内部恰好引用 2 次，classify_probe_error 内严禁引用。"""
+    repo_root = PLUGIN_ROOT.parent.parent
+    install_py = repo_root / "scripts" / "install.py"
+    tree = ast.parse(install_py.read_text(encoding="utf-8"), filename=str(install_py))
+
+    defs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_is_enoent"]
+    names = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "_is_enoent"]
+    assert len(defs) == 1
+    assert len(names) == 2
+
+    probe = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "probe_directory_writability")
+    assert probe.lineno <= names[0].lineno <= probe.end_lineno
+    assert probe.lineno <= names[1].lineno <= probe.end_lineno
+
+    cls = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "classify_probe_error")
+    assert [n for n in ast.walk(cls) if isinstance(n, ast.Name) and n.id == "_is_enoent"] == []
+
+
+def test_probe_remove_retry_constant_ast():
+    """AST 门禁：_PROBE_REMOVE_RETRY_S 常量声明为 0.01，且 probe 内部不存在实参为 Constant(0.01) 的裸 time.sleep 调用。"""
+    repo_root = PLUGIN_ROOT.parent.parent
+    install_py = repo_root / "scripts" / "install.py"
+    tree = ast.parse(install_py.read_text(encoding="utf-8"), filename=str(install_py))
+
+    def is_target(n, name):
+        if isinstance(n, ast.AnnAssign):
+            return isinstance(n.target, ast.Name) and n.target.id == name
+        if isinstance(n, ast.Assign):
+            return any(isinstance(t, ast.Name) and t.id == name for t in n.targets)
+        return False
+
+    # 1. 验证常量赋值节点
+    retry_constants = [
+        n
+        for n in ast.walk(tree)
+        if is_target(n, "_PROBE_REMOVE_RETRY_S")
+        and isinstance(n.value, ast.Constant)
+        and n.value.value == 0.01
+    ]
+    assert len(retry_constants) == 1
+
+    # 2. probe 内部无裸 sleep(0.01)
+    probe = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "probe_directory_writability")
+    bare_sleeps = [
+        call
+        for call in ast.walk(probe)
+        if isinstance(call, ast.Call)
+        and any(isinstance(arg, ast.Constant) and arg.value == 0.01 for arg in call.args)
+    ]
+    assert bare_sleeps == []
+
+
+def test_install_write_probe_uses_single_byte_constant_ast():
+    """AST 门禁：probe_directory_writability 内 os.write 调用恰好 1 处且写入 1 字节常量。"""
+    repo_root = PLUGIN_ROOT.parent.parent
+    install_py = repo_root / "scripts" / "install.py"
+    tree = ast.parse(install_py.read_text(encoding="utf-8"), filename=str(install_py))
+
+    probe = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "probe_directory_writability")
+    write_calls = [
+        n
+        for n in ast.walk(probe)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "write"
+    ]
+    assert len(write_calls) == 1
+    # 第二参数为写入载荷
+    payload_arg = write_calls[0].args[1]
+    assert isinstance(payload_arg, ast.Constant)
+    assert isinstance(payload_arg.value, bytes)
+    assert len(payload_arg.value) == 1
+
+
+def test_install_reserve_chars_defined_exactly_once_ast():
+    """AST 门禁：scripts/install.py 中 _LOG_ARTIFACT_RESERVE_CHARS 赋值节点数恰好为 1。"""
+    repo_root = PLUGIN_ROOT.parent.parent
+    install_py = repo_root / "scripts" / "install.py"
+    tree = ast.parse(install_py.read_text(encoding="utf-8"), filename=str(install_py))
+
+    def is_target(n, name):
+        if isinstance(n, ast.AnnAssign):
+            return isinstance(n.target, ast.Name) and n.target.id == name
+        if isinstance(n, ast.Assign):
+            return any(isinstance(t, ast.Name) and t.id == name for t in n.targets)
+        return False
+
+    assign_nodes = [
+        n
+        for n in tree.body
+        if is_target(n, "_LOG_ARTIFACT_RESERVE_CHARS")
+    ]
+    assert len(assign_nodes) == 1
+    assert isinstance(assign_nodes[0].value, ast.Constant)
+    assert assign_nodes[0].value.value == 40
+
+
+def test_max_log_ref_chars_within_install_reserve_ast_bound():
+    """AST 门禁：派生 floor 严格等于 37，且 MAX_LOG_REF_CHARS 处于 [floor, _LOG_ARTIFACT_RESERVE_CHARS] 区间。"""
+    import re
+
+    repo_root = PLUGIN_ROOT.parent.parent
+    install_py = repo_root / "scripts" / "install.py"
+    text = install_py.read_text(encoding="utf-8")
+
+    # 提取派生注释中的算式：8+1+3+1+20+4=37
+    m = re.search(r"派生于\s*(\d+)\+(\d+)\+(\d+)\+(\d+)\+(\d+)\+(\d+)=(\d+)", text)
+    assert m is not None, "未找到派生算式注释"
+    parts = [int(m.group(i)) for i in range(1, 7)]
+    floor = sum(parts)
+    assert floor == 37
+    assert int(m.group(7)) == 37
+
+    from log_naming import MAX_LOG_REF_CHARS
+
+    if str(repo_root / "scripts") not in sys.path:
+        sys.path.insert(0, str(repo_root / "scripts"))
+    import install as inst
+
+    assert floor <= MAX_LOG_REF_CHARS <= inst._LOG_ARTIFACT_RESERVE_CHARS
+
+

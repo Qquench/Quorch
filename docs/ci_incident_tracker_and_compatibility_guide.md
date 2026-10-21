@@ -414,3 +414,36 @@ foreach ($job in $jobs.jobs) {
 3. **降级与本地兜底原则**:
    - 凡涉及需要 LLM 辅助的评审决策、规范推断或日志摘要，必须降级为本地规则引擎（如 `schema_validator.py`、静态正则与 AST 分析），或通过 MCP 标准返回向用户交还人工决策，绝不允许单管 stdio 挂起等待。
 
+---
+
+### 案例 9: 跨环境 CI Scope 平价偏移与 Preflight 目录探测 Windows 句柄锁定假阴性
+
+- **首次触发节点**: GitHub Actions CI 矩阵中 `test_no_vendor_literals_in_core.py`、`test_no_api_bypass.py` 及 Windows 安装 preflight 测试失败
+- **现象**:
+  1. 架构卫生门禁报错：`ArchitectureHygieneScanner` 实际扫描到的文件三元组集合与静态固件 `isolated_scope_v120.json` 偏离，触发 CI 阻断。
+  2. Windows 环境下安装脚本 preflight 探测误判：旧实现采用 `os.rename(p_dir, p_dir)` 进行目录锁定探针，在 Windows 下因后台打开句柄常驻直接抛出 WinError 5 (ACCESS_DENIED) 导致假死阻断；且清理哨兵文件时若被索引服务移走抛出 ENOENT 会被误判为删除失败。
+- **根因深度复盘与机制原理**:
+  1. **Scope 平价漂移**: 随着新模块（如 `reviewer_observability.py` 等）的加入，核心模块集合由 11 个增至 12 个（规则三元组增至 120 个），而规则定义与隔离基准未做同代际同步。
+  2. **Windows 目录 rename 语义缺陷**: 在 POSIX 系统中同名 rename 仅做元数据验证，但在 Windows NTFS/SMB 下，只要目录下有任何子文件句柄被占用，`os.rename` 就会无条件抛出 WinError 5 (拒绝访问)，将正常的目录读取放大为致命安装阻断。
+  3. **清理侧与写入侧 ENOENT 语义非对称性**:
+     - 写入侧：在探针创建或写入时遇到 ENOENT 属于严重的目录丢失（TOCTOU 竞态），必须严格 fail-closed 判为 `blocked`。
+     - 清理侧：在删除探针时遇到 ENOENT/WinError 2/3，说明目标文件已被物理移走或清理，代表磁盘上实际已无残留，属于幂等成功（`ok`），绝不能上报为删除失败或谎报 residue。
+- **加固方案 (多重闭环)**:
+  1. **架构卫生 Scope 平价基准归一**: 生成并锁定 12 文件 / 120 三元组的 `isolated_scope_v120.json` 基准，在 `rules.py` 中引入 `MERGED_FILE_SCOPE_ALLOWLIST` 与 `MERGED_EXPANSION_ALLOWLIST`，确保本地与 CI 完全对齐。
+  2. **探针写入去副作用化与三态分类**:
+     - 彻底废弃目录 `rename` 探针，改用 `mkstemp(prefix=_PROBE_PREFIX)` 临时文件单字节写入（`b"\x00"`）并校验长度。
+     - 抽离纯函数 `classify_probe_error`：将 WinError 32/33 映射为 `advisory`（支持退避重试）；WinError 5 及未知错误判定为 `blocked`。
+  3. **非对称清理与安全所有权转移**:
+     - 遵循类型窄化标准：`assert fd is not None; local_fd = fd; fd = None; os.close(local_fd)`，杜绝 double-close 且保证异常时安全回收。
+     - 引入三路 `_is_enoent` 谓词判定（兼顾 POSIX ENOENT 与 Windows WinError 2/3），在首轮及重试轮均短路判定为 `ok`。
+  4. **静态 AST 门禁钉扎**:
+     - 在 `test_architecture_hygiene.py` 中通过 AST 扫描严格断言 `_is_enoent` 在 `install.py` 中仅定义 1 次且仅在 `probe_directory_writability` 内部调用 2 次，物理隔离至清理侧分支。
+
+---
+
+### Preflight Probe — unlink ENOENT / winerror 2|3 幂等语义
+
+当 os.remove 返回 ENOENT 或 Windows winerror ∈ {2, 3} 时，视为目标文件已不存在，探测判定为 ok，不产生 residue。
+当 os.remove 返回 winerror ∈ {32, 33}（共享冲突）时，判定为 advisory 并保留 residue 路径以支持人工清理。
+
+
