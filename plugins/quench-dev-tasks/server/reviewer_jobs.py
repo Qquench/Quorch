@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, ClassVar, Final, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, AsyncIterator, Callable, ClassVar, Final, Literal, Mapping, Optional, Sequence, Union
 from uuid import uuid4
 
 import anyio
@@ -166,12 +166,65 @@ class JobRecord:
 class PollSnapshot:
     job_id: str
     session_id: str
-    state: JobState
-    retry_after_seconds: int  # 钳制于 [2, 30] (I6)
-    log_ref: str  # 非终态仅暴露 basename (<= 40字符)
-    progress: Optional[JobProgress]
-    result: Optional[dict] = None
-    degraded_reason: Optional[DegradedReason] = None
+    state: str
+    retry_after_seconds: int
+    log_ref: str
+    elapsed_s: int = 0
+    progress: Mapping[str, Any] = field(default_factory=dict)
+    generation: int = 0
+    phase: str = ""
+
+    def __post_init__(self) -> None:
+        if isinstance(self.state, Enum):
+            object.__setattr__(self, "state", self.state.value)
+        elif not isinstance(self.state, str):
+            object.__setattr__(self, "state", str(self.state))
+
+        if not self.phase:
+            phase_val = None
+            if self.progress is not None:
+                if hasattr(self.progress, "phase") and self.progress.phase is not None:
+                    p = self.progress.phase
+                    phase_val = p.value if isinstance(p, Enum) else str(p)
+                elif isinstance(self.progress, Mapping) and "phase" in self.progress:
+                    phase_val = str(self.progress["phase"])
+            if not phase_val:
+                phase_val = self.state
+            object.__setattr__(self, "phase", phase_val)
+
+        if self.progress is not None and not isinstance(self.progress, Mapping):
+            if isinstance(self.progress, JobProgress):
+                p_dict = {
+                    "elapsed_s": float(self.progress.elapsed_s),
+                    "approx_reasoning_tokens": int(self.progress.approx_reasoning_tokens),
+                    "phase": (
+                        self.progress.phase.value
+                        if isinstance(self.progress.phase, Enum)
+                        else str(self.progress.phase)
+                    ),
+                    "idle_s": float(self.progress.idle_s),
+                    "state": str(self.progress.state),
+                }
+                object.__setattr__(self, "progress", p_dict)
+            else:
+                try:
+                    object.__setattr__(self, "progress", asdict(self.progress))
+                except Exception:
+                    object.__setattr__(self, "progress", {})
+        elif self.progress is None:
+            object.__setattr__(self, "progress", {})
+
+
+def probe_lease_health(
+    record: JobRecord,
+    *,
+    now_wall_s: Optional[float] = None,
+    ttl_s: Optional[float] = None,
+) -> bool:
+    """Check if job lease/record is healthy. Returns True if healthy (alive), False if orphaned."""
+    cur_wall = now_wall_s if now_wall_s is not None else time.time()
+    effective_ttl = ttl_s if ttl_s is not None else 60.0
+    return not is_record_orphaned(record, now_wall_s=cur_wall, ttl_s=effective_ttl)
 
 
 class SnapshotContractViolation(RuntimeError, AssertionError):
@@ -222,17 +275,25 @@ def compute_elapsed_s(record: JobRecord) -> float:
 def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:
     """强投影函数：键集合恒等于 POLL_NONTERMINAL_FIELDS"""
     prog = None
-    if snapshot.progress is not None:
-        prog = {
-            "elapsed_s": round(float(snapshot.progress.elapsed_s), 2),
-            "approx_reasoning_tokens": int(snapshot.progress.approx_reasoning_tokens),
-            "phase": (
-                snapshot.progress.phase.value
-                if isinstance(snapshot.progress.phase, ReviewerPhase)
-                else str(snapshot.progress.phase)
-            ),
-            "idle_s": round(float(snapshot.progress.idle_s), 2),
-        }
+    if snapshot.progress is not None and len(snapshot.progress) > 0:
+        if isinstance(snapshot.progress, Mapping):
+            prog = {
+                "elapsed_s": round(float(snapshot.progress.get("elapsed_s", 0.0)), 2),
+                "approx_reasoning_tokens": int(snapshot.progress.get("approx_reasoning_tokens", 0)),
+                "phase": str(snapshot.progress.get("phase", "")),
+                "idle_s": round(float(snapshot.progress.get("idle_s", 0.0)), 2),
+            }
+        else:
+            prog = {
+                "elapsed_s": round(float(snapshot.progress.elapsed_s), 2),
+                "approx_reasoning_tokens": int(snapshot.progress.approx_reasoning_tokens),
+                "phase": (
+                    snapshot.progress.phase.value
+                    if isinstance(snapshot.progress.phase, ReviewerPhase)
+                    else str(snapshot.progress.phase)
+                ),
+                "idle_s": round(float(snapshot.progress.idle_s), 2),
+            }
 
     try:
         validated_log_ref = validate_log_ref(str(snapshot.log_ref))
@@ -453,23 +514,32 @@ _atomic_replace_json = _durable_write_json
 
 def _record_to_dict(record: JobRecord) -> dict[str, Any]:
     d = asdict(record)
-    d["state"] = record.state.value
-    d["progress"]["phase"] = (
-        record.progress.phase.value
-        if isinstance(record.progress.phase, ReviewerPhase)
-        else str(record.progress.phase)
-    )
+    d["state"] = record.state.value if isinstance(record.state, Enum) else str(record.state)
+    if record.progress is not None and d.get("progress") is not None:
+        if getattr(record.progress, "phase", None) is not None:
+            d["progress"]["phase"] = (
+                record.progress.phase.value
+                if isinstance(record.progress.phase, ReviewerPhase)
+                else str(record.progress.phase)
+            )
     return d
 
 
 def _record_from_dict(d: dict[str, Any]) -> JobRecord:
-    prog_d = d["progress"]
-    prog = JobProgress(
-        elapsed_s=float(prog_d["elapsed_s"]),
-        approx_reasoning_tokens=int(prog_d["approx_reasoning_tokens"]),
-        phase=ReviewerPhase(prog_d["phase"]),
-        idle_s=float(prog_d["idle_s"]),
-    )
+    prog_d = d.get("progress")
+    prog = None
+    if prog_d is not None:
+        phase_raw = prog_d.get("phase")
+        try:
+            phase = ReviewerPhase(phase_raw)
+        except Exception:
+            phase = ReviewerPhase.STREAMING if str(phase_raw).lower() == "streaming" else ReviewerPhase.ASSEMBLING
+        prog = JobProgress(
+            elapsed_s=float(prog_d.get("elapsed_s", 0.0)),
+            approx_reasoning_tokens=int(prog_d.get("approx_reasoning_tokens", 0)),
+            phase=phase,
+            idle_s=float(prog_d.get("idle_s", 0.0)),
+        )
     return JobRecord(
         job_id=d["job_id"],
         session_id=d["session_id"],
@@ -696,6 +766,7 @@ class ReviewerJobSupervisor:
         self._worker_threads: dict[str, threading.Thread] = {}
         self._abort_handles: dict[str, Any] = {}
         self._running_jobs_lock = threading.Lock()
+        self._last_probe_mono: dict[str, float] = {}
 
     def _pin_log(self, log_path: str) -> str:
         key = norm_registry_key(log_path)
@@ -1177,6 +1248,185 @@ class ReviewerJobSupervisor:
         """Returns compact non-terminal dict projection."""
         return project_poll_result(snapshot)
 
+    def probe_lease_health(self, record: JobRecord) -> bool:
+        """多维健康度探针，检测孤儿进程 (W9)。"""
+        return probe_lease_health(record, ttl_s=self.lease_guard.lease_ttl_s)
+
+    def _read_snapshot_sync(
+        self,
+        job_id: str,
+        clock: Callable[[], float] = time.monotonic,
+        liveness_probe_interval_s: float = 2.0,
+    ) -> PollSnapshot:
+        """在 worker 线程中同步读取快照，确保 FileLock 仅在此函数内获取与即时释放 (P1-5/W6)。"""
+        val_id = validate_job_id(job_id)
+        session_id = self._find_job_session(val_id)
+        if session_id is None:
+            raise KeyError(f"Job not found: '{val_id}'")
+
+        lock_path = self._get_lock_path(session_id, val_id)
+        lock = FileLock(str(lock_path), timeout=5.0)
+        with lock:
+            record = self._load_job_record(session_id, val_id)
+            if record is None:
+                raise KeyError(f"Job record not found: '{val_id}'")
+
+            # 探针节流：以 liveness_probe_interval_s 节流 probe_lease_health (W9)
+            now_mono = clock()
+            last_probe = self._last_probe_mono.get(val_id, -float("inf"))
+            is_healthy = True
+            if (now_mono - last_probe) >= liveness_probe_interval_s:
+                self._last_probe_mono[val_id] = now_mono
+                try:
+                    is_healthy = self.probe_lease_health(record)
+                except Exception:
+                    is_healthy = True
+
+            state_val = (
+                JobState.ORPHANED.value
+                if not is_healthy
+                else (record.state.value if isinstance(record.state, Enum) else str(record.state))
+            )
+
+            # started_monotonic / created_monotonic 耗时计算，非负单调闭环 (B-2)
+            started_mono = getattr(record, "started_monotonic", getattr(record, "created_monotonic", 0.0))
+            elapsed_s = int(max(0, clock() - started_mono))
+
+            # retry_after_seconds 钳制于 [2, 30]
+            retry_after = self._compute_retry_after(float(elapsed_s))
+
+            # log_ref: 相对路径与防泄漏 (P1-7)
+            log_basename = os.path.basename(record.log_path)
+            try:
+                log_ref = validate_log_ref(log_basename)
+            except ValueError as e:
+                raise SnapshotContractViolation(f"Invalid log_ref: {e}") from e
+
+            # phase 单值安全派生与退化不变量 (B-1 / P0-NEW-1)
+            if record.progress is not None and getattr(record.progress, "phase", None) is not None:
+                p = record.progress.phase
+                phase = p.value if isinstance(p, Enum) else str(p)
+            else:
+                phase = state_val
+
+            progress_dict: dict[str, Any] = {}
+            if record.progress is not None:
+                if isinstance(record.progress, JobProgress):
+                    progress_dict = {
+                        "elapsed_s": float(record.progress.elapsed_s),
+                        "approx_reasoning_tokens": int(record.progress.approx_reasoning_tokens),
+                        "phase": (
+                            record.progress.phase.value
+                            if isinstance(record.progress.phase, Enum)
+                            else str(record.progress.phase)
+                        ),
+                        "idle_s": float(record.progress.idle_s),
+                        "state": str(record.progress.state),
+                    }
+                elif isinstance(record.progress, Mapping):
+                    progress_dict = dict(record.progress)
+                else:
+                    try:
+                        progress_dict = asdict(record.progress)
+                    except Exception:
+                        progress_dict = {}
+
+            return PollSnapshot(
+                job_id=record.job_id,
+                session_id=record.session_id,
+                state=state_val,
+                retry_after_seconds=retry_after,
+                log_ref=log_ref,
+                elapsed_s=elapsed_s,
+                progress=progress_dict,
+                generation=int(record.generation),
+                phase=phase,
+            )
+
+    def read_snapshot(
+        self,
+        job_id: str,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> PollSnapshot:
+        """公开同步方法，author 归属锁定在 24.2，用于快路径读取并为 watch() 内部调用。"""
+        return self._read_snapshot_sync(job_id, clock=clock)
+
+    async def watch(
+        self,
+        job_id: str,
+        *,
+        deadline_monotonic: float,
+        min_interval_s: float = 0.05,
+        max_interval_s: float = 1.0,
+        liveness_probe_interval_s: float = 2.0,
+    ) -> AsyncIterator[PollSnapshot]:
+        """纯 anyio 异步观察原语。
+        - 绝不跨 await 持有 FileLock (P1-5/W6)
+        - 绝对单调截止时间 (C.7)
+        - 代际漂移自愈与退避翻倍 (W7)
+        - 取消透传 (W8)
+        - 探针节流 (W9)
+        - 全程零写盘 (W10)
+        """
+        val_id = validate_job_id(job_id)
+        interval = min_interval_s
+
+        # t=0 首次同步快路径读取快照并 yield
+        snap = await anyio.to_thread.run_sync(
+            self._read_snapshot_sync,
+            val_id,
+        )
+        yield snap
+
+        terminal_names = {s.value for s in TERMINAL_STATES} | {"ORPHANED"}
+        if snap.state in terminal_names:
+            return
+
+        last_generation = snap.generation
+        last_state = snap.state
+        last_phase = snap.phase
+
+        while True:
+            now_mono = time.monotonic()
+            remaining = deadline_monotonic - now_mono
+            if remaining <= 0:
+                break
+
+            sleep_s = min(interval, remaining)
+            if sleep_s > 0:
+                await anyio.sleep(sleep_s)
+
+            if time.monotonic() >= deadline_monotonic:
+                break
+
+            snap = await anyio.to_thread.run_sync(
+                self._read_snapshot_sync,
+                val_id,
+            )
+
+            # 代际自愈 (W7)：比对当前 JobRecord.generation 与上轮代际，发生漂移时重置退避并 yield
+            if snap.generation != last_generation:
+                interval = min_interval_s
+                last_generation = snap.generation
+                last_state = snap.state
+                last_phase = snap.phase
+                yield snap
+                if snap.state in terminal_names:
+                    return
+                continue
+
+            # 状态或 phase 变迁：重置退避并 yield
+            if snap.state != last_state or snap.phase != last_phase:
+                interval = min_interval_s
+                last_state = snap.state
+                last_phase = snap.phase
+                yield snap
+                if snap.state in terminal_names:
+                    return
+            else:
+                interval = min(max_interval_s, interval * 2.0)
+
     def poll(
         self,
         job_id: str,
@@ -1209,22 +1459,7 @@ class ReviewerJobSupervisor:
             return project_terminal(record, res_dict)
 
         # 非终态白名单投影
-        elapsed = compute_elapsed_s(record)
-        retry_after = self._compute_retry_after(elapsed)
-        log_basename = os.path.basename(record.log_path)
-        try:
-            log_ref = validate_log_ref(log_basename)
-        except ValueError as e:
-            raise SnapshotContractViolation(f"Invalid log_ref: {e}") from e
-
-        snapshot = PollSnapshot(
-            job_id=record.job_id,
-            session_id=record.session_id,
-            state=record.state,
-            retry_after_seconds=retry_after,
-            log_ref=log_ref,
-            progress=record.progress,
-        )
+        snapshot = self.read_snapshot(val_id)
         return self.project_poll_result(snapshot)
 
     def progress_snapshot(self, job_id: str, *, session_id: str) -> Optional[JobProgress]:
