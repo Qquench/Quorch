@@ -16,24 +16,23 @@ from manifest import (
     load_baseline_snapshot,
     reconcile_workspace_against_whitelist,
 )
-
-STATUS_PENDING = "⬜ 待确认"
-STATUS_CONFIRMED = "✅ 已确认"
-STATUS_IN_PROGRESS = "🔨 执行中"
-STATUS_COMPLETED = "✔️ 已完成"
-STATUS_SKIPPED = "⏭️ 跳过"
-STATUS_REWORK = "🔄 需返工"
-
-SLOW_PATH_HASH_QUOTA_DEFAULT: int = 100  # 合法大范围 refactor 在此上调；配置化旋钮延后 step08
-
-ALL_STATUSES = [
+from task_status import (
     STATUS_PENDING,
     STATUS_CONFIRMED,
     STATUS_IN_PROGRESS,
     STATUS_COMPLETED,
     STATUS_SKIPPED,
     STATUS_REWORK,
-]
+    ALL_STATUSES,
+    STATUS_UNKNOWN,
+    TASK_FILE_RELATIVE_DIR,
+    EMOJI_STATUS_OPTIONS,
+    STATUS_REGEX_PART,
+    TASK_HEADER_PATTERN,
+    normalize_status,
+)
+
+SLOW_PATH_HASH_QUOTA_DEFAULT: int = 100  # 合法大范围 refactor 在此上调；配置化旋钮延后 step08
 
 VALID_TRANSITIONS: Dict[str, List[str]] = {
     STATUS_PENDING: [STATUS_CONFIRMED, STATUS_SKIPPED, STATUS_REWORK],
@@ -75,63 +74,10 @@ class TaskItem:
     raw_line: str        # Raw line text / 原始行内容
 
 
-EMOJI_STATUS_OPTIONS = [
-    r"⬜\s*(?:待确认|Pending)",
-    r"✅\s*(?:已确认|Confirmed)",
-    r"🔨\s*(?:执行中|In[-_ ]?Progress)",
-    r"✔️\s*(?:已完成|Completed)",
-    r"✔\s*(?:已完成|Completed)",
-    r"⏭️\s*(?:跳过|Skipped)",
-    r"⏭\s*(?:跳过|Skipped)",
-    r"🔄\s*(?:需返工|Rework)",
-    r"待确认",
-    r"已确认",
-    r"执行中",
-    r"已完成",
-    r"跳过",
-    r"需返工",
-    r"Pending",
-    r"Confirmed",
-    r"In[-_ ]?Progress",
-    r"Completed",
-    r"Skipped",
-    r"Rework",
-]
-
-STATUS_REGEX_PART = "|".join(EMOJI_STATUS_OPTIONS)
-
-TASK_HEADER_PATTERN = re.compile(
-    rf"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\s*[:—\-]?\s*({STATUS_REGEX_PART})\s*[:—\-]?\s*(.*)$",
-    re.IGNORECASE,
-)
-
-
 def _normalize_status(status_str: str) -> str:
     """Normalize status string (supports emoji, whitespace variants, English and Chinese). / 标准化任务状态字符串（支持中英双语与各类空格Emoji变体）。"""
-    s = status_str.strip()
-    for standard in ALL_STATUSES:
-        if standard in s or standard.replace(" ", "") in s.replace(" ", ""):
-            return standard
-        key = standard.split(" ")[-1]
-        if key in s:
-            return standard
-
-    # English aliases mapping
-    s_lower = s.lower()
-    if "pending" in s_lower:
-        return STATUS_PENDING
-    if "confirmed" in s_lower:
-        return STATUS_CONFIRMED
-    if "progress" in s_lower:
-        return STATUS_IN_PROGRESS
-    if "completed" in s_lower or "done" in s_lower:
-        return STATUS_COMPLETED
-    if "skipped" in s_lower or "skip" in s_lower:
-        return STATUS_SKIPPED
-    if "rework" in s_lower:
-        return STATUS_REWORK
-
-    return s
+    res = normalize_status(status_str)
+    return res if res != STATUS_UNKNOWN else status_str.strip()
 
 
 def parse_task_file(filepath: str) -> List[TaskItem]:

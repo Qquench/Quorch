@@ -13,14 +13,28 @@ import logging.handlers
 import os
 import re
 import sys
-from typing import Optional, List, Tuple, Pattern
-from filelock import FileLock, Timeout
+from typing import Optional, List, Tuple, Pattern, Final
+from collections import Counter
 
 # 保证能加载上级 server 模块
 current_dir = os.path.dirname(os.path.abspath(__file__))
 server_dir = os.path.dirname(current_dir)
 if server_dir not in sys.path:
     sys.path.insert(0, server_dir)
+
+from task_status import (
+    STATUS_PENDING,
+    STATUS_CONFIRMED,
+    STATUS_IN_PROGRESS,
+    STATUS_COMPLETED,
+    STATUS_SKIPPED,
+    STATUS_REWORK,
+    ALL_STATUSES,
+    STATUS_UNKNOWN,
+    TaskHeaderScan,
+    extract_header_task_statuses,
+    is_task_file as is_task_file_ssot,
+)
 
 if sys.version_info >= (3, 7):
     try:
@@ -168,19 +182,12 @@ def matches_pattern(target_file: str, pattern: str, workspace_root: str) -> bool
     return False
 
 
-STATUS_PATTERN = re.compile(r"(?:[⬜✅🔨🔄]|✔️|⏭️)\s*(?:待确认|已确认|执行中|已完成|跳过|需返工)")
-
-
 def extract_statuses(text: str) -> List[str]:
-    """提取文本中出现的全部 Quench 标准任务状态。"""
+    """提取任务单标题行中出现的全部 Quench 标准任务状态（已对齐 SSOT 且具备围栏/引用块过滤）。"""
     if not text:
         return []
-    raw_matches = STATUS_PATTERN.findall(text)
-    cleaned = []
-    for m in raw_matches:
-        c = re.sub(r"\s+", " ", m.strip())
-        cleaned.append(c)
-    return cleaned
+    scan = extract_header_task_statuses(text)
+    return [status for _, status in scan.statuses_ordered if status != STATUS_UNKNOWN]
 
 
 def _strip_long_path_prefix(path: str) -> str:
@@ -357,78 +364,269 @@ def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: 
     return None
 
 
-def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Optional[dict]:
-    """加固守卫：不论哪一个 Agent 变更状态均必须经过用户明确确认；
-    首次生成任务单时除非用户明确指示直接标记为已确认，一律从待确认开始。
+MUTATING_TOOLS: Final[frozenset[str]] = frozenset({
+    "write_to_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "insert_content",
+    "delete_file",
+})
+
+READ_ONLY_TOOLS: Final[frozenset[str]] = frozenset({
+    "read_file",
+    "view_file",
+    "grep_search",
+    "list_dir",
+})
+
+
+def build_post_image(tool_name: str, args: dict, old_content: str) -> Optional[str]:
+    """Simulate post-image of file modifications faithfully.
+    Returns Optional[str]: simulated content string, or None if post-image cannot be determined deterministically.
     """
-    filename = os.path.basename(target_file)
-
-    # 1. 首次创建或整文件写入 (write_to_file)
     if tool_name == "write_to_file":
-        code_content = args.get("CodeContent", "")
-        statuses = extract_statuses(code_content)
-        if statuses:
-            non_pending = [s for s in statuses if "待确认" not in s]
-            if non_pending:
-                unique_non_pending = list(dict.fromkeys(non_pending))
-                reason = (
-                    f"【任务单初始状态物理阻断】\n"
-                    f"检测到 Agent 正在创建或写入任务单：{filename}\n"
-                    f"内容中包含非【待确认】状态标记: {', '.join(unique_non_pending)}\n\n"
-                    f"★ 核心防线：按照 Quench 治理规范，任务初稿一律必须从【⬜ 待确认】开始，"
-                    f"严禁任何 Agent 擅自越级设为已确认！\n\n"
-                    f"决策指引：\n"
-                    f"• 若您此前已明确指示 Agent 直接标记为已确认：请点击【允许】单次放行；\n"
-                    f"• 若属于 Agent 自作主张越级跳过：请点击【拒绝】，强制要求 Agent 改为【⬜ 待确认】并走规范审查流程。"
-                )
-                return {"decision": "ask", "reason": reason}
-        return None
+        return str(args.get("CodeContent", ""))
 
-    # 2. 单块文本替换 (replace_file_content)
+    if tool_name == "delete_file":
+        return ""
+
     if tool_name == "replace_file_content":
-        target_content = args.get("TargetContent", "")
-        replacement_content = args.get("ReplacementContent", "")
-        old_statuses = extract_statuses(target_content)
-        new_statuses = extract_statuses(replacement_content)
+        tc = args.get("TargetContent")
+        rc = args.get("ReplacementContent")
+        if tc is None or rc is None or not isinstance(tc, str) or not isinstance(rc, str):
+            return None
+        if tc == "":
+            return None
 
-        if (old_statuses or new_statuses) and old_statuses != new_statuses:
-            old_desc = ", ".join(old_statuses) if old_statuses else "(无状态)"
-            new_desc = ", ".join(new_statuses) if new_statuses else "(无状态)"
-            reason = (
-                f"【任务状态流转人工审批确认】\n"
-                f"检测到 Agent 正在尝试修改任务单状态：{filename}\n"
-                f"目标变更轨迹: 【{old_desc}】 ➔ 【{new_desc}】\n\n"
-                f"★ 核心防线：不论哪一个 Agent 变更任务状态，都必须经过用户的明确确认，"
-                f"防止 Agent 私自推进或跳过状态机生命周期。\n\n"
-                f"决策指引：\n"
-                f"• 点击【允许】：明确授权并批准本次状态流转；\n"
-                f"• 点击【拒绝】：拦截本次篡改，保持原状态。"
-            )
-            return {"decision": "ask", "reason": reason}
-        return None
+        allow_multiple = bool(args.get("AllowMultiple", False))
+        start_line = args.get("StartLine")
+        end_line = args.get("EndLine")
 
-    # 3. 多块文本替换 (multi_replace_file_content)
+        if start_line is not None and end_line is not None:
+            try:
+                start_idx = int(start_line) - 1
+                end_idx = int(end_line)
+                lines = old_content.splitlines(keepends=True)
+                if 0 <= start_idx <= end_idx <= len(lines):
+                    range_text = "".join(lines[start_idx:end_idx])
+                    count = range_text.count(tc)
+                    if count == 1 or (count > 1 and allow_multiple):
+                        new_range = range_text.replace(tc, rc, -1 if allow_multiple else 1)
+                        return "".join(lines[:start_idx]) + new_range + "".join(lines[end_idx:])
+            except Exception:
+                pass
+
+        count = old_content.count(tc)
+        if count == 0:
+            return None
+        if count > 1 and not allow_multiple:
+            return None
+        return old_content.replace(tc, rc, -1 if allow_multiple else 1)
+
     if tool_name == "multi_replace_file_content":
         chunks = args.get("ReplacementChunks", [])
+        if not isinstance(chunks, list):
+            return None
+        if not chunks:
+            return old_content
+        curr = old_content
         for chunk in chunks:
-            tc = chunk.get("TargetContent", "")
-            rc = chunk.get("ReplacementContent", "")
-            old_s = extract_statuses(tc)
-            new_s = extract_statuses(rc)
-            if (old_s or new_s) and old_s != new_s:
-                old_desc = ", ".join(old_s) if old_s else "(无状态)"
-                new_desc = ", ".join(new_s) if new_s else "(无状态)"
-                reason = (
-                    f"【任务状态流转人工审批确认】\n"
-                    f"检测到 Agent 正在尝试批量修改任务单状态：{filename}\n"
-                    f"检测到变更轨迹: 【{old_desc}】 ➔ 【{new_desc}】\n\n"
-                    f"★ 核心防线：不论哪一个 Agent 变更任务状态，都必须经过用户的明确确认。\n\n"
-                    f"决策指引：\n"
-                    f"• 点击【允许】：明确授权本次状态流转；\n"
-                    f"• 点击【拒绝】：拦截本次篡改，保持原状态。"
-                )
-                return {"decision": "ask", "reason": reason}
+            if not isinstance(chunk, dict):
+                return None
+            res = build_post_image("replace_file_content", chunk, curr)
+            if res is None:
+                return None
+            curr = res
+        return curr
+
+    if tool_name == "insert_content":
+        content_to_insert = args.get("Content") or args.get("Text")
+        if content_to_insert is None:
+            return None
+        line_num = args.get("LineNumber") or args.get("Line")
+        if line_num is not None:
+            try:
+                idx = int(line_num) - 1
+                lines = old_content.splitlines(keepends=True)
+                if idx < 0:
+                    idx = 0
+                elif idx > len(lines):
+                    idx = len(lines)
+                ins = str(content_to_insert)
+                if not ins.endswith("\n") and (idx < len(lines) or old_content.endswith("\n")):
+                    ins += "\n"
+                lines.insert(idx, ins)
+                return "".join(lines)
+            except Exception:
+                return None
         return None
+
+    return None
+
+
+def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
+    """Compute directional multiset diff between old and new scan results.
+    Returns list of violation dictionaries:
+    [{"type": str, "task_id": str, "message": str}]
+    """
+    violations: List[dict] = []
+
+    # 1. New duplicates detection (F1 multiset: counts increased)
+    for tid, new_count in new.occurrence_counts.items():
+        old_count = old.occurrence_counts.get(tid, 0)
+        if new_count > old_count and new_count > 1:
+            violations.append({
+                "type": "duplicate_task_id",
+                "task_id": tid,
+                "message": f"任务编号 {tid} 出现重复（出现次数由 {old_count} 次增至 {new_count} 次）",
+            })
+
+    # 2. Status smuggling and invalid transition via Counter
+    old_counter = Counter(old.statuses_ordered)
+    new_counter = Counter(new.statuses_ordered)
+
+    for (tid, new_status), n_count in new_counter.items():
+        o_count = old_counter.get((tid, new_status), 0)
+        if n_count > o_count:
+            # Check old status for this task_id
+            old_status = old.statuses.get(tid)
+            if old_status is None:
+                # Newly added task
+                if new_status != STATUS_PENDING:
+                    violations.append({
+                        "type": "status_smuggling",
+                        "task_id": tid,
+                        "message": f"新增任务 {tid} 状态为【{new_status}】。初稿一律必须从【{STATUS_PENDING}】开始。",
+                    })
+            else:
+                # Existing task: status changed
+                if old_status != new_status:
+                    violations.append({
+                        "type": "invalid_transition",
+                        "task_id": tid,
+                        "message": f"任务 {tid} 状态被直接修改：【{old_status}】➔【{new_status}】。请使用 FastMCP 工具（dev_tasks_checkout / dev_tasks_confirm）推进状态。",
+                    })
+
+    # 3. Deletion of non-editable tasks
+    for tid, old_count in old.occurrence_counts.items():
+        new_count = new.occurrence_counts.get(tid, 0)
+        if new_count == 0:
+            old_status = old.statuses.get(tid, STATUS_PENDING)
+            if old_status not in (STATUS_PENDING, STATUS_REWORK):
+                violations.append({
+                    "type": "delete_non_editable",
+                    "task_id": tid,
+                    "message": f"非可编辑任务 {tid}【{old_status}】被删除或清空，严禁删除已有审计台账。",
+                })
+
+    # 4. Truncation / empty file
+    if len(old.statuses_ordered) > 0 and len(new.statuses_ordered) == 0:
+        violations.append({
+            "type": "file_truncated",
+            "task_id": "",
+            "message": "任务单内容被截断清空，所有任务均丢失。",
+        })
+
+    # 5. Newly introduced malformed headers (F2)
+    new_malformed = new.malformed_ids - old.malformed_ids
+    if new_malformed:
+        violations.append({
+            "type": "malformed_header",
+            "task_id": ", ".join(sorted(new_malformed)),
+            "message": f"新增畸形任务标题行: {', '.join(sorted(new_malformed))}",
+        })
+
+    return violations
+
+
+def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Optional[dict]:
+    """加固守卫：基于 header 精准提取 + 多维差分 + 入口穷举，防止任何未授权状态篡改。"""
+    filename = os.path.basename(target_file)
+
+    if tool_name in READ_ONLY_TOOLS:
+        return None
+
+    if tool_name not in MUTATING_TOOLS:
+        return {
+            "decision": "ask",
+            "reason": (
+                f"【未知变更工具拦截】\n"
+                f"检测到未在白名单中的变更工具 {tool_name} 试图操作任务单 {filename}。\n"
+                f"为防范未定义修改行为，请人工确认操作意图。"
+            ),
+        }
+
+    if tool_name == "delete_file":
+        return {
+            "decision": "ask",
+            "reason": (
+                f"【任务单物理删除阻断】\n"
+                f"受管任务单 {filename} 禁止通过 delete_file 删除。\n"
+                f"若需作废或撤销任务，请使用标准命令 dev_tasks_confirm(action='revoke')。"
+            ),
+        }
+
+    # 读取旧文件内容（若不存在视为新建；读取异常 fail-open 并记日志）
+    old_content = ""
+    if os.path.isfile(target_file):
+        try:
+            with open(target_file, "r", encoding="utf-8") as f:
+                old_content = f.read()
+        except OSError:
+            # fail-open
+            return None
+
+    post_image = build_post_image(tool_name, args, old_content)
+    if post_image is None:
+        return {
+            "decision": "ask",
+            "reason": (
+                f"【无法确定后置快照】\n"
+                f"工具 {tool_name} 对任务单 {filename} 的修改参数无法确定性演算 (undeterminable_post_image)。\n"
+                f"请人工核查修改内容。"
+            ),
+        }
+
+    old_scan = extract_header_task_statuses(old_content)
+    new_scan = extract_header_task_statuses(post_image)
+
+    if not old_content:
+        # 新建文件检查
+        for tid, st in new_scan.statuses_ordered:
+            if st != STATUS_PENDING:
+                return {
+                    "decision": "ask",
+                    "reason": (
+                        f"【任务单初始状态物理阻断】\n"
+                        f"新建任务单 {filename} 包含非【{STATUS_PENDING}】任务: {tid}【{st}】。\n"
+                        f"按照 Quench 治理规范，初稿一律必须从【{STATUS_PENDING}】开始。"
+                    ),
+                }
+        if new_scan.duplicates:
+            return {
+                "decision": "ask",
+                "reason": f"【重复任务编号拦截】新建任务单包含重复任务编号: {', '.join(sorted(new_scan.duplicates))}",
+            }
+        if new_scan.malformed_ids:
+            return {
+                "decision": "ask",
+                "reason": f"【畸形任务标题拦截】新建任务单包含无法解析的任务标题: {', '.join(sorted(new_scan.malformed_ids))}",
+            }
+        return None
+
+    # 多维差分校验
+    violations = diff_task_statuses(old_scan, new_scan)
+    if violations:
+        reasons_text = "\n".join(f"• {v['message']}" for v in violations)
+        return {
+            "decision": "ask",
+            "reason": (
+                f"【任务状态与边界守卫拦截】\n"
+                f"检测到对任务单 {filename} 的修改违反规范：\n"
+                f"{reasons_text}\n\n"
+                f"★ 核心防线：任务状态必须由 dev_tasks_checkout 或 dev_tasks_confirm 推进，严禁直接篡写。"
+            ),
+        }
 
     return None
 
@@ -513,6 +711,7 @@ def verify_session_integrity(
 
 def safe_clean_corrupted_bypass(bypass_path: str, logger: Optional[logging.Logger] = None) -> None:
     """原子化清理或重命名已失效/损坏的会话旁路文件，带 FileLock 保护。"""
+    from filelock import FileLock, Timeout
     lock_file = bypass_path + ".lock"
     try:
         with FileLock(lock_file, timeout=5.0):
@@ -550,6 +749,7 @@ def is_session_bypass_matched(
     if not os.path.isfile(bypass_file):
         return False
 
+    from filelock import FileLock, Timeout
     lock_file = bypass_file + ".lock"
     try:
         with FileLock(lock_file, timeout=5.0):
@@ -863,8 +1063,8 @@ def main():
         # 第三层：交互式弹窗向用户确认（Ask Modal）
         reason = (
             f"【未纳管代码修改确认 / Unmanaged Code Modification Confirmation】\n"
-            f"No Quench task is currently in '🔨 In Progress' state, and the target file did not match any fast-track whitelist or session bypass rule.\n"
-            f"当前工作区未处于任何 Quench 任务的“🔨 执行中”状态，且目标文件未命中快速通道白名单或会话旁路规则。\n\n"
+            f"No Quench task is currently in '{STATUS_IN_PROGRESS}' state, and the target file did not match any fast-track whitelist or session bypass rule.\n"
+            f"当前工作区未处于任何 Quench 任务的“{STATUS_IN_PROGRESS}”状态，且目标文件未命中快速通道白名单或会话旁路规则。\n\n"
             f"📁 Target / 目标文件: {target_file}\n"
             f"💡 Model Justification / 模型修改理由: {desc}\n\n"
             f"Decision Options / 请进行决策：\n"

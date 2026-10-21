@@ -451,6 +451,16 @@
     "parameters": {
       "additionalProperties": false,
       "properties": {
+        "mode": {
+          "default": "append",
+          "description": "Writing mode ('append', 'overwrite', 'upsert') / 写入模式。",
+          "enum": [
+            "append",
+            "overwrite",
+            "upsert"
+          ],
+          "type": "string"
+        },
         "task_file_name": {
           "description": "Target task file name (e.g., '2026-09-13_feature.md') / 任务单文件名。",
           "type": "string"
@@ -544,6 +554,18 @@
           "default": false,
           "description": "If True, atomically updates the task in the markdown file (Pending tasks only) / 是否将规约强化写回待确认任务单。",
           "type": "boolean"
+        },
+        "task_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional target task file name or path when persist=True / 可选目标任务单文件名或路径。"
         },
         "workspace_root": {
           "description": "Root path of the target workspace / 项目根目录绝对路径。",

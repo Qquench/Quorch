@@ -3,6 +3,11 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-21] 2026-10-20_reviewer_task_revision_deadlock_and_hook_guard.md
+
+- **Task 1.1**: 修复 Hook 任务状态误杀：header 精准提取 + 多维差分 + 入口穷举（INV-2 加固）
+- **Task 1.2**: 补齐 MCP 原地修订闭环：write_task_file_guarded 受控原语 + propose(mode) + refine_spec(persist) 去幽灵
+
 ## [2026-10-20] 2026-10-19_toolchain_metadata_ssot_and_slimming.md
 
 - **Task 1.1**: （终审修订版 · 原位替换）— 工具面常量源 + 派生快照 + 原子幂等导出

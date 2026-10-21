@@ -118,6 +118,21 @@ from manifest import (
 )
 
 from manifest_lease import reclaim_stale_task, probe_lease_health, HealthVerdict
+from task_writer import (
+    write_task_file_guarded,
+    split_task_document,
+    compose_task_document,
+    _render_task_markdown,
+    InvalidTransitionError,
+    NonEditableTaskMutatedError,
+    NonEditableTaskMissingError,
+    DuplicateTaskIdError,
+    StatusSmugglingError,
+    StatusManifestMismatchError,
+    TaskFileLockTimeoutError,
+    PersistTargetRequiredError,
+    TaskNotFoundError,
+)
 
 mcp = FastMCP("quench-dev-tasks")
 
@@ -143,79 +158,8 @@ def _resolve_task_file_path(workspace_root: str, task_file: str) -> str:
     return cand
 
 
-def _render_task_markdown(task: Dict[str, Any]) -> str:
-    """Render a single structured task dictionary into compliant Markdown snippet. / 将单条结构化任务字典渲染为符合规范的 Markdown 片段。"""
-    task_id = task.get("id") or task.get("task_id") or "1.0"
-    title = task.get("title") or "未命名任务"
-    status = task.get("status") or STATUS_PENDING
-    is_draft = bool(task.get("draft"))
+# _render_task_markdown is imported from task_writer above
 
-    if is_draft:
-        lines = [
-            f"### 任务 {task_id} {status} (草案) — {title}\n",
-            "<!-- quench-task-meta: {\"draft\": true} -->\n\n",
-            "#### 【涉及文件】\n",
-            "```\n",
-        ]
-    else:
-        lines = [
-            f"### 任务 {task_id} {status} — {title}\n",
-            "\n",
-            "#### 【涉及文件】\n",
-            "```\n",
-        ]
-    affected = task.get("affected_files", [])
-    if isinstance(affected, list):
-        for af in affected:
-            lines.append(f"{af}\n")
-    else:
-        lines.append(f"{affected}\n")
-    lines.append("```\n\n")
-
-    lines.append("#### 【缺陷根因与修改目标】\n")
-    lines.append("```\n")
-    lines.append(f"{task.get('root_cause_and_goal', '无')}\n")
-    lines.append("```\n\n")
-
-    lines.append("#### 【目标签名与类型契约】\n")
-    contracts = task.get("type_contracts", "无")
-    if isinstance(contracts, list):
-        contracts_str = "\n".join(contracts)
-    else:
-        contracts_str = str(contracts)
-    lines.append("```\n")
-    lines.append(f"{contracts_str}\n")
-    lines.append("```\n\n")
-
-    lines.append("#### 【分步改造指引】\n")
-    steps = task.get("steps", [])
-    if isinstance(steps, list):
-        for s in steps:
-            lines.append(f"{s}\n")
-    else:
-        lines.append(f"{steps}\n")
-    lines.append("\n")
-
-    lines.append("#### 【防御与边缘校验】\n")
-    checks = task.get("defensive_checks", [])
-    if isinstance(checks, list):
-        for c in checks:
-            lines.append(f"{c}\n")
-    else:
-        lines.append(f"{checks}\n")
-    lines.append("\n")
-
-    lines.append("#### 【DoD 验证命令】\n")
-    lines.append("```bash\n")
-    dod = task.get("dod_commands", "")
-    if isinstance(dod, list):
-        for d in dod:
-            lines.append(f"{d}\n")
-    else:
-        lines.append(f"{dod}\n")
-    lines.append("```\n\n---\n\n")
-
-    return "".join(lines)
 
 
 def _extract_task_detail(filepath: str, task_id: str) -> Dict[str, Any]:
@@ -676,7 +620,10 @@ def dev_tasks_status(
 
 @mcp.tool()
 def dev_tasks_propose(
-    workspace_root: str, task_file_name: str, tasks: List[Dict[str, Any]]
+    workspace_root: str,
+    task_file_name: str,
+    tasks: List[Dict[str, Any]],
+    mode: Literal["append", "overwrite", "upsert"] = "append",
 ) -> Dict[str, Any]:
     """Create or append standard development task items. Each task item must adhere to the six-core-field contract.
 
@@ -686,7 +633,15 @@ def dev_tasks_propose(
         workspace_root: Root path of the target workspace / 项目根目录绝对路径。
         task_file_name: Target task file name (e.g., '2026-09-13_feature.md') / 任务单文件名。
         tasks: List of task specifications conforming to the six core fields / 符合六大核心字段的任务字典列表。
+        mode: Writing mode ('append', 'overwrite', 'upsert') / 写入模式。
     """
+    if mode not in ("append", "overwrite", "upsert"):
+        return {
+            "created": False,
+            "errors": [f"Invalid mode '{mode}'. Must be one of: 'append', 'overwrite', 'upsert' / 非法 mode 参数"],
+            "message": f"Invalid mode '{mode}'",
+        }
+
     try:
         config = load_project_config(workspace_root)
     except Exception as e:
@@ -699,63 +654,36 @@ def dev_tasks_propose(
     os.makedirs(dev_tasks_dir, exist_ok=True)
     target_path = os.path.join(dev_tasks_dir, task_file_name)
 
-    all_errors = []
-    all_warnings = []
-
+    # 预校验每个任务的 id 补全
     for idx, t in enumerate(tasks, 1):
-        t_id = t.get("id") or f"{idx}"
-        t["id"] = t_id
-        res = validate_task_schema(t)
-        if not res.is_valid:
-            for err in res.errors:
-                all_errors.append(f"Task {t_id}: {err}")
-        for w in res.warnings:
-            all_warnings.append(f"Task {t_id}: {w}")
-
-    if all_errors:
-        return {
-            "created": False,
-            "errors": all_errors,
-            "warnings": all_warnings,
-            "message": "Task schema validation failed. Please fix according to errors and retry / 任务单校验未通过，请根据错误信息修正后重试。",
-        }
-
-    file_exists = os.path.isfile(target_path)
-    rendered_blocks = "".join(_render_task_markdown(t) for t in tasks)
-
-    if not file_exists:
-        header = [
-            f"# {os.path.splitext(task_file_name)[0]} Development Tasks / 开发任务单\n\n",
-            "> **Execution Guidelines for AI Models / 执行模型须知**\n",
-            "> - Strictly follow each task's [Step-by-Step Instructions / 分步改造指引] in sequential order\n",
-            "> - Do not modify files outside the declared task scope / 不得修改任务未涉及的文件\n",
-            "> - Preserve all existing comments and docstrings unless explicitly instructed / 保留所有现有注释和文档字符串\n",
-            "> - **Mandatory Unit Test Assertions / 改逻辑必加单测断言**：Append assertions in the test directory to prevent regressions\n",
-            "> - Upon starting a task, update its status to `🔨 执行中`; upon completion, update to `✔️ 已完成`\n\n",
-            f"- **Created Date / 创建日期**：{date.today().isoformat()}\n\n",
-            "---\n\n",
-            "## Task List & Status / 任务清单与状态\n\n",
-        ]
-        full_content = "".join(header) + rendered_blocks
-        with open(target_path, "w", encoding="utf-8") as f:
-            f.write(full_content)
-    else:
-        with open(target_path, "a", encoding="utf-8") as f:
-            f.write(rendered_blocks)
+        if not t.get("id"):
+            t["id"] = f"{idx}"
 
     try:
-        for t in tasks:
-            t_id = t.get("id") or "1"
-            register_proposal(workspace_root, task_id=str(t_id), md_path=target_path)
-    except Exception:
-        pass
+        res = write_task_file_guarded(
+            workspace_root=workspace_root,
+            task_file_path=target_path,
+            tasks_to_write=tasks,
+            mode=mode,
+        )
+    except Exception as e:
+        return {
+            "created": False,
+            "errors": [str(e)],
+            "message": f"Failed to propose tasks: {e} / 提交任务单失败: {e}",
+        }
 
+    written = res.get("written", [])
+    skipped = res.get("skipped", [])
     return {
         "created": True,
         "file_path": target_path,
-        "created_count": len(tasks),
-        "warnings": all_warnings,
-        "message": f"Successfully {'appended' if file_exists else 'created'} {len(tasks)} tasks in {target_path} / 成功{'追加' if file_exists else '创建'} {len(tasks)} 项任务至 {target_path}",
+        "created_count": len(written),
+        "mode": mode,
+        "written": written,
+        "skipped": skipped,
+        "warnings": [],
+        "message": f"Successfully executed '{mode}' for {len(written)} tasks in {target_path} / 成功在 {target_path} 执行 '{mode}' 写入 {len(written)} 项任务",
     }
 
 
@@ -2275,6 +2203,7 @@ async def dev_tasks_refine_spec(
     context_files: Optional[List[str]] = None,
     max_hops: int = 1,
     persist: bool = False,
+    task_file: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.
     Ensures complete Six Core Fields, concurrency boundary defenses, and executable DoD assertions.
@@ -2288,7 +2217,20 @@ async def dev_tasks_refine_spec(
         context_files: Optional seed files for AST exploration / 可选用于代码探索的种子文件列表。
         max_hops: Exploration depth (clamped to 0..3) / 拓扑探索跳数（最大为3）。
         persist: If True, atomically updates the task in the markdown file (Pending tasks only) / 是否将规约强化写回待确认任务单。
+        task_file: Optional target task file name or path when persist=True / 可选目标任务单文件名或路径。
     """
+    if persist:
+        if not task_file or not str(task_file).strip():
+            raise PersistTargetRequiredError(
+                "persist=True requires task_file parameter (task_file must be specified) / persist=True 必须提供 task_file 参数"
+            )
+        if not isinstance(draft_task, dict):
+            raise ValueError("draft_task must be a dictionary / draft_task 必须为字典对象")
+        if "id" not in draft_task and "task_id" not in draft_task:
+            raise TaskNotFoundError(
+                "draft_task must contain an 'id' or 'task_id' for persist=True / draft_task 必须包含 id 字段"
+            )
+
     if not isinstance(draft_task, dict):
         return {"ok": False, "error": "draft_task must be a dictionary / draft_task 必须为字典对象"}
 
@@ -2323,12 +2265,38 @@ async def dev_tasks_refine_spec(
         else:
             fallback_spec = raw_spec if raw_spec.strip() else f"### 任务 {task_id} ⬜ 待确认 — {title}\n"
         degraded_info = _degraded_card(reason="reviewer_not_configured", config=config)
+
+        persisted = False
+        persist_res = None
+        if persist:
+            resolved_tf = _resolve_task_file_path(workspace_root, task_file)
+            fallback_dict = dict(draft_task)
+            if raw_spec.strip():
+                parsed_from_raw = _parse_task_markdown_sections(fallback_spec)
+                for k, v in parsed_from_raw.items():
+                    if v and not fallback_dict.get(k):
+                        fallback_dict[k] = v
+            fallback_dict["id"] = task_id
+            fallback_dict["title"] = title
+            fallback_dict["status"] = STATUS_PENDING
+            persist_res = await asyncio.to_thread(
+                write_task_file_guarded,
+                workspace_root=workspace_root,
+                task_file_path=resolved_tf,
+                tasks_to_write=[fallback_dict],
+                mode="upsert",
+            )
+            persisted = True
+
         return {
             "ok": True,
+            "refined": True,
             "degraded": True,
             "task_id": task_id,
             "title": title,
             "refined_spec": fallback_spec,
+            "persisted": persisted,
+            "persist_result": persist_res,
             "validation": {
                 "is_valid": True,
                 "errors": [],
@@ -2406,12 +2374,28 @@ async def dev_tasks_refine_spec(
             parsed_dict["draft"] = True
         rendered_markdown = _render_task_markdown(parsed_dict)
 
+        persisted = False
+        persist_res = None
+        if persist:
+            resolved_tf = _resolve_task_file_path(workspace_root, task_file)
+            persist_res = await asyncio.to_thread(
+                write_task_file_guarded,
+                workspace_root=workspace_root,
+                task_file_path=resolved_tf,
+                tasks_to_write=[parsed_dict],
+                mode="upsert",
+            )
+            persisted = True
+
         return {
             "ok": True,
+            "refined": True,
             "degraded": not val_res.is_valid or not lint_res.passed,
             "task_id": task_id,
             "title": title,
             "draft": not lint_res.passed,
+            "persisted": persisted,
+            "persist_result": persist_res,
             "physical_lint": {
                 "passed": lint_res.passed,
                 "issues": [
@@ -3090,7 +3074,7 @@ async def dev_reviewer_consult(
             "1. 提交后台推演任务 (免任务单)：\n"
             f"   dev_reviewer_submit(workspace_root='{workspace_root}', query='{sample_q}...', mode='{mode}')\n"
             "2. 轮询进度或提取终态结果：\n"
-            f"   dev_reviewer_poll(workspace_root='{workspace_root}', job_id='<job_id>', session_id='{clean_sid}', raw_text=True)\n"
+            f"   dev_reviewer_poll(workspace_root='{workspace_root}', job_id='<job_id>', session_id='{clean_sid}', wait_max_s=25)\n"
         )
         handoff_prompt = (
             "审查引擎未配置或当前离线。请开启新会话并切换到旗舰 Reviewer 模型后重新提问；当前会话的实现模型不会、也不得代行架构审查职责。"

@@ -133,12 +133,12 @@ The DevTasks state machine defines strict valid transitions enforced by `state_m
 The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_COUNT`; code is authoritative, JSON snapshot is derived mirror evidence):
 
 1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
-2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status.
+2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status (supporting mode='append'|'overwrite'|'upsert').
 3. **`dev_tasks_confirm`**: Advances tasks to `[Confirmed]`, `[Skipped]`, or transitions them to `[Rework]`. Enforces Pre-Confirm audit gate policy on Tier-1 managed paths outside manifest lock, validating against verdicts ledger with exact 5-key blocking payload (`ok`, `reason`, `artifact_ref`, `audit_ref`, `parse_skipped_lines`) and lock-time `precondition_changed` re-validation.
 4. **`dev_tasks_checkout`**: Checks out the next confirmed task, sets its state to `[In Progress]`, captures a physical baseline snapshot, and provides step-by-step guidance.
 5. **`dev_tasks_complete`**: Submits a completed task, requiring DoD test command output, physical test assertion auditing, and physical scope reconciliation against the declared whitelist.
 6. **`dev_tasks_escalate`**: Awakens the Reviewer role with focused contextual snippets when encountering roadblocks.
-7. **`dev_tasks_refine_spec`**: Runs multi-turn architectural reasoning via `ReviewerClient`, streaming reasoning logs and enforcing the physical lint gate.
+7. **`dev_tasks_refine_spec`**: Runs multi-turn architectural reasoning via `ReviewerClient`, streaming reasoning logs, enforcing the physical lint gate, and optionally persisting refined task back to task file (`persist=True`, `task_file`).
 8. **`dev_tasks_promote_draft`**: Validates physical feasibility of a draft task and promotes it to formal `[Pending]` state.
 9. **`dev_tasks_archive`**: Retires closed tasks to `archive/` and increments the changelog.
 10. **`dev_tasks_set_bypass`**: Manages temporary time-bound bypass tokens with strict audit logging.
@@ -194,7 +194,9 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
     "workspace_root": "."
   },
   "dev_tasks_promote_draft": {},
-  "dev_tasks_propose": {},
+  "dev_tasks_propose": {
+    "mode": "append"
+  },
   "dev_tasks_reclaim": {
     "expected_generation": 0,
     "expected_holder_token": "",
@@ -205,7 +207,8 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
   "dev_tasks_refine_spec": {
     "context_files": null,
     "max_hops": 1,
-    "persist": false
+    "persist": false,
+    "task_file": null
   },
   "dev_tasks_set_bypass": {
     "action": "enable",

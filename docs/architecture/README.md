@@ -55,7 +55,9 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 │  Tier 3: Core Domain Governance Engine                           │
 │  (State Machine & Validators)                                    │
 │  • filelock-backed CAS atomic state transitions (state_machine)  │
+│  • Task status SSOT & fence-aware scanner (task_status.py)       │
 │  • Six-field schema validator (schema_validator.py)              │
+│  • Guarded atomic task revision & partition identity (task_writer)│
 │  • Physical feasibility lint gate (draft_lint)                   │
 │  • DoD output auditor (dod_guard)                                │
 │  • Manifest bounds & compaction (manifest.py)                    │
@@ -248,6 +250,8 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 |--------|------|----------------|-----------------|
 | `server.py` | T2 | FastMCP tool endpoint definitions; request routing; DoD output auditor (`dod_guard`) | Must not import vendor SDK directly; delegates to Tier 3/4 |
 | `state_machine.py` | T3 | CAS atomic state transitions backed by `filelock` | Single writer at a time; idempotent on repeated calls |
+| `task_status.py` | T3 | SSOT for 6 canonical statuses, pure ASCII sentinel `"?? UNKNOWN"`, fence-aware status extraction, and `is_task_file` predicate | Zero regex duplication; zero emoji hardcoding in guards |
+| `task_writer.py` | T3 | Lossless partition roundtrip, guarded task file writes (`write_task_file_guarded`) with directory confinement, pre-lock manifest check & atomic fsync | Single writer via FileLock; preserves BOM & CRLF; blocks status smuggling |
 | `schema_validator.py` | T3 | Six-field contract validation; physical feasibility lint gate (`draft_lint`) | No file writes; pure validation |
 | `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement; CAS TTL lease management (`manifest_lease`) | Single lock holder per task; lease expiration safety |
 | `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, unified async job state machine, tri-state union contract, 1KB non-terminal snapshot, raw_text projection, cancellation, log pin & retention quota | Durable atomic writes; memory-leak-free |
@@ -280,12 +284,18 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 ```
 server.py → state_machine.py   (read/write state)
 server.py → schema_validator.py (validate before write)
+server.py → task_writer.py     (guarded atomic propose/refine_spec persist)
+server.py → task_status.py     (task status SSOT)
 server.py → consultation.py    (Reviewer consult path)
 server.py → reviewer_engine.py (ReviewerClient factory)
 server.py → manifest.py        (task CRUD)
 server.py → code_explorer.py   (AST slice for refine_spec)
 server.py → reporting.py       (handoff card rendering & CHANGELOG append)
 server.py → tool_surface_constants.py (SSOT tool constants)
+
+task_writer.py → task_status.py (canonical statuses & extract_header_task_statuses)
+task_writer.py → path_guard.py  (directory confinement)
+task_writer.py → schema_validator.py (six-field format validation)
 
 reviewer_engine.py → adapters/* (vendor-specific HTTP)
 reviewer_engine.py → log_naming.py (session log paths)
