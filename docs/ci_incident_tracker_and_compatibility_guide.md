@@ -62,6 +62,7 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 | **INC-20260925-01** | 2026-09-25 | `23e08a8` / `main` (Run 36136603921) | Ubuntu 22.04 (Py 3.11, 3.12) | `AttributeError: module 'ctypes' does not have attribute 'windll'` | [案例 7](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror) | `8f97709` | ✅ 已闭环 |
 | **INC-20260925-02** | 2026-09-25 | `8f97709` / `main` (Run 36143945613) | Windows Server (Py 3.11) | `assert elapsed < 2.5` 超时测试偶发 Flaky (2.609s) | [案例 8](#案例-8-测试断言紧贴超时边界导致-ci-虚拟化宿主调度抖动偶发-flaky) | `pending` (Step 06) | ✅ 已闭环 |
 | **INC-20260930-01** | 2026-09-30 | `b19e981` / `main` (Run 36718049950) | Ubuntu 3.11, Windows 3.11 | `SyntaxError: f-string expression part cannot include a backslash` | [案例 9](#案例-9-python-311-与-312-pep-701-差异导致-f-string-表达式内反斜杠触发编译期-syntaxerror) | `pending` (Hotfix) | ✅ 已闭环 |
+| **CI-2026-10-21-AST-01** | 2026-10-21 | Task 1.1 / `main` | Cross-Platform | IDE 剥离 default 导致大模型主动传入 `raw_text=True` <!-- quench-prompt-surface:historical --> 破坏结构化契约 | [案例 10](#案例-10-ide-参数默认值剥离与-docstring-描述缺失引发大模型调用面漂移-ci-2026-10-21-ast-01) | `main` | ✅ 已闭环 |
 
 ---
 
@@ -445,5 +446,23 @@ foreach ($job in $jobs.jobs) {
 
 当 os.remove 返回 ENOENT 或 Windows winerror ∈ {2, 3} 时，视为目标文件已不存在，探测判定为 ok，不产生 residue。
 当 os.remove 返回 winerror ∈ {32, 33}（共享冲突）时，判定为 advisory 并保留 residue 路径以支持人工清理。
+
+---
+
+<!-- quench-prompt-surface:historical -->
+### 案例 10: IDE 参数默认值剥离与 docstring 描述缺失引发大模型调用面漂移 (CI-2026-10-21-AST-01)
+
+- **首次触发节点**: 本地及多端大模型在调用 `dev_reviewer_poll` 时偶发注入 `raw_text=True` <!-- quench-prompt-surface:historical -->，导致返回类型分叉为纯文本 Markdown 破坏后续结构化解析
+- **现象**:
+  1. <!-- quench-prompt-surface:historical --> 大模型在没有显式用户要求的情况下，在轮询推演任务时传入 `raw_text=True`；
+  2. 导致终端解析依赖 `dict` 的调用方崩溃抛出 `AttributeError` 或 `KeyError`。
+- **根因深度复盘与机制原理**:
+  1. **IDE 注入 System Prompt 剥离 default**: IDE 在将 MCP 工具注册给大模型时，部分环境会剥离 JSON Schema 中的 `default` 字段。
+  2. **Docstring 缺少标准 Google-style Args 块**: `server.py` 中的 `dev_reviewer_poll` 未写 `Args:` 参数注释，导致模型无法获知参数具体语义与推荐用法。
+  3. <!-- quench-prompt-surface:historical --> **文档与配置示例残留**: `docs/configuration.md` 中存在 `dev_reviewer_poll(..., raw_text=True)` 历史示例，诱导大模型模仿。
+- **加固方案 (多重闭环)**:
+  1. **物理移除类型分叉**: 彻底移除 `dev_reviewer_poll` 的 `raw_text` 形参，恒定返回强类型 `dict[str, Any]`。
+  2. **标准 Args 块补全**: 为函数补齐完整的 Google-style `Args:` 文档字符串。
+  3. **Prompt-Surface 门禁 (P1~P5)**: 引入 `scripts/check_prompt_surface.py` 静态门禁，严禁活跃文档与代码块出现残留参数，并受 pre-commit 守卫拦截。
 
 

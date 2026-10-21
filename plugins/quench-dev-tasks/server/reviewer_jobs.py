@@ -293,6 +293,7 @@ def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any
         if "findings" in clean_result and isinstance(clean_result["findings"], str):
             if len(clean_result["findings"]) > 40000:
                 clean_result["findings"] = clean_result["findings"][:40000]
+                clean_result["truncated"] = True
 
         usage = dict(clean_result.get("usage", {}))
 
@@ -341,16 +342,8 @@ def project_terminal(record: JobRecord, result: Optional[dict]) -> dict[str, Any
 
 def project_poll_result(
     snapshot: PollSnapshot,
-    *,
-    raw_text: bool = False,
-) -> Union[str, dict[str, Any]]:
-    """If raw_text is True and state is non-terminal, returns single-line canonical str.
-    Otherwise returns compact non-terminal dict or full terminal projection dict.
-    """
-    if raw_text:
-        tokens = snapshot.progress.approx_reasoning_tokens if snapshot.progress else 0
-        elapsed = snapshot.progress.elapsed_s if snapshot.progress else 0.0
-        return format_heartbeat_line(tokens, elapsed)
+) -> dict[str, Any]:
+    """Returns compact non-terminal dict projection."""
     return project_nonterminal(snapshot)
 
 
@@ -1180,21 +1173,16 @@ class ReviewerJobSupervisor:
     def project_poll_result(
         self,
         snapshot: PollSnapshot,
-        *,
-        raw_text: bool = False,
-    ) -> Union[str, dict[str, Any]]:
-        """If raw_text is True and state is non-terminal, returns single-line canonical str.
-        Otherwise returns compact non-terminal dict or full terminal projection dict.
-        """
-        return project_poll_result(snapshot, raw_text=raw_text)
+    ) -> dict[str, Any]:
+        """Returns compact non-terminal dict projection."""
+        return project_poll_result(snapshot)
 
     def poll(
         self,
         job_id: str,
         *,
         session_id: str,
-        raw_text: bool = False,
-    ) -> Union[str, dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Poll 只读零锁与极简白名单契约 (I5, I5-B, I5-C, AUTH)。"""
         val_id = validate_job_id(job_id)
         from consultation import sanitize_session_id
@@ -1218,20 +1206,7 @@ class ReviewerJobSupervisor:
                         res_dict = json.load(f)
                 except Exception:
                     pass
-            term = project_terminal(record, res_dict)
-            if raw_text:
-                if term["state"] == JobState.COMPLETED.value:
-                    findings = (term.get("result") or {}).get("findings", "")
-                    return findings if findings is not None else ""
-                deg_reason = term.get("degraded_reason") or "unknown"
-                log_p = term.get("log_path") or ""
-                return (
-                    f"### [Reviewer Consultation Degraded]\n"
-                    f"- State: {term['state']}\n"
-                    f"- Degraded Reason: {deg_reason}\n"
-                    f"- Log: `{log_p}`\n"
-                )
-            return term
+            return project_terminal(record, res_dict)
 
         # 非终态白名单投影
         elapsed = compute_elapsed_s(record)
@@ -1250,7 +1225,7 @@ class ReviewerJobSupervisor:
             log_ref=log_ref,
             progress=record.progress,
         )
-        return self.project_poll_result(snapshot, raw_text=raw_text)
+        return self.project_poll_result(snapshot)
 
     def progress_snapshot(self, job_id: str, *, session_id: str) -> Optional[JobProgress]:
         """纯读、无副作用、不跨 await 持锁。
@@ -1306,7 +1281,7 @@ class ReviewerJobSupervisor:
 
         if record.state in TERMINAL_STATES:
             # 终态幂等
-            return self.poll(job_id, session_id=session_id, raw_text=False)
+            return self.poll(job_id, session_id=session_id)
 
         with self._running_jobs_lock:
             handles = self._abort_handles.get(val_id)
@@ -1367,7 +1342,7 @@ class ReviewerJobSupervisor:
             except Exception:
                 pass
 
-        return self.poll(job_id, session_id=session_id, raw_text=False)
+        return self.poll(job_id, session_id=session_id)
 
     def reconcile_on_load(self) -> list[str]:
         """启动载入对账：

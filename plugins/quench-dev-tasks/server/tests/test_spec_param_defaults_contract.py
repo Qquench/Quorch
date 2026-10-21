@@ -183,13 +183,13 @@ def test_single_sentinel_identity_and_missing_detection(
 
     # Clone snapshot and remove one parameter's default
     corrupted_snapshot = json.loads(json.dumps(snapshot_data))
-    del corrupted_snapshot["dev_reviewer_poll"]["parameters"]["properties"]["raw_text"]["default"]
+    del corrupted_snapshot["dev_reviewer_poll"]["parameters"]["properties"]["wait_max_s"]["default"]
 
     diffs = compare_documented_with_snapshot(documented, corrupted_snapshot)
     assert len(diffs) == 1
     diff = diffs[0]
     assert diff.tool == "dev_reviewer_poll"
-    assert diff.param == "raw_text"
+    assert diff.param == "wait_max_s"
     assert diff.kind == "missing_in_snapshot"
     assert diff.snapshot is _MISSING
 

@@ -115,6 +115,90 @@ def evaluate_schema_check(
         return SchemaCheckOutcome.UNVERIFIABLE
 
 
+class PromptSurfaceOutcome(enum.Enum):
+    SKIP = "skip"          # 变更集未命中：零子进程，<50ms
+    PASS = "pass"          # rc == 0
+    VIOLATION = "violation" # rc == 1 → 阻断
+    UNVERIFIABLE = "unverifiable"  # rc == 2 / TimeoutExpired → 阻断（fail-closed）
+    GUARD_ERROR = "guard_error"    # 仅变更集获取失败 → fail-open
+
+
+PROMPT_SURFACE_TRIGGER_PATHS: Final[frozenset[str]] = frozenset({
+    "plugins/quench-dev-tasks/server/server.py",
+    "plugins/quench-dev-tasks/server/tool_surface_constants.py",
+    "scripts/check_prompt_surface.py",
+    "scripts/export_ide_schemas.py",
+    "docs/architecture/ide_tool_schemas.json",
+    "CHANGELOG.md",
+    "README.md",
+    "README_zh.md",
+    "docs/configuration.md",
+    "dev_tasks_mcp_specification.md",
+    "docs/architecture/README.md",
+    "plugins/quench-dev-tasks/skills/dev-tasks-workflow/SKILL.md",
+    "plugins/quench-dev-tasks/rules/dev-tasks-discipline.md",
+    "docs/ci_incident_tracker_and_compatibility_guide.md",
+})
+
+
+def should_run_prompt_surface_check(changed_paths: Sequence[str]) -> bool:
+    """Determine if any of the changed paths intersect with PROMPT_SURFACE_TRIGGER_PATHS or are markdown files."""
+    if not changed_paths:
+        return False
+    normalized_triggers = {p.replace("\\", "/").strip().lstrip("./") for p in PROMPT_SURFACE_TRIGGER_PATHS}
+    for p in changed_paths:
+        norm = p.replace("\\", "/").strip().lstrip("./")
+        if norm.endswith(".md") or norm in normalized_triggers:
+            return True
+    return False
+
+
+def evaluate_prompt_surface_check(
+    changed_paths: Optional[Sequence[str]], *, repo_root: Path
+) -> PromptSurfaceOutcome:
+    """Evaluate Prompt-Surface contract gate (P1~P5). Fail-closed on violation/error."""
+    if changed_paths is None:
+        return PromptSurfaceOutcome.GUARD_ERROR
+
+    if not should_run_prompt_surface_check(changed_paths):
+        return PromptSurfaceOutcome.SKIP
+
+    checker_script = repo_root / "scripts" / "check_prompt_surface.py"
+    if not checker_script.is_file():
+        try:
+            scripts_dir = repo_root / "scripts"
+            if str(scripts_dir) not in sys.path:
+                sys.path.insert(0, str(scripts_dir))
+            import check_prompt_surface
+            rc = check_prompt_surface.main(["--check", "--workspace", str(repo_root)])
+            if rc == 0:
+                return PromptSurfaceOutcome.PASS
+            elif rc == 1:
+                return PromptSurfaceOutcome.VIOLATION
+            else:
+                return PromptSurfaceOutcome.UNVERIFIABLE
+        except Exception:
+            return PromptSurfaceOutcome.UNVERIFIABLE
+
+    try:
+        res = subprocess.run(
+            [sys.executable, str(checker_script), "--check", "--workspace", str(repo_root)],
+            cwd=str(repo_root),
+            capture_output=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return PromptSurfaceOutcome.PASS
+        elif res.returncode == 1:
+            return PromptSurfaceOutcome.VIOLATION
+        else:
+            return PromptSurfaceOutcome.UNVERIFIABLE
+    except subprocess.TimeoutExpired:
+        return PromptSurfaceOutcome.UNVERIFIABLE
+    except Exception:
+        return PromptSurfaceOutcome.UNVERIFIABLE
+
+
 def _extract_yaml_field(content: str, field: str) -> Optional[str]:
     """从 YAML 内容中正则提取单行标量字段值（避免依赖 PyYAML）。"""
     pattern = re.compile(
@@ -415,6 +499,22 @@ def main() -> int:
         return 1
     elif schema_outcome == SchemaCheckOutcome.GUARD_ERROR:
         print("⚠️ [Quench Guard] 无法获取暂存区文件，Schema 门禁降级放行（Fail-Open）。", file=sys.stderr)
+
+    # 执行 Prompt-Surface 契约硬门禁判定（独立硬门禁，不受 is_antigravity_environment 豁免）
+    prompt_surface_outcome = evaluate_prompt_surface_check(staged_files, repo_root=Path(workspace_root))
+    if prompt_surface_outcome == PromptSurfaceOutcome.VIOLATION:
+        print("\n" + "=" * 65, file=sys.stderr)
+        print("🛑 \033[91m[Quench Guard] Git Commit 物理拦截：Prompt Surface 契约违规（P1~P5 门禁拦截）！\033[0m", file=sys.stderr)
+        print("=" * 65, file=sys.stderr)
+        print("💡 解决指引: 请运行 `python scripts/check_prompt_surface.py --check` 查看详细违规并修正。\n", file=sys.stderr)
+        return 1
+    elif prompt_surface_outcome == PromptSurfaceOutcome.UNVERIFIABLE:
+        print("\n" + "=" * 65, file=sys.stderr)
+        print("🛑 \033[91m[Quench Guard] Git Commit 物理拦截：Prompt Surface 门禁执行失败或超时（Fail-Closed 阻断）！\033[0m", file=sys.stderr)
+        print("=" * 65, file=sys.stderr)
+        return 1
+    elif prompt_surface_outcome == PromptSurfaceOutcome.GUARD_ERROR:
+        print("⚠️ [Quench Guard] 无法获取暂存区文件，Prompt Surface 门禁降级放行（Fail-Open）。", file=sys.stderr)
 
     # 查找执行中任务
     active_task = find_active_task(dev_tasks_dir)

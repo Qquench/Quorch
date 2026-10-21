@@ -396,3 +396,16 @@ def test_max_log_ref_chars_within_install_reserve_ast_bound():
     assert floor <= MAX_LOG_REF_CHARS <= inst._LOG_ARTIFACT_RESERVE_CHARS
 
 
+def test_prompt_surface_checker_script_exists_and_referenced_by_guard():
+    """断言 check_prompt_surface.py 脚本存在且被 git_pre_commit_guard 物理引用。"""
+    repo_root = PLUGIN_ROOT.parent.parent
+    checker_py = repo_root / "scripts" / "check_prompt_surface.py"
+    assert checker_py.is_file(), f"Missing script: {checker_py}"
+
+    guard_py = PLUGIN_ROOT / "scripts" / "git_pre_commit_guard.py"
+    assert guard_py.is_file(), f"Missing guard: {guard_py}"
+    guard_text = guard_py.read_text(encoding="utf-8")
+    assert "check_prompt_surface.py" in guard_text, "git_pre_commit_guard must reference check_prompt_surface.py"
+    assert "evaluate_prompt_surface_check" in guard_text, "git_pre_commit_guard must implement evaluate_prompt_surface_check"
+
+

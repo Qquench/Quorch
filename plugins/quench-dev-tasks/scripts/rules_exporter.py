@@ -178,6 +178,57 @@ class RulesExporter:
             "cursor_mdc": out_mdc,
         }
 
+    @classmethod
+    def check_all(
+        cls,
+        project_root: str,
+        discipline_path: str | None = None,
+    ) -> int:
+        """只读校验现有 Cursor 规则文件是否与源文件一致。零写盘，无漂移或未启用返回 0，内容漂移返回 1。"""
+        root = os.path.abspath(project_root)
+        legacy_path = os.path.join(root, ".cursorrules")
+        mdc_path = os.path.join(root, ".cursor", "rules", "quench-dev-tasks.mdc")
+
+        drifted = False
+        rules_text = cls.extract_condensed_rules(discipline_path)
+
+        if os.path.isfile(legacy_path):
+            expected_legacy = rules_text + "\n"
+            try:
+                with open(legacy_path, "r", encoding="utf-8", errors="ignore") as f:
+                    actual_legacy = f.read()
+                if actual_legacy != expected_legacy:
+                    sys.stderr.write(f"❌ Cursor rules 内容漂移: {legacy_path}\n")
+                    drifted = True
+            except Exception as e:
+                sys.stderr.write(f"❌ 读取 Cursor rules 失败 ({legacy_path}): {e}\n")
+                drifted = True
+
+        if os.path.isfile(mdc_path):
+            expected_mdc = (
+                "---\n"
+                "description: Quench 任务治理体系开发纪律与代码管控规范\n"
+                'globs: "*"\n'
+                "alwaysApply: true\n"
+                "---\n\n"
+                f"{rules_text}\n"
+            )
+            try:
+                with open(mdc_path, "r", encoding="utf-8", errors="ignore") as f:
+                    actual_mdc = f.read()
+                if actual_mdc != expected_mdc:
+                    sys.stderr.write(f"❌ Cursor MDC rules 内容漂移: {mdc_path}\n")
+                    drifted = True
+            except Exception as e:
+                sys.stderr.write(f"❌ 读取 Cursor MDC rules 失败 ({mdc_path}): {e}\n")
+                drifted = True
+
+        if drifted:
+            return 1
+
+        print("✅ Cursor 规则文件只读校验通过（无漂移或未启用）")
+        return 0
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -200,8 +251,19 @@ def main():
         action="store_true",
         help="若已有规则文件存在，强制覆盖写入",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="只读校验现有规则文件是否漂移（零写盘）",
+    )
 
     args = parser.parse_args()
+    if args.check:
+        return RulesExporter.check_all(
+            project_root=args.project_root,
+            discipline_path=args.discipline_path,
+        )
+
     results = RulesExporter.export_all(
         project_root=args.project_root,
         discipline_path=args.discipline_path,

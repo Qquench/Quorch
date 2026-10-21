@@ -99,7 +99,7 @@ The Quench DevTasks MCP Server exposes 16 specialized tools (full specification 
 | `dev_tasks_refine_spec` | Refine draft spec with AST analysis & reasoning | Upgrading drafts into executable contracts |
 | `dev_tasks_promote_draft`| Lint physical feasibility and promote draft | Promoting verified drafts to pending queue |
 | `dev_reviewer_submit` | Submit async Reviewer background job | Long-running deep architectural reasoning |
-| `dev_reviewer_poll` | Poll async job status (structured dict or optional raw-text projection) | Polling reasoning progress & verdict |
+| `dev_reviewer_poll` | Poll async job status (structured dict with 1KB snapshot) | Polling reasoning progress & verdict |
 | `dev_reviewer_cancel` | Deterministically cancel in-flight async job | Aborting in-progress background jobs |
 | `dev_tasks_set_bypass` | Activate time-bounded bypass token | Urgent hotfixes, documentation, typos |
 | `dev_tasks_archive` | Archive closed tasks and update changelog | All tasks in file closed |

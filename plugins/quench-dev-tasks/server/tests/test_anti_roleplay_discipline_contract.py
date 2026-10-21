@@ -164,16 +164,11 @@ def test_inv3_degraded_poll_projection_enforces_anti_roleplay(tmp_path):
         updates={"degraded_reason": "reviewer_not_configured"},
     )
 
-    # 1. raw_text=False: findings 必为空字符串
-    dict_res = supervisor.poll(rec.job_id, session_id="anti_roleplay_sess", raw_text=False)
+    # 1. 结构化返回: findings 必为空字符串 (INV-3)
+    dict_res = supervisor.poll(rec.job_id, session_id="anti_roleplay_sess")
     assert dict_res["result"]["status"] == "degraded"
     assert dict_res["result"]["findings"] == ""
     assert dict_res["degraded_reason"] == "reviewer_not_configured"
-
-    # 2. raw_text=True: 必为降级卡片，绝非审查分析正文
-    text_res = supervisor.poll(rec.job_id, session_id="anti_roleplay_sess", raw_text=True)
-    assert "### [Reviewer Consultation Degraded]" in text_res
-    assert "reviewer_not_configured" in text_res
 
 
 @pytest.mark.anyio

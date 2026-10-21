@@ -3,6 +3,12 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-21] 2026-10-21_dev_reviewer_poll_slimming_and_prompt_surface.md
+
+<!-- quench-prompt-surface:historical -->
+- **Task 1.1**: 物理移除 `dev_reviewer_poll` 的 `raw_text` 双投影并恢复单一结构化返回契约 (Breaking Change: 彻底移除 `raw_text` 形参，统一收敛为单一返回类型 `dict[str, Any]`，补全 Google-style Args: 块并固化 40k 字符 findings 截断断言与 rules_exporter --check 只读校验)。
+- **Task 1.2**: 新增 Prompt-Surface 契约门禁（P1~P5），防止 docstring / 文档示例 / IDE schema 再次漂移 (引入纯 AST 门禁 `scripts/check_prompt_surface.py`，覆盖 docstring Args: 完备性、IDE 快照参数描述长度、活文档代码块清洗、Markdown 代码块未知参数检测与历史白名单豁免纪律，并接入 `git_pre_commit_guard.py` 提交物理拦截)。
+
 ## [2026-10-21] 2026-10-21_ci_parity_and_preflight_fix.md
 
 - **Task 1.1**: TP-3 覆盖扩张授权下沉为文件级并派生 token 投影（R1 修订）
@@ -260,7 +266,7 @@ Unlike real-time specification documents (which reflect only the active design),
   - Replaced ad-hoc raw API scripts with standard MCP and CLI interfaces.
 - **Task 4.5**: 异步心跳格式 SSOT 贯通、Poll 紧凑信封/纯文本投射、统一纯英文展示与无效推送彻底清除
   - Implemented pure function `format_heartbeat_line` SSOT returning `[Reviewer thinking: {tokens} tokens | {elapsed_s:.1f}s]`;
-  - Added `raw_text=True` non-terminal poll projection directly returning clean single-line strings in FastMCP text blocks;
+  - Added `raw_text=True` <!-- quench-prompt-surface:historical --> non-terminal poll projection directly returning clean single-line strings in FastMCP text blocks;
   - Added `wait_max_s` long polling (0–25s) suspending execution until status transitions;
   - Cleaned up obsolete push channels in `AdaptiveHeartbeatSink` and aligned with Pull Model.
 

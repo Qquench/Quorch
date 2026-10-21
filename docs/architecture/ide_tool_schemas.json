@@ -8,12 +8,15 @@
       "additionalProperties": false,
       "properties": {
         "job_id": {
+          "description": "Target job ID to cancel / 待取消的任务ID。",
           "type": "string"
         },
         "session_id": {
+          "description": "Caller session ID for multi-session authorization / 会话隔离标识符。",
           "type": "string"
         },
         "workspace_root": {
+          "description": "Root path of the target workspace / 项目根目录绝对路径。",
           "type": "string"
         }
       },
@@ -26,25 +29,25 @@
     }
   },
   "dev_reviewer_poll": {
-    "description": "Poll status or result of a background Reviewer task.\nEnforces 1KB non-terminal snapshot contract.\n\n轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。\n默认 raw_text=False 返回结构化 1KB 极简快照与终态折叠字典（防大文本刷屏）；\n可选 raw_text=True 纯文本单行心跳输出与终态直出 Markdown，支持 wait_max_s 服务端长轮询。",
+    "description": "Poll status or result of a background Reviewer task.\nEnforces 1KB non-terminal snapshot contract.\n\n轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，恒定返回结构化字典。",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "job_id": {
+          "description": "Target job ID to poll / 待轮询的任务ID。",
           "type": "string"
         },
-        "raw_text": {
-          "default": false,
-          "type": "boolean"
-        },
         "session_id": {
+          "description": "Caller session ID for multi-session authorization / 会话隔离标识符。",
           "type": "string"
         },
         "wait_max_s": {
           "default": 0,
+          "description": "Server-side long polling wait timeout in seconds (0-25) / 服务端长轮询最大挂起等待秒数。",
           "type": "integer"
         },
         "workspace_root": {
+          "description": "Root path of the target workspace / 项目根目录绝对路径。",
           "type": "string"
         }
       },
@@ -73,7 +76,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Optional list of relevant files for architectural context / 可选重点参考文件列表。"
         },
         "idempotency_key": {
           "anyOf": [
@@ -84,17 +88,21 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Optional idempotency key to prevent duplicate submissions / 可选幂等键以防止重复提交。"
         },
         "max_hops": {
           "default": 1,
+          "description": "AST exploration depth for context expansion (0-3) / 拓扑探索跳数（最大为3）。",
           "type": "integer"
         },
         "mode": {
           "default": "evaluate",
+          "description": "Consultation mode ('critique', 'evaluate', 'brainstorm', 'audit') / 审查咨询模式。",
           "type": "string"
         },
         "query": {
+          "description": "Review or consultation query content / 待推演或咨询的问题内容。",
           "type": "string"
         },
         "session_id": {
@@ -106,9 +114,11 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Optional session UUID for multi-session isolation / 可选多会话隔离标识。"
         },
         "workspace_root": {
+          "description": "Root path of the target workspace / 项目根目录绝对路径。",
           "type": "string"
         }
       },

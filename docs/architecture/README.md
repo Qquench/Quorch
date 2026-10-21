@@ -179,12 +179,12 @@ Quench establishes a unified asynchronous Reviewer execution path, converging al
                            │
        ┌───────────────────┴───────────────────┐
        ▼ (in-flight)                           ▼ (terminal)
-dev_reviewer_poll()                     dev_reviewer_poll(raw_text=False)
-[Reviewer thinking: 12.3s | 1,234 tokens] Full structured verdict
-(Direct Markdown or 1KB snapshot)        (40k char budget cap dict)
+dev_reviewer_poll()                     dev_reviewer_poll()
+Compact 1KB non-terminal snapshot       Full structured verdict
+(State, retry-after, progress)          (40k char budget cap dict)
 ```
 
-- **Clean Raw-Text Projection**: `dev_reviewer_poll` returns a structured contract dictionary and 1KB non-terminal snapshot by default (code is authoritative, JSON snapshot is derived mirror evidence; see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)). Passing `raw_text=True` returns a canonical single-line string (`[Reviewer thinking: ...s | ... tokens]`) in in-flight states and directly returns findings Markdown upon completion.
+- **Structured-Only Return Contract**: `dev_reviewer_poll` returns a structured contract dictionary in all states (a compact 1KB non-terminal snapshot during in-flight states, and a complete structured dictionary capped by 40k char findings budget upon terminal states; code is authoritative, JSON snapshot is derived mirror evidence; see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)).
 - **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
 - **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (range 0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops (see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)).
 - **Snapshot Drift Gate Policy**: CI strictly executes `python scripts/export_ide_schemas.py --check` (read-only verification); `--write` is strictly reserved for local developer execution upon intentional changes, and any snapshot diff requires Reviewer approval. Pre-commit guard monitors `SCHEMA_TRIGGER_PATHS` (`plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/tool_surface_constants.py`, `scripts/export_ide_schemas.py`, `docs/architecture/ide_tool_schemas.json`) and blocks drift fail-closed.
@@ -221,6 +221,16 @@ Quench enforces a bifurcated test execution contract designed for fast developer
      - **Sample Variance Guard**: Sample Coefficient of Variation ($CV = \sigma / \mu \le 15\%$ with $ddof=1$ sample Bessel correction) with bounded 1-round retry (`MAX_CV_RETRY_ROUNDS = 1`).
      - **Dual-Layer Anti-Reentrancy Protection**: Subprocess isolation with `QUENCH_TEST_DURATION_BENCH_ACTIVE=quench-bench-v1` magic-value environment guard plus `--tier2` runner `--deselect` on contract test harness, preventing recursive test invocation or timing self-pollution.
      - **Self-Repository Anchor**: Validates workspace root contains core Quench marker files (`docs/architecture/README.md` and `.agents/quench_stack.yaml`), failing closed in untrusted directories.
+
+### 3.6 Prompt-Surface Contract Gate (P1~P5 AST Enforcement)
+
+To permanently guard against model prompt surface drift, IDE schema divergence, and stale documentation call examples, Quench implements `scripts/check_prompt_surface.py`:
+- **P1 (Docstring Completeness)**: AST verification guaranteeing all FastMCP tools have complete Google-style `Args:` sections.
+- **P2 (Snapshot Freshness & Descriptions)**: Asserts envelope metadata freshness and enforces that every tool parameter in `docs/architecture/ide_tool_schemas.json` has an informative description (≥ 8 chars).
+- **P3 (Live Documentation Hygiene)**: Rejects deprecated parameters in live documentation code blocks.
+- **P4 (Workspace Example Call Legality)**: AST check ensuring all markdown Python code fences call MCP tools with valid keywords, protected by R2 anti-self-lock exclusions (`docs/dev_tasks/`, `docs/archive/`).
+- **P5 (Historical Allowlist Exemption Discipline)**: Strictly enforces line-level exemption markers (`<!-- quench-prompt-surface:historical -->`) for audited historical references in `CHANGELOG.md` and compatibility guides.
+- **Pre-commit Guard Integration**: Physical intercept in `git_pre_commit_guard.py` before any commit touches code or documentation.
 
 ---
 

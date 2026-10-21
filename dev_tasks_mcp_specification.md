@@ -146,7 +146,7 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
 12. **`dev_tasks_reclaim`**: CAS-guaranteed zombie task reclamation with dual-process contention safety and monotonic generation increments.
 13. **`dev_tasks_export_handoff_card`**: Generates a standard markdown Reviewer handoff card for a task.
 14. **`dev_reviewer_submit`**: Submits an asynchronous long-running Reviewer consultation job with pre-flight fail-closed sandbox checks & context truncation, detached background worker execution, persistent `JobRecord`, and configurable consultation mode (see §4.1).
-15. **`dev_reviewer_poll`**: Polls asynchronous Reviewer job status and retrieves results. Enforces strict tri-state discriminated union return contract (`state` discriminator: A. COMPLETED, B. FAILED/CANCELLED/ORPHANED with degraded findings="", C. QUEUED/RUNNING/CANCELLED_PENDING_REAP with 1KB snapshot and retry-after). Returns a compact 1KB non-terminal snapshot and structured contract dictionary in terminal states by default (preventing large Markdown dumps in UI), while optional raw-text projection returns a single-line canonical string (`[Reviewer thinking: ...s | ... tokens]`) in non-terminal states and directly returns findings Markdown in terminal states. Supports long polling with monotonic deadline and sleep lower bound (0.05s) to eliminate busy waiting hot-spin loops (see §4.1).
+15. **`dev_reviewer_poll`**: Polls asynchronous Reviewer job status and retrieves results. Enforces strict tri-state discriminated union return contract (`state` discriminator: A. COMPLETED, B. FAILED/CANCELLED/ORPHANED with degraded findings="", C. QUEUED/RUNNING/CANCELLED_PENDING_REAP with 1KB snapshot and retry-after). Enforces structured-only return contract returning a compact 1KB non-terminal snapshot or structured contract dictionary in terminal states (preventing large Markdown dumps in UI). Supports long polling with monotonic deadline and sleep lower bound (0.05s) to eliminate busy waiting hot-spin loops (see §4.1).
 16. **`dev_reviewer_cancel`**: Deterministically cancels an in-flight async Reviewer job, aborting network transfer and retaining token accounting.
 
 ### 4.1 Parameter Defaults SSOT Reference (Machine-Readable Contract)
@@ -156,7 +156,6 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
 {
   "dev_reviewer_cancel": {},
   "dev_reviewer_poll": {
-    "raw_text": false,
     "wait_max_s": 0
   },
   "dev_reviewer_submit": {
@@ -225,6 +224,16 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
 }
 ```
 <!-- QUENCH-PARAM-DEFAULTS-END -->
+ 
+### 4.2 Prompt-Surface Contract Gate (P1~P5)
+
+To guarantee that language model interfaces, IDE prompt surfaces, documentation code fences, and schema snapshots remain in 100% synchronization without behavioral drift, Quench enforces an automated static AST gate (`scripts/check_prompt_surface.py`):
+
+1. **P1 (Docstring & Args: Completeness)**: AST verification ensuring all FastMCP tools have complete Google-style `Args:` sections with non-empty descriptions (>= 8 characters) covering all signature parameters.
+2. **P2 (Schema Snapshot Freshness & Descriptions)**: Envelope metadata validation against `tool_surface_constants` and verification that every parameter in `docs/architecture/ide_tool_schemas.json` has an explicit description.
+3. **P3 (Live Documentation Call Keyword Sanitation)**: Zero occurrences of deprecated or removed parameters in live documentation code blocks.
+4. **P4 (Workspace Example Call Legality)**: AST scanning of all Markdown python code fences across the repository to verify that all MCP tool calls use only valid, currently defined keyword parameters (excluding `docs/dev_tasks/` and `docs/archive/` per R2 anti-self-lock).
+5. **P5 (Historical Allowlist Exemption Discipline)**: Preserves historical audit records in `CHANGELOG.md` and compatibility guides while strictly requiring explicit line-level exemption markers (`<!-- quench-prompt-surface:historical -->`).
 
 ---
 

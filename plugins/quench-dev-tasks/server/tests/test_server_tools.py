@@ -393,25 +393,27 @@ def test_registered_tools_count_and_list():
 
 
 def test_reviewer_tools_signature_defaults_and_contracts():
-    """断言 dev_reviewer_submit 默认 mode='evaluate'，dev_reviewer_poll 默认 raw_text=False。"""
+    """断言 dev_reviewer_submit 默认 mode='evaluate'，dev_reviewer_poll 已移除 raw_text 并默认 wait_max_s=0。"""
     import inspect
     sig_submit = inspect.signature(server.dev_reviewer_submit)
     assert sig_submit.parameters["mode"].default == "evaluate"
 
-    sig_poll = inspect.signature(server.dev_reviewer_poll)
-    assert sig_poll.parameters["raw_text"].default is False
+    fn_poll = getattr(server.dev_reviewer_poll, "fn", server.dev_reviewer_poll)
+    sig_poll = inspect.signature(fn_poll)
+    assert "raw_text" not in sig_poll.parameters
+    assert sig_poll.parameters["wait_max_s"].default == 0
 
 
 @pytest.mark.anyio
 async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
-    """断言 dev_reviewer_poll 默认 raw_text=False 返回契约 dict，显式 raw_text=True 直出 Markdown。"""
+    """断言 dev_reviewer_poll 恒定返回契约 dict，显式传入 raw_text=True 被底层函数拒绝抛出 TypeError。"""
     from reviewer_jobs import ReviewerJobSupervisor, JobState, _durable_write_json, POLL_TERMINAL_FIELDS
 
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
     rec = supervisor.submit({"query": "q", "session_id": "poll_tool_test"})
 
-    # 1. 非终态默认 raw_text=False 返回 6 字段字典（防止大卡片展开）
+    # 1. 非终态返回 6 字段字典（防止大卡片展开）
     non_term_dict = await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
@@ -420,17 +422,20 @@ async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
     assert isinstance(non_term_dict, dict)
     assert non_term_dict["state"] == "QUEUED"
 
-    # 2. 非终态显式 raw_text=True 返回心跳字符串
-    non_term_res = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="poll_tool_test",
-        raw_text=True,
-    )
-    assert isinstance(non_term_res, str)
-    assert non_term_res.startswith("[Reviewer thinking:")
+    # 2. 物理断言：锚定在 dev_reviewer_poll.fn 上传入未知参数 raw_text=True 抛出 TypeError
+    fn_poll = getattr(server.dev_reviewer_poll, "fn", server.dev_reviewer_poll)
+    with pytest.raises(TypeError) as excinfo:
+        await fn_poll(
+            workspace_root=ws,
+            job_id=rec.job_id,
+            session_id="poll_tool_test",
+            raw_text=True,
+        )
+    err_msg = str(excinfo.value)
+    assert "raw_text" in err_msg or "unexpected keyword argument" in err_msg
+    assert "'FunctionTool' object is not callable" not in err_msg
 
-    # 3. 终态 COMPLETED: 默认 raw_text=False 严格返回完整结构化字典，且绝无 reasoning 泄露
+    # 3. 终态 COMPLETED: 严格返回完整结构化字典，且绝无 reasoning 泄露
     res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
     _durable_write_json(res_path, {"verdict": "PASS", "findings": "### Strategic Finding\n- All good.", "usage": {"total_tokens": 120}})
     supervisor._cas_transition(
@@ -451,20 +456,13 @@ async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
     assert term_res_dict["state"] == "COMPLETED"
     assert "reasoning" not in term_res_dict["result"]
     assert "raw_reasoning" not in term_res_dict["result"]
-
-    # 4. 终态 COMPLETED: 显式 raw_text=True 直接返回 Markdown findings
-    term_res_text = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="poll_tool_test",
-        raw_text=True,
-    )
-    assert term_res_text == "### Strategic Finding\n- All good."
+    assert term_res_dict["result"]["verdict"] == "PASS"
+    assert term_res_dict["result"]["findings"] == "### Strategic Finding\n- All good."
 
 
 @pytest.mark.anyio
 async def test_reviewer_poll_schema_unchanged():
-    """断言 dev_reviewer_poll 参数 schema 逐字节相等，ctx 绝不出现在 properties 中 (K1 / B4)。"""
+    """断言 dev_reviewer_poll 参数 schema 中 raw_text 已移除，其余属性完备 (K1 / B4)。"""
     tool = await server.mcp.get_tool("dev_reviewer_poll")
     params = tool.parameters
     assert params["type"] == "object"
@@ -475,23 +473,22 @@ async def test_reviewer_poll_schema_unchanged():
         "job_id",
         "session_id",
         "wait_max_s",
-        "raw_text",
     }
     assert params["properties"]["wait_max_s"]["default"] == 0
-    assert params["properties"]["raw_text"]["default"] is False
+    assert "raw_text" not in params["properties"]
     assert params["required"] == ["workspace_root", "job_id", "session_id"]
 
 
 @pytest.mark.anyio
 async def test_reviewer_poll_positional_compat(tmp_path):
-    """断言位置参数调用 (ws, jid, sid, 25, False) 正确绑定 wait_max_s 与 raw_text，不被 ctx 劫持 (B1)。"""
+    """断言位置参数调用 (ws, jid, sid, 0) 正确绑定 wait_max_s，不被 ctx 劫持 (B1)。"""
     from reviewer_jobs import ReviewerJobSupervisor
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
     rec = supervisor.submit({"query": "q", "session_id": "pos_test"})
 
-    # wait_max_s=0, raw_text=False 作为位置参数
-    res = await server.dev_reviewer_poll(ws, rec.job_id, "pos_test", 0, False)
+    # wait_max_s=0 作为第 4 个位置参数
+    res = await server.dev_reviewer_poll(ws, rec.job_id, "pos_test", 0)
     assert isinstance(res, dict)
     assert res["state"] == "QUEUED"
 

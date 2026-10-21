@@ -65,7 +65,7 @@ AI 编程助手显著提升了编码效率，但在复杂的真实工程实践�
 - **双模型逻辑角色解耦**：90% 的日常编码由轻量高敏捷模型（`Runner`）执行；高阶推理模型（`Reviewer`）仅在任务规划、架构复核与遇到重大冲突时委派介入，大幅节省旗舰算力配额。
 - **厂商中立 Reviewer 审查引擎 (`ReviewerClient`)**：基于声明式 `PROVIDER_PRESETS` 注册表的通用中立架构，支持 OpenAI、DeepSeek（流式思维链与 Prompt Cache 计费感知）、Ollama 本地全离线模型、vLLM 高性能端点、通用代理网关、IDE 内置子代理及 Manual 优雅回退链，并受源码级静态中立性扫描闸门守护。
 - **Reviewer 异步推演任务制 (`dev_reviewer_submit`, `dev_reviewer_poll`, `dev_reviewer_cancel`)**：将长耗时复杂架构推演任务解耦为常驻后台 Worker，具备持久化状态安全落盘、确定性主动取消终止、1KB 严格非终态白名单契约与 `wait_max_s` 服务端长轮询挂起等待。
-- **清爽单行纯文本心跳投射**：非终态轮询支持 `raw_text=True` 直接透传单行纯文本进度字串（`[Reviewer thinking: 1,234 tokens | 12.3s]`），彻底消灭多层嵌套大 JSON 弹窗刷屏与上下文膨胀。
+- **单一结构化返回契约**：轮询结果恒定返回结构化字典，严格遵循 1KB 极简非终态快照或终态审计判定字典（上限 40,000 字符），杜绝类型分叉与表现层歧义。
 - **免任务单即时架构咨询 (`dev_reviewer_submit` / `dev_reviewer_poll`)**：支持无任务单绑定的随性红队挑刺 (`critique`)、方案选型矩阵 (`evaluate`)、架构头脑风暴 (`brainstorm`) 与合规审计 (`audit`)，统一基于异步任务主通路独立运行，自带只读沙箱守卫与字节级稳定前缀缓存。
 - **严格出口单一化与 AST 防旁路静态门禁**：通过 `scripts/check_no_api_bypass.py` 静态代码 AST 扫描，硬性断绝任何跳过 `ReviewerClient` 编写临时脚本偷调模型 API 的旁路通道。
 - **严格防角色扮演治理红线**：从纪律规则与工具协议上杜绝主模型在审查要求下自作主张或伪装 Reviewer；在引擎未配置或异常断线时统一输出 `findings == ""` 的结构化降级卡片。
@@ -130,7 +130,7 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 | **草案与规约强化** | `dev_tasks_refine_spec` | 基于 AST 代码探查与高阶推理大脑强化任务规约 | 将粗粒度草案升级为可执行契约 |
 | | `dev_tasks_promote_draft`| 实施物理可行性 Lint 门禁（防路径穿越、语法 dry-run）并晋升为待执行 | 将推演完毕的草案纳入待领队列 |
 | **架构审查与咨询** | `dev_reviewer_submit` | 提交异步 Reviewer 推演任务，常驻后台 Worker 独立运行 | 发起耗时较长或即席的深度长推演架构审查 |
-| | `dev_reviewer_poll` | 轮询异步任务进度或结果，支持单行纯文本投射与长轮询挂起 | 定期探查推演进展、拉取最终审查裁定 |
+| | `dev_reviewer_poll` | 轮询异步任务进度或结果，强约束 1KB 极简快照与结构化裁定 | 定期探查推演进展、拉取最终审查裁定 |
 | | `dev_reviewer_cancel` | 确定性主动取消执行中的异步推演任务，中止模型网络传输 | 发现方案不符或需紧急刹车止损时 |
 | **治理维护与旁路** | `dev_tasks_set_bypass` | 开启附带物理会话锁与过期倒计时的快速通道旁路 | 进行极轻量修补（如单点样式、错别字） |
 | | `dev_tasks_archive` | 归档已闭环的任务单并自动追加记录至 `CHANGELOG.md` | 当前任务单全量完成闭环后 |

@@ -2846,6 +2846,15 @@ async def dev_reviewer_submit(
     Returns initial JobRecord metadata without blocking.
 
     提交 Reviewer 异步长推演任务：返回初始任务句柄与非终态元数据。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        query: Review or consultation query content / 待推演或咨询的问题内容。
+        context_files: Optional list of relevant files for architectural context / 可选重点参考文件列表。
+        mode: Consultation mode ('critique', 'evaluate', 'brainstorm', 'audit') / 审查咨询模式。
+        max_hops: AST exploration depth for context expansion (0-3) / 拓扑探索跳数（最大为3）。
+        session_id: Optional session UUID for multi-session isolation / 可选多会话隔离标识。
+        idempotency_key: Optional idempotency key to prevent duplicate submissions / 可选幂等键以防止重复提交。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2909,14 +2918,17 @@ async def dev_reviewer_poll(
     job_id: str,
     session_id: str,
     wait_max_s: int = 0,
-    raw_text: bool = False,
-) -> Union[str, dict[str, Any]]:
+) -> dict[str, Any]:
     """Poll status or result of a background Reviewer task.
     Enforces 1KB non-terminal snapshot contract.
 
-    轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，终态返回对称双源投影。
-    默认 raw_text=False 返回结构化 1KB 极简快照与终态折叠字典（防大文本刷屏）；
-    可选 raw_text=True 纯文本单行心跳输出与终态直出 Markdown，支持 wait_max_s 服务端长轮询。
+    轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，恒定返回结构化字典。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        job_id: Target job ID to poll / 待轮询的任务ID。
+        session_id: Caller session ID for multi-session authorization / 会话隔离标识符。
+        wait_max_s: Server-side long polling wait timeout in seconds (0-25) / 服务端长轮询最大挂起等待秒数。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2941,7 +2953,7 @@ async def dev_reviewer_poll(
     # timeout_s == 0 瞬态直接返回，不睡眠 (K4)
     if timeout_s == 0:
         try:
-            return supervisor.poll(job_id, session_id=session_id, raw_text=raw_text)
+            return supervisor.poll(job_id, session_id=session_id)
         except (KeyError, ValueError, PermissionError) as e:
             return {"status": "error", "error": str(e)}
         except Exception as e:
@@ -2951,7 +2963,7 @@ async def dev_reviewer_poll(
 
     while True:
         try:
-            snap_dict = supervisor.poll(job_id, session_id=session_id, raw_text=False)
+            snap_dict = supervisor.poll(job_id, session_id=session_id)
         except (KeyError, ValueError, PermissionError) as e:
             return {"status": "error", "error": str(e)}
         except Exception as e:
@@ -2959,15 +2971,11 @@ async def dev_reviewer_poll(
 
         state = snap_dict.get("state")
         if state in POLL_TERMINAL_STATES:
-            if not raw_text:
-                return snap_dict
-            return supervisor.poll(job_id, session_id=session_id, raw_text=True)
+            return snap_dict
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            if not raw_text:
-                return snap_dict
-            return supervisor.poll(job_id, session_id=session_id, raw_text=True)
+            return snap_dict
 
         # 睡眠步长：保证下限 0.05s 防止热旋，上限 0.25s
         sleep_s = min(0.25, max(0.05, remaining))
@@ -2983,6 +2991,11 @@ async def dev_reviewer_cancel(
     """Deterministically cancel a running Reviewer task and abort transport.
 
     确定性取消在途推演任务：物理关闭 Socket 并保全实际计费 token 记录。
+
+    Args:
+        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
+        job_id: Target job ID to cancel / 待取消的任务ID。
+        session_id: Caller session ID for multi-session authorization / 会话隔离标识符。
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -3140,7 +3153,7 @@ async def dev_reviewer_consult(
     max_wait_s = 175.0
     start_t = time.monotonic()
     while time.monotonic() - start_t < max_wait_s:
-        poll_res = supervisor.poll(record.job_id, session_id=clean_sid, raw_text=False)
+        poll_res = supervisor.poll(record.job_id, session_id=clean_sid)
         state = poll_res.get("state")
         if state in ("COMPLETED", "FAILED", "CANCELLED", "ORPHANED"):
             res_dict = poll_res.get("result")

@@ -126,10 +126,75 @@ def test_rules_exporter_cli(tmp_path):
     assert os.path.isfile(os.path.join(proj_dir, ".cursor", "rules", "quench-dev-tasks.mdc"))
 
 
+def test_rules_exporter_check_all_no_files(tmp_path):
+    """测试当目标目录不存在任何 Cursor 规则文件时，只读校验直接通过返回 0。"""
+    proj_dir = str(tmp_path / "check_empty_proj")
+    os.makedirs(proj_dir, exist_ok=True)
+    assert RulesExporter.check_all(project_root=proj_dir) == 0
 
 
+def test_rules_exporter_check_all_clean_and_drifted(tmp_path):
+    """测试 RulesExporter.check_all 对一致规则返回 0，对漂移规则返回 1。"""
+    proj_dir = str(tmp_path / "check_rules_proj")
+    os.makedirs(proj_dir, exist_ok=True)
 
-def test_discipline_rules_zero_delete_symbols_preserved() -> None:
+    # 1. 导出初始规则
+    RulesExporter.export_all(project_root=proj_dir)
+    assert RulesExporter.check_all(project_root=proj_dir) == 0
+
+    # 2. 篡改 .cursorrules 触发漂移
+    legacy_path = os.path.join(proj_dir, ".cursorrules")
+    with open(legacy_path, "w", encoding="utf-8") as f:
+        f.write("# Drifted content\n")
+    assert RulesExporter.check_all(project_root=proj_dir) == 1
+
+    # 3. 恢复 .cursorrules，篡改 mdc 规则触发漂移
+    RulesExporter.export_cursorrules(None, legacy_path, force=True)
+    assert RulesExporter.check_all(project_root=proj_dir) == 0
+
+    mdc_path = os.path.join(proj_dir, ".cursor", "rules", "quench-dev-tasks.mdc")
+    with open(mdc_path, "w", encoding="utf-8") as f:
+        f.write("---\nglobs: *\n---\n# Drifted MDC\n")
+    assert RulesExporter.check_all(project_root=proj_dir) == 1
+
+
+def test_rules_exporter_cli_check_flag(tmp_path):
+    """测试 CLI --check 模式：一致返回 0，漂移返回 1。"""
+    proj_dir = str(tmp_path / "cli_check_proj")
+    os.makedirs(proj_dir, exist_ok=True)
+
+    # 1. 未生成规则，直接 --check -> 0
+    p1 = subprocess.run(
+        [PYTHON_EXE, EXPORTER_SCRIPT, "--dest", proj_dir, "--check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert p1.returncode == 0
+    assert "只读校验通过" in p1.stdout
+
+    # 2. 导出规则后 --check -> 0
+    RulesExporter.export_all(project_root=proj_dir)
+    p2 = subprocess.run(
+        [PYTHON_EXE, EXPORTER_SCRIPT, "--dest", proj_dir, "--check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert p2.returncode == 0
+
+    # 3. 漂移后 --check -> 1
+    legacy_path = os.path.join(proj_dir, ".cursorrules")
+    with open(legacy_path, "w", encoding="utf-8") as f:
+        f.write("drift\n")
+    p3 = subprocess.run(
+        [PYTHON_EXE, EXPORTER_SCRIPT, "--dest", proj_dir, "--check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert p3.returncode == 1
+    assert "漂移" in p3.stderr
     """物理断言六核心字段双语标题与 INV-1~INV-9 符号名在精简后完好存在（Zero-Delete 不变量）。"""
     discipline_path = REPO_ROOT / "plugins" / "quench-dev-tasks" / "rules" / "dev-tasks-discipline.md"
     assert discipline_path.is_file()

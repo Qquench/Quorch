@@ -277,7 +277,7 @@ def test_auth_cross_session_poll_rejected(tmp_path):
     rec = supervisor.submit({"query": "q", "session_id": "session_alpha"})
 
     # 同会话合法访问
-    res = supervisor.poll(rec.job_id, session_id="session_alpha", raw_text=False)
+    res = supervisor.poll(rec.job_id, session_id="session_alpha")
     assert res["job_id"] == rec.job_id
 
     # 跨会话越权访问被拒
@@ -307,26 +307,25 @@ async def test_consult_thin_shell_backward_compatible(tmp_path):
     assert "mode" in res
 
 
-def test_poll_raw_text_nonterminal_projection(tmp_path):
-    """RAW-TEXT: 非终态 raw_text=True 必须返回简洁单行字符串，彻底消除 JSON 展开卡片。"""
+def test_poll_structured_nonterminal_projection(tmp_path):
+    """NONTERMINAL: 非终态 supervisor.poll 必须返回简洁字典，且显式传入 raw_text 抛 TypeError。"""
     supervisor = ReviewerJobSupervisor(tmp_path)
     rec = supervisor.submit({"query": "q", "session_id": "raw_text_sess"})
 
-    # 1. raw_text=False -> 返回非终态 6 字段字典
-    res_dict = supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=False)
+    # 1. poll 恒定返回非终态 6 字段字典
+    res_dict = supervisor.poll(rec.job_id, session_id="raw_text_sess")
     assert isinstance(res_dict, dict)
     assert set(res_dict.keys()) == POLL_NONTERMINAL_FIELDS
+    assert res_dict["state"] == "QUEUED"
 
-    # 2. raw_text=True -> 返回纯文本单行 str
-    res_str = supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)
-    assert isinstance(res_str, str)
-    assert res_str.startswith("[Reviewer thinking:")
-    assert "tokens" in res_str
-    assert "\n" not in res_str
+    # 2. 显式传入 raw_text=True 抛出 TypeError
+    with pytest.raises(TypeError) as excinfo:
+        supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)
+    assert "unexpected keyword argument" in str(excinfo.value) or "raw_text" in str(excinfo.value)
 
 
-def test_poll_raw_text_terminal_projection(tmp_path):
-    """RAW-TEXT: 终态 raw_text=True 直出 Markdown findings；raw_text=False 返回完整结构化字典。"""
+def test_poll_structured_terminal_projection(tmp_path):
+    """TERMINAL: 终态 COMPLETED 必须返回完整结构化字典，严禁返回 str。"""
     supervisor = ReviewerJobSupervisor(tmp_path)
     rec = supervisor.submit({"query": "q", "session_id": "term_raw_sess"})
 
@@ -343,23 +342,17 @@ def test_poll_raw_text_terminal_projection(tmp_path):
         updates={"result_ref": str(res_path)},
     )
 
-    # 1. 终态 raw_text=True 直出 findings Markdown 纯文本
-    res_text = supervisor.poll(rec.job_id, session_id="term_raw_sess", raw_text=True)
-    assert res_text == "All clear"
-
-    # 2. supervisor 默认 raw_text=False 返回结构化字典以兼容内部调用
-    assert isinstance(supervisor.poll(rec.job_id, session_id="term_raw_sess"), dict)
-
-    # 3. raw_text=False 严格返回完整结构化字典
-    res_terminal = supervisor.poll(rec.job_id, session_id="term_raw_sess", raw_text=False)
+    # 终态严格返回完整结构化字典
+    res_terminal = supervisor.poll(rec.job_id, session_id="term_raw_sess")
     assert isinstance(res_terminal, dict)
     assert set(res_terminal.keys()) == POLL_TERMINAL_FIELDS
     assert res_terminal["state"] == "COMPLETED"
     assert res_terminal["result"]["verdict"] == "PASS"
+    assert res_terminal["result"]["findings"] == "All clear"
 
 
-def test_poll_raw_text_degraded_terminal_projection(tmp_path):
-    """RAW-TEXT: 失败/取消/孤儿终态在 raw_text=True 时返回标准化降级卡（纯文本 Markdown，受 INV-3 约束）。"""
+def test_poll_structured_degraded_terminal_projection(tmp_path):
+    """DEGRADED: 失败/取消/孤儿终态统一返回标准化结构化字典（严格受 INV-3 约束，findings==""）。"""
     supervisor = ReviewerJobSupervisor(tmp_path)
     rec = supervisor.submit({"query": "q", "session_id": "term_fail_sess"})
 
@@ -371,11 +364,47 @@ def test_poll_raw_text_degraded_terminal_projection(tmp_path):
         updates={"degraded_reason": "network"},
     )
 
-    res_text = supervisor.poll(rec.job_id, session_id="term_fail_sess", raw_text=True)
-    assert isinstance(res_text, str)
-    assert "### [Reviewer Consultation Degraded]" in res_text
-    assert "FAILED" in res_text
-    assert "network" in res_text
+    res = supervisor.poll(rec.job_id, session_id="term_fail_sess")
+    assert isinstance(res, dict)
+    assert set(res.keys()) == POLL_TERMINAL_FIELDS
+    assert res["state"] == "FAILED"
+    assert res["degraded_reason"] == "network"
+    assert res["result"]["status"] == "degraded"
+    assert res["result"]["findings"] == ""
+
+
+def test_poll_terminal_findings_truncation_and_multibyte(tmp_path):
+    """40k 预算防线强化断言：len==40001 截断为 40000 且 truncated=True，多字节 UTF-8 边界安全。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    rec = supervisor.submit({"query": "q", "session_id": "trunc_sess"})
+
+    from reviewer_jobs import _durable_write_json
+    res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
+
+    # 1. 构造 40001 字符 findings，断言截断为 40000 且 truncated is True
+    long_findings = "x" * 40001
+    _durable_write_json(res_path, {"verdict": "PASS", "findings": long_findings, "usage": {}})
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.QUEUED,
+        JobState.COMPLETED,
+        updates={"result_ref": str(res_path)},
+    )
+    res = supervisor.poll(rec.job_id, session_id="trunc_sess")
+    assert len(res["result"]["findings"]) == 40000
+    assert res["result"]["truncated"] is True
+
+    # 2. 多字节 CJK / emoji 边界安全性验证
+    multibyte_findings = "a" * 39999 + "🚀" + "b" * 100
+    _durable_write_json(res_path, {"verdict": "PASS", "findings": multibyte_findings, "usage": {}})
+    res_mb = supervisor.poll(rec.job_id, session_id="trunc_sess")
+    findings_str = res_mb["result"]["findings"]
+    assert len(findings_str) == 40000
+    assert res_mb["result"]["truncated"] is True
+    # 断言截断结果可 utf-8 正常解码，不得产生半个码位或孤立代理项
+    encoded_bytes = findings_str.encode("utf-8")
+    assert encoded_bytes.decode("utf-8") == findings_str
 
 
 def test_terminal_states_and_result_allowed_fields_convergence():
@@ -436,12 +465,12 @@ def test_heartbeat_single_line_projection_format():
             approx_reasoning_tokens=120,
         ),
     )
-    raw = project_poll_result(snapshot, raw_text=True)
-    assert raw == "[Reviewer thinking: 12.4s | 120 tokens]"
-
-    structured = project_poll_result(snapshot, raw_text=False)
+    structured = project_poll_result(snapshot)
     assert isinstance(structured, dict)
     assert structured["state"] == "RUNNING"
+
+    with pytest.raises(TypeError):
+        project_poll_result(snapshot, raw_text=True)
 
 
 def test_progress_snapshot_and_no_is_terminal_state(tmp_path):

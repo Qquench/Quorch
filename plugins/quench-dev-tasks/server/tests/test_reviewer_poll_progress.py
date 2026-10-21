@@ -6,7 +6,7 @@ Locks in:
 - B3: Concurrent cancellation yields CANCELLED projection in <= 1.0s
 - B4: asyncio.CancelledError passthrough (never swallowed by except Exception)
 - B5: [已收敛至 test_tool_surface_contract.py]
-- B6: Non-terminal wait returns format_heartbeat_line when raw_text=True
+- B6: Non-terminal wait timeout returns structured dict (Option B)
 - B7: Zero wait (wait_max_s=0) immediate return without sleep
 """
 import asyncio
@@ -144,33 +144,22 @@ async def test_b4_cancelled_error_passthrough(tmp_path):
         await poll_task
 
     # 且后台 worker 的状态仍保持非终态存活，未被连带销毁
-    poll_res = supervisor.poll(rec.job_id, session_id="b4_test", raw_text=False)
+    poll_res = supervisor.poll(rec.job_id, session_id="b4_test")
     assert poll_res["state"] not in POLL_TERMINAL_STATES
 
 
 @pytest.mark.anyio
-async def test_b6_raw_text_heartbeat_projection(tmp_path):
-    """B6: 非终态超时返回时，raw_text=True 返回单行心跳文本，raw_text=False 返回结构化 dict。"""
+async def test_b6_timeout_returns_structured_dict(tmp_path):
+    """B6: 非终态超时返回时，恒定返回结构化 dict，绝不返回 str。"""
     ws = str(tmp_path)
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
     rec = supervisor.submit({"query": "q", "session_id": "b6_test"})
-
-    res_text = await server.dev_reviewer_poll(
-        workspace_root=ws,
-        job_id=rec.job_id,
-        session_id="b6_test",
-        wait_max_s=1,
-        raw_text=True,
-    )
-    assert isinstance(res_text, str)
-    assert res_text.startswith("[Reviewer thinking:")
 
     res_dict = await server.dev_reviewer_poll(
         workspace_root=ws,
         job_id=rec.job_id,
         session_id="b6_test",
         wait_max_s=1,
-        raw_text=False,
     )
     assert isinstance(res_dict, dict)
     assert res_dict["state"] == "QUEUED"

@@ -162,8 +162,9 @@ job = dev_reviewer_submit(
 res = dev_reviewer_poll(
     workspace_root=".",
     job_id=job["job"]["job_id"],
-    raw_text=True,
+    session_id="my_session",
 )
+findings = (res.get("result") or {}).get("findings", "")
 ```
 
 ### Consultation Modes
