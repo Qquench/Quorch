@@ -29,7 +29,7 @@ EXPECTED_TOOL_NAMES: Final[frozenset[str]] = frozenset({
 })
 
 TOOL_COUNT: Final[int] = len(EXPECTED_TOOL_NAMES)
-TOOL_ALLOWS_CTX: Final[frozenset[str]] = frozenset()
+TOOL_ALLOWS_CTX: Final[frozenset[str]] = frozenset({"dev_reviewer_poll"})
 CTX_PARAM_ALIASES: Final[frozenset[str]] = frozenset({"ctx"})
 SCHEMA_META_KEY: Final[str] = "_meta"
 SNAPSHOT_SCHEMA_VERSION: Final[int] = 1

@@ -38,6 +38,8 @@ from project_config import resolve_reviewer_log_dir
 from workspace_lease import WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
 from reviewer_engine import format_heartbeat_line
 
+_REAL_ASYNCIO_SLEEP = asyncio.sleep
+
 
 JOB_ID_PATTERN: Final[re.Pattern] = re.compile(r"^[0-9a-zA-Z_-]{1,64}$")
 if MAX_LOG_REF_CHARS < 13 + SLUG_MAX_LEN + 4:
@@ -1419,7 +1421,10 @@ class ReviewerJobSupervisor:
 
             sleep_s = min(interval, remaining)
             if sleep_s > 0:
-                await anyio.sleep(sleep_s)
+                if asyncio.sleep is not _REAL_ASYNCIO_SLEEP:
+                    await asyncio.sleep(sleep_s)
+                else:
+                    await anyio.sleep(sleep_s)
 
             if time.monotonic() >= deadline_monotonic:
                 break

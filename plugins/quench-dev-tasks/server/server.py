@@ -8,6 +8,7 @@ import datetime
 from datetime import datetime, timezone, timedelta, date
 import glob
 import json
+import math
 import os
 import re
 import shutil
@@ -2912,12 +2913,128 @@ async def dev_reviewer_submit(
         }
 
 
+def _clamp_wait(wait_max_s: Any) -> float:
+    """Clamp wait_max_s parameter to [0.0, 25.0].
+
+    Raises:
+        TypeError: If wait_max_s is a boolean.
+        ValueError: If wait_max_s cannot be parsed as a number.
+    """
+    if isinstance(wait_max_s, bool):
+        raise TypeError("wait_max_s cannot be a boolean")
+    if wait_max_s is None:
+        return 0.0
+    try:
+        val = float(wait_max_s)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid wait_max_s: '{wait_max_s}' must be an integer.") from exc
+    if math.isnan(val) or math.isinf(val) or val < 0.0:
+        return 0.0
+    return min(25.0, val)
+
+
+async def _poll_impl(
+    *args: Any,
+    workspace_root: Optional[str] = None,
+    job_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    wait_max_s: float = 0.0,
+    bridge: Optional[Any] = None,
+) -> dict[str, Any]:
+    """Pure scheduling logic for polling a Reviewer task.
+
+    Supports either (workspace_root, job_id, session_id, wait_max_s, bridge) or (job_id, wait_max_s, bridge).
+    """
+    if len(args) == 3:
+        job_id, wait_max_s, bridge = args
+        workspace_root = workspace_root or "."
+        session_id = session_id or ""
+    elif len(args) == 4:
+        workspace_root, job_id, session_id, wait_max_s = args
+    elif len(args) == 5:
+        workspace_root, job_id, session_id, wait_max_s, bridge = args
+
+    from reviewer_jobs import (
+        TERMINAL_STATES,
+        JobState,
+        PollSnapshot,
+        ReviewerJobSupervisor,
+        SnapshotContractViolation,
+        project_nonterminal,
+    )
+    from consultation import sanitize_session_id
+
+    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    terminal_names = {s.value for s in TERMINAL_STATES} | {"ORPHANED"}
+    val_sid = sanitize_session_id(session_id, max_len=128) if session_id else ""
+
+    # wait_max_s <= 0.0: 快路径单次调用 read_snapshot (C.7 / K4)
+    if wait_max_s <= 0.0:
+        try:
+            snap = supervisor.read_snapshot(job_id)
+            if snap.state in terminal_names:
+                return supervisor.poll(job_id, session_id=session_id)
+            if not val_sid or snap.session_id != val_sid:
+                raise PermissionError(
+                    f"Access denied: caller session_id '{session_id}' does not match job session_id '{snap.session_id}'"
+                )
+            return project_nonterminal(snap)
+        except SnapshotContractViolation:
+            raise
+        except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+            raise
+        except (KeyError, ValueError, PermissionError) as e:
+            return {"status": "error", "error": str(e)}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    # wait_max_s > 0.0: 绝对截止时间与 supervisor.watch 异步生成器循环
+    deadline = time.monotonic() + wait_max_s
+    last_snap: Optional[PollSnapshot] = None
+
+    try:
+        async for snap in supervisor.watch(job_id, deadline_monotonic=deadline):
+            last_snap = snap
+            # 终态判定：立即返回终态结构化结果，且终态不发通知避免客户端 UI 闪烁
+            if snap.state in terminal_names:
+                return supervisor.poll(job_id, session_id=session_id)
+
+            if not val_sid or snap.session_id != val_sid:
+                raise PermissionError(
+                    f"Access denied: caller session_id '{session_id}' does not match job session_id '{snap.session_id}'"
+                )
+
+            # 非终态快照：通过 progress bridge 发送通知
+            if bridge is not None:
+                await bridge.emit(snap)
+
+        # 超时结束：返回末次快照投影
+        if last_snap is not None:
+            if last_snap.state in terminal_names:
+                return supervisor.poll(job_id, session_id=session_id)
+            return project_nonterminal(last_snap)
+
+        fallback_snap = supervisor.read_snapshot(job_id)
+        if fallback_snap.state in terminal_names:
+            return supervisor.poll(job_id, session_id=session_id)
+        return project_nonterminal(fallback_snap)
+    except SnapshotContractViolation:
+        raise
+    except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+        raise
+    except (KeyError, ValueError, PermissionError) as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @mcp.tool()
 async def dev_reviewer_poll(
     workspace_root: str,
     job_id: str,
     session_id: str,
     wait_max_s: int = 0,
+    ctx: Context = None,
 ) -> dict[str, Any]:
     """Poll status or result of a background Reviewer task.
     Enforces 1KB non-terminal snapshot contract.
@@ -2929,6 +3046,7 @@ async def dev_reviewer_poll(
         job_id: Target job ID to poll / 待轮询的任务ID。
         session_id: Caller session ID for multi-session authorization / 会话隔离标识符。
         wait_max_s: Server-side long polling wait timeout in seconds (0-25) / 服务端长轮询最大挂起等待秒数。
+        ctx: FastMCP Context injected by server framework.
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -2936,50 +3054,28 @@ async def dev_reviewer_poll(
             "error": f"Invalid workspace_root: '{workspace_root}' is not an existing directory.",
         }
 
+    if isinstance(wait_max_s, bool):
+        raise TypeError("wait_max_s cannot be a boolean")
+
     try:
-        wait_int = int(wait_max_s) if wait_max_s is not None else 0
+        timeout_s = _clamp_wait(wait_max_s)
     except (ValueError, TypeError):
         return {
             "status": "error",
             "error": f"Invalid wait_max_s: '{wait_max_s}' must be an integer.",
         }
 
-    from reviewer_jobs import POLL_TERMINAL_STATES, ReviewerJobSupervisor
-    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    from progress_bridge import ProgressBridge
 
-    timeout_s = max(0, min(25, wait_int))
-    start_t = time.monotonic()
+    bridge = ProgressBridge.from_context(ctx)
 
-    # timeout_s == 0 瞬态直接返回，不睡眠 (K4)
-    if timeout_s == 0:
-        try:
-            return supervisor.poll(job_id, session_id=session_id)
-        except (KeyError, ValueError, PermissionError) as e:
-            return {"status": "error", "error": str(e)}
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-
-    deadline = start_t + timeout_s
-
-    while True:
-        try:
-            snap_dict = supervisor.poll(job_id, session_id=session_id)
-        except (KeyError, ValueError, PermissionError) as e:
-            return {"status": "error", "error": str(e)}
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-
-        state = snap_dict.get("state")
-        if state in POLL_TERMINAL_STATES:
-            return snap_dict
-
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return snap_dict
-
-        # 睡眠步长：保证下限 0.05s 防止热旋，上限 0.25s
-        sleep_s = min(0.25, max(0.05, remaining))
-        await asyncio.sleep(sleep_s)
+    return await _poll_impl(
+        workspace_root=workspace_root,
+        job_id=job_id,
+        session_id=session_id,
+        wait_max_s=timeout_s,
+        bridge=bridge,
+    )
 
 
 @mcp.tool()
