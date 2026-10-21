@@ -264,7 +264,8 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `task_writer.py` | T3 | Lossless partition roundtrip, guarded task file writes (`write_task_file_guarded`) with directory confinement, pre-lock manifest check & atomic fsync | Single writer via FileLock; preserves BOM & CRLF; blocks status smuggling |
 | `schema_validator.py` | T3 | Six-field contract validation; physical feasibility lint gate (`draft_lint`) | No file writes; pure validation |
 | `manifest.py` | T3 | Manifest read/write/compaction; bounds enforcement; CAS TTL lease management (`manifest_lease`) | Single lock holder per task; lease expiration safety |
-| `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, unified async job state machine, tri-state union contract, 1KB non-terminal snapshot, raw_text projection, cancellation, log pin & retention quota | Durable atomic writes; memory-leak-free |
+| `reviewer_jobs.py` | T4 | `ReviewerJobSupervisor`, unified async job state machine, tri-state union contract, `PollSnapshot` freeze contract, 1KB non-terminal snapshot V2, cancellation, log pin & retention quota | Durable atomic writes; memory-leak-free |
+| `progress_bridge.py` | T4 | FastMCP `notifications/progress` bridge (`ProgressBridge`), coalescing, token detection, message formatting | Read-only consumer of `PollSnapshot`; zero job scheduling authority |
 | `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease guard, TTL + generation CAS takeover, touch checkpoint contract | FileLock-backed; pure TTL timeout & generation CAS |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
 | `consultation.py` | T4 | Reviewer sandbox guards (`assert_read_only_sandbox`) & context slice assembly (`assemble_reviewer_context`) | Read-only guard enforced before any context injection |
@@ -302,6 +303,9 @@ server.py → manifest.py        (task CRUD)
 server.py → code_explorer.py   (AST slice for refine_spec)
 server.py → reporting.py       (handoff card rendering & CHANGELOG append)
 server.py → tool_surface_constants.py (SSOT tool constants)
+server.py → progress_bridge.py (ProgressBridge.from_context & emit)
+
+progress_bridge.py → reviewer_jobs.py (read PollSnapshot, SnapshotContractViolation)
 
 task_writer.py → task_status.py (canonical statuses & extract_header_task_statuses)
 task_writer.py → path_guard.py  (directory confinement)
