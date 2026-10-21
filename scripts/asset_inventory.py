@@ -29,6 +29,9 @@ CURRENT_INV_REL: Final[str] = "docs/architecture/over_engineering_inventory.md"
 DELTA_REPORT_ARG: Final[str] = "--delta-report"
 DELTA_BEGIN_MARK: Final[str] = "<!-- QUENCH-DELTA-BEGIN:v1.21 -->"
 DELTA_END_MARK: Final[str] = "<!-- QUENCH-DELTA-END:v1.21 -->"
+PROJECTION_SCHEMA_VERSION: Final[str] = "quench-inventory-projection/v1"
+PROJECTION_BEGIN_MARK: Final[str] = "<!-- QUENCH-PROJECTION-BEGIN:v1 -->"
+PROJECTION_END_MARK: Final[str] = "<!-- QUENCH-PROJECTION-END -->"
 
 
 class FrozenSnapshotMissingError(Exception):
@@ -43,6 +46,11 @@ class FrozenSnapshotUnparsableError(Exception):
 
 class DeltaBlockMalformedError(Exception):
     """Delta 分隔符失衡或格式畸形时抛出（Fail-closed 闭锁）。"""
+    pass
+
+
+class ProjectionSchemaMismatchError(Exception):
+    """on-disk 投影块缺失、schema_version 不识别或 marker 失衡时抛出（映射至 EXIT_USAGE=2）。"""
     pass
 
 CONSUMER_SCAN_ROOTS: Final[tuple[str, ...]] = (
@@ -178,6 +186,27 @@ class CouplingRecord:
 class InventorySnapshot:
     report: InventoryReport
     rendered_pure_markdown: str
+
+
+@dataclass(frozen=True)
+class PureProjection:
+    """gated 投影：仅由源码树决定。严禁包含时间戳、运行历史、文件字节大小。
+
+    排序约束（canonical form）：
+      - modules      : 按 rel_path 升序；imported_modules/imported_symbols/defined_symbols 内部字母序
+      - consumers    : 按 (defined_in, symbol) 升序；consumed_by/test_refs/doc_refs 内部字母序
+      - tools        : 按 registered_name 升序；params 按参数名升序
+      - removal_candidates : 保留 ConsumerEdge 完整结构（按 (defined_in, symbol) 升序）
+      - must_not_remove / g1prime_gaps / doc_drift_ledger : 字母序元组
+    """
+    schema_version: str
+    modules: tuple[ModuleNode, ...]
+    consumers: tuple[ConsumerEdge, ...]
+    tools: tuple[ToolSurface, ...]
+    removal_candidates: tuple[ConsumerEdge, ...]
+    must_not_remove: tuple[str, ...]
+    g1prime_gaps: tuple[str, ...]
+    doc_drift_ledger: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -1013,24 +1042,285 @@ def _assert_balanced_markers(inventory_text: str) -> None:
             )
 
 
-def strip_delta_block(inventory_text: str) -> str:
-    """剥离既有 Delta 块，返回纯投影文本。先校验标记平衡。"""
-    _assert_balanced_markers(inventory_text)
-    if DELTA_BEGIN_MARK not in inventory_text:
+def strip_projection_block(inventory_text: str) -> str:
+    """剥离既有 Projection 块，返回文本。"""
+    if PROJECTION_BEGIN_MARK not in inventory_text:
         return inventory_text
+    b_idx = inventory_text.find(PROJECTION_BEGIN_MARK)
+    e_idx = inventory_text.find(PROJECTION_END_MARK)
+    if b_idx != -1 and e_idx != -1 and e_idx > b_idx:
+        before = inventory_text[:b_idx].rstrip()
+        after = inventory_text[e_idx + len(PROJECTION_END_MARK) :].lstrip("\r\n")
+        if after:
+            return f"{before}\n\n{after}".strip() + "\n"
+        return before.strip() + "\n"
+    return inventory_text
+
+
+def strip_delta_block(inventory_text: str) -> str:
+    """剥离既有 Delta 块（及可选 Projection 块），返回纯投影文本。先校验标记平衡。"""
+    _assert_balanced_markers(inventory_text)
+    text = strip_projection_block(inventory_text)
+    if DELTA_BEGIN_MARK not in text:
+        return text
     pattern = re.compile(
         r"\n*" + re.escape(DELTA_BEGIN_MARK) + r".*?" + re.escape(DELTA_END_MARK) + r"\n*",
         flags=re.DOTALL,
     )
-    return pattern.sub("\n\n", inventory_text).strip() + "\n"
+    return pattern.sub("\n\n", text).strip() + "\n"
 
 
-def compute_pure_projection_sha256(inventory_text: str) -> str:
-    """计算剔除 Delta 块与非门禁遥测段后的纯投影门禁主体 SHA256，保证时间漂移零假红。"""
-    pure_text = strip_delta_block(inventory_text)
-    gated_text = extract_gated_body(pure_text)
-    pure_normalized = gated_text.replace("\r\n", "\n").replace("\r", "\n")
-    return hashlib.sha256(pure_normalized.encode("utf-8")).hexdigest()
+def build_pure_projection(report: InventoryReport) -> PureProjection:
+    """从 InventoryReport 构建规范化语义投影 PureProjection。
+    
+    构造期严格排除易变量（verdicts 日志统计、遥测样本数、文件大小等），
+    对内部全量元组执行确定性全序排序。
+    """
+    if report.skipped_files:
+        print(f"[inventory] {len(report.skipped_files)} file(s) skipped", file=sys.stderr)
+
+    # 1. modules 按 rel_path 升序；内部字段字母序
+    sorted_modules = tuple(
+        sorted(
+            (
+                ModuleNode(
+                    rel_path=m.rel_path,
+                    imported_modules=tuple(sorted(m.imported_modules)),
+                    imported_symbols=tuple(sorted(m.imported_symbols)),
+                    defined_symbols=tuple(sorted(m.defined_symbols)),
+                )
+                for m in report.modules
+            ),
+            key=lambda m: m.rel_path,
+        )
+    )
+
+    # 2. consumers 按 (defined_in, symbol, consumed_by, test_refs, doc_refs) 全序升序；内部字段字母序
+    sorted_consumers = tuple(
+        sorted(
+            (
+                ConsumerEdge(
+                    symbol=c.symbol,
+                    defined_in=c.defined_in,
+                    consumed_by=tuple(sorted(c.consumed_by)),
+                    test_refs=tuple(sorted(c.test_refs)),
+                    doc_refs=tuple(sorted(c.doc_refs)),
+                    is_lower_bound=c.is_lower_bound,
+                )
+                for c in report.consumers
+            ),
+            key=lambda c: (c.defined_in, c.symbol, c.consumed_by, c.test_refs, c.doc_refs),
+        )
+    )
+
+    # 3. tools 按 registered_name 升序；params 按名称升序
+    sorted_tools = tuple(
+        sorted(
+            (
+                ToolSurface(
+                    name=t.name,
+                    registered_name=t.registered_name,
+                    params=tuple(sorted(t.params, key=lambda p: p[0])),
+                    returns_repr=t.returns_repr,
+                )
+                for t in report.tools
+            ),
+            key=lambda t: t.registered_name,
+        )
+    )
+
+    # 4. removal_candidates 保持完整 ConsumerEdge 结构，按同 consumers 的全序升序
+    sorted_removal = tuple(
+        sorted(
+            (
+                ConsumerEdge(
+                    symbol=c.symbol,
+                    defined_in=c.defined_in,
+                    consumed_by=tuple(sorted(c.consumed_by)),
+                    test_refs=tuple(sorted(c.test_refs)),
+                    doc_refs=tuple(sorted(c.doc_refs)),
+                    is_lower_bound=c.is_lower_bound,
+                )
+                for c in report.removal_candidates
+            ),
+            key=lambda c: (c.defined_in, c.symbol, c.consumed_by, c.test_refs, c.doc_refs),
+        )
+    )
+
+    # 5. must_not_remove / g1prime_gaps / doc_drift_ledger 按字母序升序
+    sorted_must_not = tuple(sorted(report.must_not_remove))
+    sorted_g1prime = tuple(sorted(report.g1prime_gaps))
+    sorted_doc_drift = tuple(sorted(report.doc_drift_ledger))
+
+    return PureProjection(
+        schema_version=PROJECTION_SCHEMA_VERSION,
+        modules=sorted_modules,
+        consumers=sorted_consumers,
+        tools=sorted_tools,
+        removal_candidates=sorted_removal,
+        must_not_remove=sorted_must_not,
+        g1prime_gaps=sorted_g1prime,
+        doc_drift_ledger=sorted_doc_drift,
+    )
+
+
+def canonical_projection_json(proj: PureProjection) -> bytes:
+    """序列化为抗字典序与换行波动的规范化 JSON 字节串。"""
+    from dataclasses import asdict
+
+    # 强制重新规范化排序
+    sorted_proj = build_pure_projection(
+        InventoryReport(
+            modules=proj.modules,
+            consumers=proj.consumers,
+            tools=proj.tools,
+            audit_reason_histogram={},
+            telemetry_meta={},
+            skipped_files=(),
+            doc_drift_ledger=proj.doc_drift_ledger,
+            g1prime_gaps=proj.g1prime_gaps,
+            removal_candidates=proj.removal_candidates,
+            must_not_remove=proj.must_not_remove,
+        )
+    )
+    raw_dict = asdict(sorted_proj)
+    s = json.dumps(raw_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return s.encode("utf-8")
+
+
+def render_projection_block(proj: PureProjection) -> str:
+    """生成带有标记的规范化投影嵌入块。"""
+    json_str = canonical_projection_json(proj).decode("utf-8")
+    return f"{PROJECTION_BEGIN_MARK}\n{json_str}\n{PROJECTION_END_MARK}"
+
+
+def extract_projection_block(markdown: str) -> PureProjection:
+    """从 Markdown 文本中提取并反序列化 PureProjection 实例。
+    
+    异常（缺失、多块、标记失衡、非法 JSON、未知 schema_version）一律抛出 ProjectionSchemaMismatchError。
+    """
+    begin_count = markdown.count(PROJECTION_BEGIN_MARK)
+    end_count = markdown.count(PROJECTION_END_MARK)
+    if begin_count == 0 or end_count == 0:
+        raise ProjectionSchemaMismatchError("Projection block missing from inventory markdown")
+    if begin_count > 1 or end_count > 1:
+        raise ProjectionSchemaMismatchError("Duplicate projection blocks found in inventory markdown")
+    b_idx = markdown.find(PROJECTION_BEGIN_MARK)
+    e_idx = markdown.find(PROJECTION_END_MARK)
+    if e_idx < b_idx:
+        raise ProjectionSchemaMismatchError("Malformed projection markers: end appears before begin")
+
+    json_str = markdown[b_idx + len(PROJECTION_BEGIN_MARK) : e_idx].strip()
+    try:
+        data = json.loads(json_str)
+    except Exception as e:
+        raise ProjectionSchemaMismatchError(f"Failed to parse projection JSON: {e}")
+
+    version = data.get("schema_version")
+    if version != PROJECTION_SCHEMA_VERSION:
+        raise ProjectionSchemaMismatchError(
+            f"Projection schema '{version}' not recognized; run --write to refresh"
+        )
+
+    try:
+        modules = tuple(
+            ModuleNode(
+                rel_path=m["rel_path"],
+                imported_modules=tuple(m["imported_modules"]),
+                imported_symbols=tuple(m["imported_symbols"]),
+                defined_symbols=tuple(m["defined_symbols"]),
+            )
+            for m in data.get("modules", [])
+        )
+        consumers = tuple(
+            ConsumerEdge(
+                symbol=c["symbol"],
+                defined_in=c["defined_in"],
+                consumed_by=tuple(c["consumed_by"]),
+                test_refs=tuple(c["test_refs"]),
+                doc_refs=tuple(c["doc_refs"]),
+                is_lower_bound=c.get("is_lower_bound", True),
+            )
+            for c in data.get("consumers", [])
+        )
+        tools = tuple(
+            ToolSurface(
+                name=t["name"],
+                registered_name=t["registered_name"],
+                params=tuple((p[0], p[1]) for p in t["params"]),
+                returns_repr=t.get("returns_repr"),
+            )
+            for t in data.get("tools", [])
+        )
+        removal_candidates = tuple(
+            ConsumerEdge(
+                symbol=c["symbol"],
+                defined_in=c["defined_in"],
+                consumed_by=tuple(c["consumed_by"]),
+                test_refs=tuple(c["test_refs"]),
+                doc_refs=tuple(c["doc_refs"]),
+                is_lower_bound=c.get("is_lower_bound", True),
+            )
+            for c in data.get("removal_candidates", [])
+        )
+        proj = PureProjection(
+            schema_version=str(version),
+            modules=modules,
+            consumers=consumers,
+            tools=tools,
+            removal_candidates=removal_candidates,
+            must_not_remove=tuple(data.get("must_not_remove", ())),
+            g1prime_gaps=tuple(data.get("g1prime_gaps", ())),
+            doc_drift_ledger=tuple(data.get("doc_drift_ledger", ())),
+        )
+        return build_pure_projection(
+            InventoryReport(
+                modules=proj.modules,
+                consumers=proj.consumers,
+                tools=proj.tools,
+                audit_reason_histogram={},
+                telemetry_meta={},
+                skipped_files=(),
+                doc_drift_ledger=proj.doc_drift_ledger,
+                g1prime_gaps=proj.g1prime_gaps,
+                removal_candidates=proj.removal_candidates,
+                must_not_remove=proj.must_not_remove,
+            )
+        )
+    except Exception as e:
+        raise ProjectionSchemaMismatchError(f"Malformed projection schema structure: {e}")
+
+
+def diagnose_drift(on_disk: PureProjection, fresh: PureProjection) -> tuple[str, ...]:
+    """对比两份 PureProjection，返回所有差异顶层字段名列表（升序）。"""
+    diff_fields = []
+    fields = (
+        "modules",
+        "consumers",
+        "tools",
+        "removal_candidates",
+        "must_not_remove",
+        "g1prime_gaps",
+        "doc_drift_ledger",
+    )
+    for f in fields:
+        if getattr(on_disk, f) != getattr(fresh, f):
+            diff_fields.append(f)
+    return tuple(sorted(diff_fields))
+
+
+def compute_pure_projection_sha256(proj_or_text: PureProjection | str) -> str:
+    """计算纯语义投影的 SHA256。支持传入 PureProjection 或 Markdown 文本。"""
+    if isinstance(proj_or_text, PureProjection):
+        return hashlib.sha256(canonical_projection_json(proj_or_text)).hexdigest()
+    try:
+        proj = extract_projection_block(proj_or_text)
+        return hashlib.sha256(canonical_projection_json(proj)).hexdigest()
+    except Exception:
+        pure_text = strip_delta_block(proj_or_text)
+        gated_text = extract_gated_body(pure_text)
+        pure_normalized = gated_text.replace("\r\n", "\n").replace("\r", "\n")
+        return hashlib.sha256(pure_normalized.encode("utf-8")).hexdigest()
 
 
 def atomic_write_text(target_path: Path, text: str) -> None:
@@ -1299,11 +1589,20 @@ def render_delta_report_markdown(delta: DeltaReport) -> str:
     return "\n".join(lines)
 
 
-def write_inventory_with_delta(inventory_text: str, delta: DeltaReport) -> str:
-    """在清单文本中嵌入 Delta 报告段。必须先剥离旧 Delta 段再嵌入，确保 write(write(x)) == write(x)。"""
-    pure_text = strip_delta_block(inventory_text)
+def write_inventory_with_delta(
+    inventory_text: str,
+    delta: DeltaReport,
+    proj: PureProjection | None = None,
+) -> str:
+    """在清单文本中嵌入 Delta 报告段与规范化 Projection 块。先剥离旧块再嵌入，确保 write(write(x)) == write(x)。"""
+    pure_text = strip_projection_block(strip_delta_block(inventory_text))
     delta_md = render_delta_report_markdown(delta)
-    combined = pure_text.rstrip() + "\n\n" + delta_md.strip() + "\n"
+    combined = pure_text.rstrip() + "\n\n" + delta_md.strip()
+    if proj is not None:
+        proj_block = render_projection_block(proj)
+        combined = combined.rstrip() + "\n\n" + proj_block.strip() + "\n"
+    else:
+        combined = combined.rstrip() + "\n"
     return combined
 
 
@@ -1364,7 +1663,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             delta = compute_delta_report(frozen_file, snapshot)
         except Exception as e:
             print(f"Delta report calculation failed: {e}", file=sys.stderr)
-            return EXIT_DRIFT
+            return EXIT_USAGE
         delta_md = render_delta_report_markdown(delta)
         try:
             sys.stdout.write(delta_md)
@@ -1387,20 +1686,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             _assert_balanced_markers(existing_text)
         except DeltaBlockMalformedError as e:
             print(f"Marker balance check failed: {e}", file=sys.stderr)
-            return EXIT_DRIFT
+            return EXIT_USAGE
+
+        try:
+            on_disk_proj = extract_projection_block(existing_text)
+        except ProjectionSchemaMismatchError as e:
+            print(f"Projection schema mismatch: {e}", file=sys.stderr)
+            return EXIT_USAGE
 
         report = build_inventory_report(repo_root)
-        new_pure_text = render_markdown(report)
+        fresh_proj = build_pure_projection(report)
 
-        existing_pure = strip_delta_block(existing_text)
-        existing_gated = extract_gated_body(existing_pure)
-        new_gated = extract_gated_body(new_pure_text)
+        sha_on_disk = compute_pure_projection_sha256(on_disk_proj)
+        sha_fresh = compute_pure_projection_sha256(fresh_proj)
 
-        if existing_gated != new_gated:
-            print("Drift detected between codebase and inventory report pure projection!", file=sys.stderr)
+        if sha_on_disk != sha_fresh:
+            drift_keys = diagnose_drift(on_disk_proj, fresh_proj)
+            keys_str = ",".join(drift_keys) if drift_keys else "unknown"
+            print(
+                f"drift sha256_on_disk={sha_on_disk} sha256_fresh={sha_fresh} drift_keys={keys_str}",
+                file=sys.stderr,
+            )
             return EXIT_DRIFT
 
         if DELTA_BEGIN_MARK in existing_text and frozen_file.is_file():
+            new_pure_text = render_markdown(report)
             snapshot = InventorySnapshot(report=report, rendered_pure_markdown=new_pure_text)
             try:
                 delta = compute_delta_report(frozen_file, snapshot)
@@ -1413,7 +1723,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return EXIT_DRIFT
             except Exception as e:
                 print(f"Delta report generation failed: {e}", file=sys.stderr)
-                return EXIT_DRIFT
+                return EXIT_USAGE
 
         print("Freshness check passed: inventory matches codebase.", file=sys.stdout)
         return EXIT_OK
@@ -1421,25 +1731,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         # 默认模式（或显式 --write）：生成并写入资产清单
         report = build_inventory_report(repo_root)
+        proj = build_pure_projection(report)
         rendered_pure = render_markdown(report)
-        base = strip_delta_block(rendered_pure).rstrip()
+        base = strip_projection_block(strip_delta_block(rendered_pure)).rstrip()
 
         if frozen_file.is_file():
             snapshot = InventorySnapshot(report=report, rendered_pure_markdown=rendered_pure)
             try:
                 delta = compute_delta_report(frozen_file, snapshot)
-                full_content = write_inventory_with_delta(rendered_pure, delta)
+                full_content = write_inventory_with_delta(rendered_pure, delta, proj=proj)
             except Exception as e:
                 print(f"Delta report generation failed: {e}", file=sys.stderr)
-                return EXIT_DRIFT
+                return EXIT_USAGE
         elif out_file.is_file() and DELTA_BEGIN_MARK in out_file.read_text(encoding="utf-8"):
             existing_text = out_file.read_text(encoding="utf-8")
             existing_delta_block = existing_text[
                 existing_text.find(DELTA_BEGIN_MARK) : existing_text.find(DELTA_END_MARK) + len(DELTA_END_MARK)
             ]
-            full_content = f"{base}\n\n{existing_delta_block}\n"
+            proj_block = render_projection_block(proj)
+            full_content = f"{base}\n\n{existing_delta_block}\n\n{proj_block}\n"
         else:
-            full_content = f"{base}\n"
+            proj_block = render_projection_block(proj)
+            full_content = f"{base}\n\n{proj_block}\n"
 
         atomic_write_text(out_file, full_content)
         print(f"Successfully generated inventory: {out_file}", file=sys.stdout)

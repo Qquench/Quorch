@@ -74,6 +74,18 @@ from asset_inventory import (  # noqa: E402
     main,
     render_markdown,
     scan_modules,
+    PROJECTION_SCHEMA_VERSION,
+    PROJECTION_BEGIN_MARK,
+    PROJECTION_END_MARK,
+    ProjectionSchemaMismatchError,
+    PureProjection,
+    build_pure_projection,
+    canonical_projection_json,
+    diagnose_drift,
+    render_projection_block,
+    extract_projection_block,
+    strip_projection_block,
+    ToolSurface,
 )
 from dataclasses import dataclass
 
@@ -164,7 +176,8 @@ def create_mini_repo(root: Path) -> Path:
     pure = render_markdown(report)
     snapshot = InventorySnapshot(report=report, rendered_pure_markdown=pure)
     delta = compute_delta_report(root / FROZEN_V120_REL, snapshot)
-    full = write_inventory_with_delta(pure, delta)
+    proj = build_pure_projection(report)
+    full = write_inventory_with_delta(pure, delta, proj=proj)
     atomic_write_text(root / OUTPUT_MD_REL, full)
     return root
 
@@ -365,32 +378,226 @@ def test_11_must_not_remove_symbols_hard_override():
     assert fake_edge not in candidates_with_orphan
 
 
-def test_12_check_three_way_exit_semantics(tmp_path: Path):
+def test_12_check_three_way_exit_semantics(tmp_path: Path, capsys: pytest.CaptureFixture):
     """12. --check 语义三分：一致 → EXIT_OK；不一致 → EXIT_DRIFT；产物缺失 → EXIT_USAGE。
     
     [TP-2 架构不变量守卫]：
     - 分支 1 (产物缺失)：在独立的 tmp_path mini 仓库中删除产物，断言 EXIT_USAGE；
-    - 分支 2 (真仓锚点)：对真仓 REPO_ROOT 运行未 mock、未隔离、未被跳过的 --check 校验，断言 EXIT_OK；
-    - 分支 3 (产物漂移)：在独立的 tmp_path mini 仓库中篡改产物，断言 EXIT_DRIFT。
+    - 分支 2 (沙箱锚点)：在独立的 tmp_path mini 仓库中运行未污染的 --check 校验，断言 EXIT_OK；
+    - 分支 3 (代码漂移)：在独立的 tmp_path mini 仓库中修改源码移除被登记符号，断言 EXIT_DRIFT，且 stderr 输出 drift 诊断。
     """
     # 1) 产物缺失 -> EXIT_USAGE (隔离在 tmp mini-repo 中)
     b1_repo = create_mini_repo(tmp_path / "mini_repo_b1")
     (b1_repo / OUTPUT_MD_REL).unlink()
     assert main(["--repo-root", str(b1_repo), "--check"]) == EXIT_USAGE
 
-    # 2) 真实仓库产物当前一致 -> EXIT_OK (全单测中唯一保留的真仓完整扫描锚点)
-    assert main(["--repo-root", str(REPO_ROOT), "--check"]) == EXIT_OK
+    # 2) 沙箱产物当前一致 -> EXIT_OK (隔离在独立的 mini_repo_b2 中，彻底解耦物理工作树)
+    b2_repo = create_mini_repo(tmp_path / "mini_repo_b2")
+    assert main(["--repo-root", str(b2_repo), "--check"]) == EXIT_OK
 
-    # 3) 模拟产物漂移 -> EXIT_DRIFT (隔离在独立的 tmp mini-repo 中，零真仓磁盘污染与回滚风险)
+    # 3) 模拟源码与投影漂移 -> EXIT_DRIFT (隔离在独立的 mini_repo_b3 中)
     b3_repo = create_mini_repo(tmp_path / "mini_repo_b3")
-    b3_out = b3_repo / OUTPUT_MD_REL
-    original_text = b3_out.read_text(encoding="utf-8")
-    b3_out.write_text(original_text.replace("Architecture Asset Inventory", "TAMPERED HEADER"), encoding="utf-8")
-    assert main(["--repo-root", str(b3_repo), "--check"]) == EXIT_DRIFT
+    sample_py = b3_repo / SERVER_ROOT_REL / "sample.py"
+    sample_py.write_text(
+        "_issue_checkout_lease = 2\n"
+        "_fake_orphan_removal_candidate = 3\n",
+        encoding="utf-8",
+    )
+    capsys.readouterr()  # 清空此前缓冲区
+    ret = main(["--repo-root", str(b3_repo), "--check"])
+    assert ret == EXIT_DRIFT
+    err = capsys.readouterr().err
+    assert "drift sha256_on_disk=" in err
+    assert "drift_keys=" in err
 
 
-def test_13_output_crlf_free():
-    """13. 产物字节中 b"\\r\\n" not in bytes（CRLF 不变式）。"""
+def test_13_pure_projection_sort_invariance():
+    """13. PureProjection 排序不变性：乱序构建 report 经规范化后哈希完全一致。"""
+    mod_a = ModuleNode(
+        rel_path="plugins/quench-dev-tasks/server/a.py",
+        imported_modules=(),
+        imported_symbols=(),
+        defined_symbols=("sym_z", "sym_a"),
+    )
+    mod_b = ModuleNode(
+        rel_path="plugins/quench-dev-tasks/server/b.py",
+        imported_modules=(),
+        imported_symbols=(),
+        defined_symbols=("sym_b",),
+    )
+    rep1 = InventoryReport(
+        modules=(mod_a, mod_b),
+        consumers=(),
+        tools=(),
+        audit_reason_histogram={},
+        telemetry_meta={},
+        skipped_files=(),
+        doc_drift_ledger=("z_doc", "a_doc"),
+        g1prime_gaps=("g2", "g1"),
+        removal_candidates=(),
+        must_not_remove=("sym_y", "sym_x"),
+    )
+    rep2 = InventoryReport(
+        modules=(mod_b, mod_a),
+        consumers=(),
+        tools=(),
+        audit_reason_histogram={},
+        telemetry_meta={},
+        skipped_files=(),
+        doc_drift_ledger=("a_doc", "z_doc"),
+        g1prime_gaps=("g1", "g2"),
+        removal_candidates=(),
+        must_not_remove=("sym_x", "sym_y"),
+    )
+    proj1 = build_pure_projection(rep1)
+    proj2 = build_pure_projection(rep2)
+    assert proj1.modules == proj2.modules
+    assert proj1.doc_drift_ledger == proj2.doc_drift_ledger
+    assert proj1.must_not_remove == proj2.must_not_remove
+    assert compute_pure_projection_sha256(proj1) == compute_pure_projection_sha256(proj2)
+
+
+def test_14_drift_diagnostic_format(capsys: pytest.CaptureFixture, tmp_path: Path):
+    """14. 漂移诊断格式：capsys 校验 stderr 符合正则格式。"""
+    repo = create_mini_repo(tmp_path / "mini_repo_diag")
+    sample_py = repo / SERVER_ROOT_REL / "sample.py"
+    sample_py.write_text(
+        sample_py.read_text(encoding="utf-8") + "extra_drift_symbol = 99\n",
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    ret = main(["--repo-root", str(repo), "--check"])
+    assert ret == EXIT_DRIFT
+    err = capsys.readouterr().err.strip()
+    pattern = r"^drift sha256_on_disk=[0-9a-f]{64} sha256_fresh=[0-9a-f]{64} drift_keys=[\w,]+$"
+    assert re.search(pattern, err) is not None, f"Stderr did not match expected drift format: {err}"
+
+
+def test_15_verdicts_append_no_drift(mini_repo_fixture: Path):
+    """15. 零假红抗干扰：向 verdicts.jsonl 追加 50+ 条日志记录，--check 恒定通过返回 0。"""
+    v_path = mini_repo_fixture / ".agents/logs/reviewer/verdicts.jsonl"
+    with open(v_path, "a", encoding="utf-8", newline="\n") as fh:
+        for i in range(60):
+            fh.write(f'{{"session_id": "probe-{i}", "task_id": "1.{i}", "verdict": "PASS"}}\n')
+
+    assert main(["--repo-root", str(mini_repo_fixture), "--check"]) == EXIT_OK
+
+
+def test_16_pythonhashseed_invariance(tmp_path: Path):
+    """16. 子进程验证 PYTHONHASHSEED=0 与 PYTHONHASHSEED=31337 下投影哈希恒等。"""
+    import subprocess
+    repo = create_mini_repo(tmp_path / "mini_repo_seed")
+    script = (
+        "import sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(SCRIPTS_DIR)!r}); "
+        "import asset_inventory; "
+        f"rep = asset_inventory.build_inventory_report(Path({str(repo)!r})); "
+        "proj = asset_inventory.build_pure_projection(rep); "
+        "print(asset_inventory.compute_pure_projection_sha256(proj))"
+    )
+    env0 = os.environ.copy()
+    env0["PYTHONHASHSEED"] = "0"
+    p0 = subprocess.run([sys.executable, "-c", script], env=env0, capture_output=True, text=True, check=True)
+    hash0 = p0.stdout.strip()
+
+    env1 = os.environ.copy()
+    env1["PYTHONHASHSEED"] = "31337"
+    p1 = subprocess.run([sys.executable, "-c", script], env=env1, capture_output=True, text=True, check=True)
+    hash1 = p1.stdout.strip()
+
+    assert len(hash0) == 64
+    assert hash0 == hash1
+
+
+def test_17_crlf_lf_equivalence(tmp_path: Path):
+    """17. 跨平台换行防御：CRLF 仓与 LF 仓生成的 canonical_projection_json 字节严格恒等。"""
+    repo_lf = create_mini_repo(tmp_path / "repo_lf")
+    repo_crlf = create_mini_repo(tmp_path / "repo_crlf")
+
+    for p in repo_crlf.rglob("*"):
+        if p.is_file() and p.suffix in (".py", ".md", ".yaml", ".jsonl"):
+            content = p.read_text(encoding="utf-8")
+            p.write_bytes(content.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
+
+    rep_lf = build_inventory_report(repo_lf)
+    rep_crlf = build_inventory_report(repo_crlf)
+
+    proj_lf = build_pure_projection(rep_lf)
+    proj_crlf = build_pure_projection(rep_crlf)
+
+    bytes_lf = canonical_projection_json(proj_lf)
+    bytes_crlf = canonical_projection_json(proj_crlf)
+
+    assert bytes_lf == bytes_crlf
+
+
+def test_18_schema_version_mismatch_exit_usage(tmp_path: Path, capsys: pytest.CaptureFixture):
+    """18. 未知或畸形 schema_version 严格 fail-closed 返回 EXIT_USAGE=2。"""
+    repo = create_mini_repo(tmp_path / "repo_bad_schema")
+    out_file = repo / OUTPUT_MD_REL
+    content = out_file.read_text(encoding="utf-8")
+    tampered = content.replace("quench-inventory-projection/v1", "quench-inventory-projection/v999")
+    atomic_write_text(out_file, tampered)
+
+    capsys.readouterr()
+    ret = main(["--repo-root", str(repo), "--check"])
+    assert ret == EXIT_USAGE
+    err = capsys.readouterr().err
+    assert "Projection schema mismatch" in err or "schema" in err
+
+
+def test_19_skipped_file_stderr_warning(capsys: pytest.CaptureFixture, tmp_path: Path):
+    """19. 超大跳过文件向 stderr 单行警告且不污染 PureProjection。"""
+    repo = create_mini_repo(tmp_path / "repo_skipped")
+    oversized = repo / SERVER_ROOT_REL / "huge_module.py"
+    oversized.write_bytes(b"# pad\n" + b"x = 1\n" * (MAX_SCANNED_FILE_BYTES // 4))
+
+    capsys.readouterr()
+    rep = build_inventory_report(repo)
+    assert len(rep.skipped_files) >= 1
+    proj = build_pure_projection(rep)
+    err = capsys.readouterr().err
+    assert "[inventory]" in err
+    assert "skipped" in err
+    assert not any("huge_module.py" in m.rel_path for m in proj.modules)
+
+
+def test_20_symbol_deletion_detected(tmp_path: Path, capsys: pytest.CaptureFixture):
+    """20. 删除模块中已登记符号能够被准确检出，且 drift_keys 包含 modules。"""
+    repo = create_mini_repo(tmp_path / "repo_sym_del")
+    sample_py = repo / SERVER_ROOT_REL / "sample.py"
+    sample_py.write_text(
+        "_issue_checkout_lease = 2\n"
+        "_fake_orphan_removal_candidate = 3\n",
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    ret = main(["--repo-root", str(repo), "--check"])
+    assert ret == EXIT_DRIFT
+    err = capsys.readouterr().err
+    assert "drift_keys=" in err
+    assert "modules" in err
+
+
+def test_21_idempotent_projection_block(mini_repo_fixture: Path):
+    """21. 投影块写入幂等：连续多次 --write 不产生重复注释块且字节完全一致。"""
+    out_file = mini_repo_fixture / OUTPUT_MD_REL
+    main(["--repo-root", str(mini_repo_fixture), "--write"])
+    text1 = out_file.read_bytes()
+
+    assert text1.count(PROJECTION_BEGIN_MARK.encode("utf-8")) == 1
+    assert text1.count(PROJECTION_END_MARK.encode("utf-8")) == 1
+    assert text1.count(DELTA_BEGIN_MARK.encode("utf-8")) == 1
+    assert text1.count(DELTA_END_MARK.encode("utf-8")) == 1
+
+    main(["--repo-root", str(mini_repo_fixture), "--write"])
+    text2 = out_file.read_bytes()
+
+    assert text1 == text2
+
+
+def test_output_crlf_free():
+    """产物字节中 b"\\r\\n" not in bytes（CRLF 不变式）。"""
     out_file = REPO_ROOT / OUTPUT_MD_REL
     assert out_file.is_file()
     raw_bytes = out_file.read_bytes()

@@ -763,9 +763,9 @@
 
 <!-- BEGIN TELEMETRY (non-gated) -->
 - 遥测状态: ok
-- 样本总量: 349
+- 样本总量: 359
 - 评估结论: 样本充足
 
 ### 审计理由分布:
-- `unknown`: 349
+- `unknown`: 359
 <!-- END TELEMETRY -->

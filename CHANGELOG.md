@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-22] 2026-10-22_hermetic_asset_inventory_pure_projection.md
+
+- **Task 1.1**: 资产清单门禁密封化重构：语义投影哈希取代文本剥离比对与测试解耦
+
 ## [2026-10-21] 2026-10-21_dev_reviewer_poll_slimming_and_prompt_surface.md
 
 <!-- quench-prompt-surface:historical -->
