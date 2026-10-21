@@ -465,4 +465,28 @@ foreach ($job in $jobs.jobs) {
   2. **标准 Args 块补全**: 为函数补齐完整的 Google-style `Args:` 文档字符串。
   3. **Prompt-Surface 门禁 (P1~P5)**: 引入 `scripts/check_prompt_surface.py` 静态门禁，严禁活跃文档与代码块出现残留参数，并受 pre-commit 守卫拦截。
 
+---
+
+### 案例 11: FastMCP Context 形参注入的零 Schema 漂移契约与 report_progress 版本能力矩阵 (CI-2026-10-22-MCP-01)
+
+- **首次触发节点**: v1.24 原生进度通知通道与 long polling 改造（Task 24.1 / E1 门禁）
+- **现象与背景**:
+  1. `git_pre_commit_guard.py` 监控 `docs/architecture/ide_tool_schemas.json` 且 fail-closed，CI 中 `scripts/export_ide_schemas.py --check` 执行严格只读字节比对；
+  2. 若 FastMCP 工具添加 `ctx: Context` 形参改变了 `ide_tool_schemas.json` 的任何字节，将导致全仓库提交被物理锁定；
+  3. `scripts/check_prompt_surface.py` 门禁执行 Google-style `Args:` 检查，框架注入参数 `ctx` 易触发未知形参或缺失参数告警。
+- **根因深度复盘与机制原理**:
+  1. **FastMCP 框架参数过滤机制**: FastMCP 在通过 Pydantic/inspect 解析 `@mcp.tool` 函数形参生成 MCP JSON Schema 时，会自动识别类型注解为 `Context`（或其子类）的参数，并从 `inputSchema.properties` 与 `inputSchema.required` 中严格剔除，由框架在 RPC 调用上下文时自动动态绑定注入。
+  2. **Context.report_progress 能力版本分化**:
+     - 现代 FastMCP 版本中，`Context.report_progress(progress: float, total: float | None = None, message: str | None = None)` 完整支持 `progress`、`total` 与 `message`；
+     - 早期版本仅支持 `(progress: float, total: float | None = None)`，直接传递 `message` 会抛出 `TypeError: unexpected keyword argument 'message'`。
+- **加固方案 (多重闭环)**:
+  1. **影子 Schema 生产验证探针 (`test_reviewer_poll_ctx_schema_invariance.py`)**:
+     - 建立物理单元测试断言无论工具是否携带 `ctx: Context = None`，其生成的 JSON Schema 保持严格字节一致；
+     - 生产影子探针显式锚定 pending `dev_reviewer_poll` 签名（`{'workspace_root', 'job_id', 'session_id', 'wait_max_s', 'ctx'}`），比对 `ide_tool_schemas.json` 达成 0 字节漂移。
+  2. **框架注入白名单收敛**:
+     - 在 `scripts/check_prompt_surface.py` 中引入 `INJECTED_FRAMEWORK_PARAMS = frozenset({"self", "ctx", "context"})`，对框架注入参数提供确定性豁免，允许在 docstring 中声明说明而不触发 `P1_PARAM_UNKNOWN`。
+  3. **运行时动态能力探测与自适应降级 (`ProgressBridge`)**:
+     - 通过 `inspect.signature(ctx.report_progress)` 动态嗅探 `supports_message`，不支持时安全降级为仅发送浮点标量，避免破坏长轮询 RPC 主循环。
+
+
 

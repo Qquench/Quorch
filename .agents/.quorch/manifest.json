@@ -1192,68 +1192,68 @@
     "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.1": {
       "task_id": "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.1",
       "md_sha256": "a0d6823785ff0b7c1175363a25348feccc48bcdc0801bd50c6df13e800351fe0",
-      "generation": 0,
+      "generation": 1,
       "holder_token": "",
-      "last_heartbeat_monotonic_ns": 486349234000000,
-      "last_heartbeat_wall_utc": "2026-10-21T22:11:01.549076+00:00",
-      "git_head_sha": "a1b16a83cca77efa8c2b7af40f721742bebff4d9",
-      "git_index_mtime": 1792590943.8133469,
-      "released": false
+      "last_heartbeat_monotonic_ns": 489045187000000,
+      "last_heartbeat_wall_utc": "2026-10-21T22:55:57.512247+00:00",
+      "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
+      "git_index_mtime": 1792623337.7564096,
+      "released": true
     },
     "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.2": {
       "task_id": "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.2",
       "md_sha256": "a0d6823785ff0b7c1175363a25348feccc48bcdc0801bd50c6df13e800351fe0",
-      "generation": 0,
+      "generation": 1,
       "holder_token": "",
-      "last_heartbeat_monotonic_ns": 486349250000000,
-      "last_heartbeat_wall_utc": "2026-10-21T22:11:01.564663+00:00",
-      "git_head_sha": "a1b16a83cca77efa8c2b7af40f721742bebff4d9",
-      "git_index_mtime": 1792590943.8133469,
-      "released": false
+      "last_heartbeat_monotonic_ns": 489045234000000,
+      "last_heartbeat_wall_utc": "2026-10-21T22:55:57.548327+00:00",
+      "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
+      "git_index_mtime": 1792623337.7564096,
+      "released": true
     },
     "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.3": {
       "task_id": "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.3",
       "md_sha256": "a0d6823785ff0b7c1175363a25348feccc48bcdc0801bd50c6df13e800351fe0",
-      "generation": 0,
+      "generation": 1,
       "holder_token": "",
-      "last_heartbeat_monotonic_ns": 486349265000000,
-      "last_heartbeat_wall_utc": "2026-10-21T22:11:01.580686+00:00",
-      "git_head_sha": "a1b16a83cca77efa8c2b7af40f721742bebff4d9",
-      "git_index_mtime": 1792590943.8133469,
-      "released": false
+      "last_heartbeat_monotonic_ns": 489045265000000,
+      "last_heartbeat_wall_utc": "2026-10-21T22:55:57.582326+00:00",
+      "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
+      "git_index_mtime": 1792623337.7564096,
+      "released": true
     },
     "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.4": {
       "task_id": "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.4",
       "md_sha256": "a0d6823785ff0b7c1175363a25348feccc48bcdc0801bd50c6df13e800351fe0",
-      "generation": 0,
+      "generation": 1,
       "holder_token": "",
-      "last_heartbeat_monotonic_ns": 486349281000000,
-      "last_heartbeat_wall_utc": "2026-10-21T22:11:01.596676+00:00",
-      "git_head_sha": "a1b16a83cca77efa8c2b7af40f721742bebff4d9",
-      "git_index_mtime": 1792590943.8133469,
-      "released": false
+      "last_heartbeat_monotonic_ns": 489045296000000,
+      "last_heartbeat_wall_utc": "2026-10-21T22:55:57.618327+00:00",
+      "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
+      "git_index_mtime": 1792623337.7564096,
+      "released": true
     },
     "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.5": {
       "task_id": "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.5",
       "md_sha256": "a0d6823785ff0b7c1175363a25348feccc48bcdc0801bd50c6df13e800351fe0",
-      "generation": 0,
+      "generation": 1,
       "holder_token": "",
-      "last_heartbeat_monotonic_ns": 486349296000000,
-      "last_heartbeat_wall_utc": "2026-10-21T22:11:01.612670+00:00",
-      "git_head_sha": "a1b16a83cca77efa8c2b7af40f721742bebff4d9",
-      "git_index_mtime": 1792590943.8133469,
-      "released": false
+      "last_heartbeat_monotonic_ns": 489045328000000,
+      "last_heartbeat_wall_utc": "2026-10-21T22:55:57.652812+00:00",
+      "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
+      "git_index_mtime": 1792623337.7564096,
+      "released": true
     },
     "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.6": {
       "task_id": "2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming::24.6",
       "md_sha256": "a0d6823785ff0b7c1175363a25348feccc48bcdc0801bd50c6df13e800351fe0",
-      "generation": 0,
+      "generation": 1,
       "holder_token": "",
-      "last_heartbeat_monotonic_ns": 486349312000000,
-      "last_heartbeat_wall_utc": "2026-10-21T22:11:01.627674+00:00",
-      "git_head_sha": "a1b16a83cca77efa8c2b7af40f721742bebff4d9",
-      "git_index_mtime": 1792590943.8133469,
-      "released": false
+      "last_heartbeat_monotonic_ns": 489045375000000,
+      "last_heartbeat_wall_utc": "2026-10-21T22:55:57.686939+00:00",
+      "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
+      "git_index_mtime": 1792623337.7564096,
+      "released": true
     }
   }
 }

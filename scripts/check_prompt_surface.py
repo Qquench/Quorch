@@ -45,6 +45,9 @@ EXEMPTION_MARKER: Final[str] = "quench-prompt-surface:historical"
 CALL_KEYWORD_RE: Final[re.Pattern[str]] = re.compile(r"\braw_text\s*=\s*(?:True|False)\b")
 MIN_PARAM_DESC_CHARS: Final[int] = 8
 
+# FastMCP / 框架自动注入形参白名单（由框架在运行时提供，不暴露于 JSON Schema 输入且在文档检查中豁免）
+INJECTED_FRAMEWORK_PARAMS: Final[frozenset[str]] = frozenset({"self", "ctx", "context"})
+
 LIVE_DOCS: Final[frozenset[str]] = frozenset({
     "README.md",
     "README_zh.md",
@@ -90,7 +93,7 @@ def extract_server_signatures(server_py: Path) -> dict[str, frozenset[str]]:
                 for d in node.decorator_list
             )
             if is_tool:
-                params = [a.arg for a in node.args.args if a.arg not in ("self", "ctx")]
+                params = [a.arg for a in node.args.args if a.arg not in INJECTED_FRAMEWORK_PARAMS]
                 sigs[node.name] = frozenset(params)
     return sigs
 
@@ -188,7 +191,7 @@ def check_docstring_args(server_py: Path, expected_tools: frozenset[str]) -> lis
             continue
 
         documented = _parse_docstring_args(doc)
-        sig_params = [a.arg for a in node.args.args if a.arg not in ("self", "ctx")]
+        sig_params = [a.arg for a in node.args.args if a.arg not in INJECTED_FRAMEWORK_PARAMS]
 
         for p in sig_params:
             if p not in documented:
@@ -213,7 +216,7 @@ def check_docstring_args(server_py: Path, expected_tools: frozenset[str]) -> lis
                     )
 
         for p in documented:
-            if p not in sig_params:
+            if p not in sig_params and p not in INJECTED_FRAMEWORK_PARAMS:
                 findings.append(
                     LintFinding(
                         "P1_PARAM_UNKNOWN",
@@ -222,6 +225,17 @@ def check_docstring_args(server_py: Path, expected_tools: frozenset[str]) -> lis
                         f"Tool '{tool_name}' Args: documents unknown parameter '{p}' not in signature",
                     )
                 )
+            elif p in INJECTED_FRAMEWORK_PARAMS:
+                desc = documented[p]
+                if len(desc) < MIN_PARAM_DESC_CHARS:
+                    findings.append(
+                        LintFinding(
+                            "P1_PARAM_DESC_TOO_SHORT",
+                            str(server_py),
+                            node.lineno,
+                            f"Tool '{tool_name}' framework parameter '{p}' description too short ({len(desc)} < {MIN_PARAM_DESC_CHARS})",
+                        )
+                    )
 
     return findings
 
