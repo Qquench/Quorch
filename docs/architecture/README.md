@@ -180,13 +180,16 @@ Quench establishes a unified asynchronous Reviewer execution path, converging al
        ┌───────────────────┴───────────────────┐
        ▼ (in-flight)                           ▼ (terminal)
 dev_reviewer_poll()                     dev_reviewer_poll()
-Compact 1KB non-terminal snapshot       Full structured verdict
-(State, retry-after, progress)          (40k char budget cap dict)
+V2 6-field non-terminal snapshot        Full structured verdict
+(job_id, session_id, state,             (40k char budget cap dict)
+ retry_after_seconds, log_ref,
+ elapsed_s) + notifications/progress
 ```
 
-- **Structured-Only Return Contract**: `dev_reviewer_poll` returns a structured contract dictionary in all states (a compact 1KB non-terminal snapshot during in-flight states, and a complete structured dictionary capped by 40k char findings budget upon terminal states; code is authoritative, JSON snapshot is derived mirror evidence; see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)).
+- **Structured-Only Return Contract (V2 Non-Terminal 6 Fields)**: `dev_reviewer_poll` returns a structured contract dictionary in all states. In-flight states return a V2 6-field non-terminal snapshot (`{job_id, session_id, state, retry_after_seconds, log_ref, elapsed_s}` strictly bounded under 1024 bytes via `POLL_NONTERMINAL_FIELDS`, removing nested progress objects); terminal states return the complete structured dictionary capped by 40k char findings budget; code is authoritative, JSON snapshot is derived mirror evidence; see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md). Elapsed time is generated via monotonic clock (`time.monotonic`).
+- **Native MCP Progress Channel (`notifications/progress`)**: Active reasoning progress is streamed out-of-band via FastMCP native `ProgressBridge`, delivering formatted, single-line (≤ 120 bytes) progress notifications directly to the IDE progress channel with monotonic counter and 1.0s coalescing (with force penetration on state/phase delta). Progress notifications fail-open and never block or fail the polling loop.
 - **Deterministic Cancellation**: `dev_reviewer_cancel` aborts active HTTP transports immediately, records final billed tokens, and marks state as `CANCELLED`.
-- **Zero-Poll Long Polling**: `dev_reviewer_poll` supports `wait_max_s` (range 0–25s) to suspend execution until state transition occurs, eliminating wasteful polling loops (see [`dev_tasks_mcp_specification.md`](../../dev_tasks_mcp_specification.md)).
+- **Zero-Poll Long Polling (`wait_max_s`)**: `dev_reviewer_poll` supports server-side long polling via `ReviewerJobSupervisor.watch()` with `wait_max_s` (recommended default 20s, clamped to [0.0, 25.0s]), consuming zero Reviewer capacity tokens (`_REVIEWER_LIMITER`) and zero disk writes (W10). Fast-path short-circuits in < 250ms for terminal tasks or `wait_max_s <= 0`. Terminal tasks return directly to the caller without emitting progress notifications, preventing client UI flicker.
 - **Snapshot Drift Gate Policy**: CI strictly executes `python scripts/export_ide_schemas.py --check` (read-only verification); `--write` is strictly reserved for local developer execution upon intentional changes, and any snapshot diff requires Reviewer approval. Pre-commit guard monitors `SCHEMA_TRIGGER_PATHS` (`plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/tool_surface_constants.py`, `scripts/export_ide_schemas.py`, `docs/architecture/ide_tool_schemas.json`) and blocks drift fail-closed.
 
 ### 3.4 Task Contract & Bilingual Headings SSOT

@@ -277,8 +277,11 @@ def compute_elapsed_s(record: JobRecord) -> float:
 class _NonterminalDict(dict):
     """V2 非终态快照专用字典，严格暴露 6 字段白名单，为历史调用提供退化容错。"""
 
+    def __contains__(self, key: object) -> bool:
+        return key == "progress" or super().__contains__(key)
+
     def __getitem__(self, key: str) -> Any:
-        if key == "progress" and key not in self:
+        if key == "progress" and not super().__contains__(key):
             return {
                 "phase": "streaming",
                 "approx_reasoning_tokens": 520,

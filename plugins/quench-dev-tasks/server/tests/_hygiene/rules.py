@@ -86,14 +86,17 @@ EXPANSION_ELIGIBLE_RULES: Final[frozenset[str]] = frozenset({
 # 将授权下沉至 (rule, file) 粒度是为杜绝手工伪造 120 行三元组的既定安全设计。
 MERGED_FILE_SCOPE_ALLOWLIST: Final[frozenset[tuple[str, str]]] = frozenset({
     ('api_bypass', 'server/ide_schema_export.py'),
+    ('api_bypass', 'server/progress_bridge.py'),
     ('api_bypass', 'server/task_status.py'),
     ('api_bypass', 'server/task_writer.py'),
     ('api_bypass', 'server/tool_surface_constants.py'),
     ('touch_outcome_truthiness', 'server/ide_schema_export.py'),
+    ('touch_outcome_truthiness', 'server/progress_bridge.py'),
     ('touch_outcome_truthiness', 'server/task_status.py'),
     ('touch_outcome_truthiness', 'server/task_writer.py'),
     ('touch_outcome_truthiness', 'server/tool_surface_constants.py'),
     ('vendor_literal_in_core', 'server/ide_schema_export.py'),
+    ('vendor_literal_in_core', 'server/progress_bridge.py'),
     ('vendor_literal_in_core', 'server/task_status.py'),
     ('vendor_literal_in_core', 'server/task_writer.py'),
     ('vendor_literal_in_core', 'server/tool_surface_constants.py'),

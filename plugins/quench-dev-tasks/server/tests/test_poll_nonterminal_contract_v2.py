@@ -52,6 +52,8 @@ def test_project_nonterminal_six_fields_contract_and_no_progress(sample_snapshot
         {"job_id", "session_id", "state", "retry_after_seconds", "log_ref", "elapsed_s"}
     )
     assert "progress" not in res.keys()
+    assert "progress" in res
+    assert res["progress"]["phase"] == "streaming"
     assert res["job_id"] == "job_20261022_v2test"
     assert res["session_id"] == "session_v2_001"
     assert res["state"] == "RUNNING"
