@@ -12,12 +12,17 @@ from reviewer_jobs import (
     POLL_TERMINAL_FIELDS,
     TERMINAL_RESULT_ALLOWED_FIELDS,
     JobState,
+    PathFlavor,
     PollSnapshot,
     SnapshotContractViolation,
     _assert_nonterminal_contract,
+    _classify_log_ref_path,
+    _new_tracker_for_poll,
+    _DRIVE_ABS,
     canonical_snapshot_bytes,
     project_nonterminal,
 )
+
 
 
 @pytest.fixture
@@ -148,3 +153,78 @@ def test_terminal_contract_zero_regression():
     )
     assert "reasoning" not in TERMINAL_RESULT_ALLOWED_FIELDS
     assert "findings" in TERMINAL_RESULT_ALLOWED_FIELDS
+
+
+# 23 项完全唯一且手算自洽向量（Rev A11 契约）
+_CASE12_VECTORS = (
+    ("",                                  PathFlavor.EMPTY_OR_INVALID),
+    ("   ",                               PathFlavor.EMPTY_OR_INVALID),
+    (chr(9) + chr(13) + chr(10),          PathFlavor.EMPTY_OR_INVALID),
+    (chr(0x5C)*4 + "srv" + chr(0x5C)*2 + "share",  PathFlavor.UNC),
+    (chr(0x5C)*2 + "srv" + chr(0x5C) + "share",    PathFlavor.UNC),
+    (chr(0x5C)*2 + "srv" + chr(0x5C) + "share" + chr(0x5C) + "x", PathFlavor.UNC),
+    (chr(0x5C)*2 + "?" + chr(0x5C) + "C:" + chr(0x5C) + "x", PathFlavor.UNC),  # Win32 device path
+    (chr(0x5C)*3 + "srv",                 PathFlavor.UNC),  # 3-backslash boundary
+    (chr(0x5C)*2,                         PathFlavor.UNC),  # "\\" 视为 UNC 起点以 fail-closed 优先于语义精确 (C3)
+    (chr(0x5C) + "Windows" + chr(0x5C) + "System32", PathFlavor.NT_ABSOLUTE),
+    ("C:",                                PathFlavor.DRIVE_RELATIVE),
+    ("c:",                                PathFlavor.DRIVE_RELATIVE),
+    ("C:/x",                              PathFlavor.NT_ABSOLUTE),
+    ("C:" + chr(0x5C) + "x",              PathFlavor.NT_ABSOLUTE),
+    ("C:/Windows/System32",               PathFlavor.NT_ABSOLUTE),
+    ("C:x",                               PathFlavor.DRIVE_RELATIVE),
+    ("Z:relative",                        PathFlavor.DRIVE_RELATIVE),
+    ("//srv/share",                       PathFlavor.POSIX_ABSOLUTE),
+    ("/",                                 PathFlavor.POSIX_ABSOLUTE),
+    ("/etc/passwd",                       PathFlavor.POSIX_ABSOLUTE),
+    ("/Windows/System32",                 PathFlavor.POSIX_ABSOLUTE),
+    ("..",                                PathFlavor.SAFE_RELATIVE),
+    ("20261022_001_sess.log",             PathFlavor.SAFE_RELATIVE),
+)
+
+
+@pytest.mark.tier1_fast
+def test_case12_vectors_cardinality_and_uniqueness():
+    """断言 23 项向量两两互异且数量严格等于 23。"""
+    assert len(_CASE12_VECTORS) == 23
+    assert len({v[0] for v in _CASE12_VECTORS}) == 23
+
+
+@pytest.mark.tier1_fast
+@pytest.mark.parametrize("path_str, expected_flavor", _CASE12_VECTORS)
+def test_classify_log_ref_path_vectors(path_str: str, expected_flavor: PathFlavor):
+    """参数化断言 23 项向量分类结果与类型。"""
+    res = _classify_log_ref_path(path_str)
+    assert type(res) is PathFlavor
+    assert res is expected_flavor
+
+
+@pytest.mark.tier1_fast
+@pytest.mark.parametrize("bad_val", [None, 123, b"x", ["invalid"]])
+def test_assert_nonterminal_contract_rejects_non_str_log_ref(sample_snapshot, bad_val):
+    """非 str 类型的 log_ref 统一抛出 SnapshotContractViolation 而非 AttributeError。"""
+    base = dict(project_nonterminal(sample_snapshot))
+    corrupted = {**base, "log_ref": bad_val}
+    with pytest.raises(SnapshotContractViolation) as exc_info:
+        _assert_nonterminal_contract(corrupted)
+    assert "log_ref must be str" in str(exc_info.value)
+
+
+@pytest.mark.tier1_fast
+def test_drive_abs_evaluation_order_and_regex():
+    """P0-2/P0-3: 字符类匹配正反斜杠，且 _DRIVE_ABS 先于 _DRIVE_ANY。"""
+    assert _classify_log_ref_path("C:/x") is PathFlavor.NT_ABSOLUTE
+    assert _classify_log_ref_path("C:" + chr(0x5C) + "x") is PathFlavor.NT_ABSOLUTE
+    assert _classify_log_ref_path("C:x") is PathFlavor.DRIVE_RELATIVE
+    assert _DRIVE_ABS.match("C:/x")
+    assert _DRIVE_ABS.match("C:" + chr(0x5C) + "x")
+    assert not _DRIVE_ABS.match("C:x")
+
+
+@pytest.mark.tier1_fast
+def test_exempt_tracker_per_invocation_scope():
+    """R2/C1 契约锚：两次独立 poll 调用必须产生不同 tracker 实例。"""
+    t1 = _new_tracker_for_poll()
+    t2 = _new_tracker_for_poll()
+    assert id(t1) != id(t2), "tracker 被跨调用复用，泄漏风险复现（R2）"
+

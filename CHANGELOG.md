@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-22] 2026-10-22_ci_fix_cross_platform_path_and_filelock.md
+
+- **Task 1.1**: 修复 `_DRIVE_ABS` 命名常量字符类、加固 W10 单次 Poll 作用域与案例 12 归档（Rev A11 闭环）
+
 ## [2026-10-22] 2026-10-22_fix_git_pre_commit_guard_downstream_isolation.md
 
 - **Task 1.1**: 修复 git_pre_commit_guard 对下游业务工程的 Prompt Surface 误伤拦截（终审补丁版）

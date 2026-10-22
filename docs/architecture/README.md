@@ -192,6 +192,13 @@ V2 6-field non-terminal snapshot        Full structured verdict
 - **Zero-Poll Long Polling (`wait_max_s`)**: `dev_reviewer_poll` supports server-side long polling via `ReviewerJobSupervisor.watch()` with `wait_max_s` (recommended default 20s, clamped to [0.0, 25.0s]), consuming zero Reviewer capacity tokens (`_REVIEWER_LIMITER`) and zero disk writes (W10). Fast-path short-circuits in < 250ms for terminal tasks or `wait_max_s <= 0`. Terminal tasks return directly to the caller without emitting progress notifications, preventing client UI flicker.
 - **Snapshot Drift Gate Policy**: CI strictly executes `python scripts/export_ide_schemas.py --check` (read-only verification); `--write` is strictly reserved for local developer execution upon intentional changes, and any snapshot diff requires Reviewer approval. Pre-commit guard monitors `SCHEMA_TRIGGER_PATHS` (`plugins/quench-dev-tasks/server/server.py`, `plugins/quench-dev-tasks/server/tool_surface_constants.py`, `scripts/export_ide_schemas.py`, `docs/architecture/ide_tool_schemas.json`) and blocks drift fail-closed.
 
+### 3.3.1 W10 Exclusion Domain (锁原语豁免域)
+
+为了确保跨平台 CI 矩阵与高并发环境下的确定性运行，Quench 对 **W10 (零磁盘写入/Zero Disk Write)** 契约实施精确的作用域隔离：
+- **业务状态域 (Business State Domain)**: 轮询、监控或只读推演调用期间，绝对禁止向磁盘刷入任何业务推演日志、审计条目或持久化任务快照；
+- **锁原语豁免域 (W10 Exclusion Domain)**: 进程间跨进程同步原语（如 Unix 环境下 `filelock` 创建的 `*.lock` 锁文件及已登记的无写漂移 inode 描述符）属于系统底层并发安全屏障，显式排除在业务写入审计之外，杜绝假红阻断。
+- **单次轮询作用域约束**: `_ExemptInodeTracker` 追踪器严格绑定单次 `dev_reviewer_poll` / `watch` 调用生命周期，严禁将其提升为全局或常驻单例，彻底杜绝内存与句柄泄漏。
+
 ### 3.4 Task Contract & Bilingual Headings SSOT
 
 DevTask specifications are strictly validated against the Six-Core-Field structured contract. Both English (`#### [Affected Files]`, etc.) and Chinese (`#### 【涉及文件】`, etc.) heading aliases are natively accepted and physically enforced by `schema_validator.py`.

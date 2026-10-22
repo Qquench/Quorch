@@ -291,10 +291,130 @@ class _NonterminalDict(dict):
         return super().__getitem__(key)
 
 
+class PathFlavor(str, Enum):
+    SAFE_RELATIVE = "safe_relative"
+    NT_ABSOLUTE = "nt_absolute"
+    POSIX_ABSOLUTE = "posix_absolute"
+    UNC = "unc"
+    DRIVE_RELATIVE = "drive_relative"
+    EMPTY_OR_INVALID = "empty_or_invalid"
+
+
+_BACKSLASH: Final = chr(0x5C)                # U+005C REVERSE SOLIDUS (backslash)
+_FWD: Final = chr(0x2F)                      # U+002F SOLIDUS (forward slash)
+_UNC_PREFIX_BS4: Final = _BACKSLASH * 4      # 4 backslashes
+_UNC_PREFIX_BS2: Final = _BACKSLASH * 2      # 2 backslashes
+_NT_ROOT_BS: Final = _BACKSLASH              # 1 leading backslash
+_POSIX_ROOT_FS2: Final = _FWD * 2            # "//" 2 forward slashes
+
+_SEP_CLASS: Final = re.escape(_FWD) + re.escape(_BACKSLASH)
+_DRIVE_ABS: Final = re.compile(rf"^[A-Za-z]:[{_SEP_CLASS}]")
+_DRIVE_ONLY: Final = re.compile(r"^[A-Za-z]:$")
+_DRIVE_ANY: Final = re.compile(r"^[A-Za-z]:")
+
+
+def _inode_key(st_dev: int, st_ino: int) -> tuple[int, int]:
+    """规范化 inode 身份 key；字段顺序 (st_dev, st_ino) 为 SSOT。"""
+    return (st_dev, st_ino)
+
+
+def _classify_log_ref_path(s: str) -> PathFlavor:
+    if not s or not s.strip():                       # [1] empty/whitespace
+        return PathFlavor.EMPTY_OR_INVALID
+    if s.startswith(_UNC_PREFIX_BS4):                # [2] 4 backslashes -> UNC
+        return PathFlavor.UNC
+    if s.startswith(_UNC_PREFIX_BS2):                # [3] 2 backslashes -> UNC
+        return PathFlavor.UNC
+    if s.startswith(_NT_ROOT_BS):                    # [4] 1 backslash root -> NT_ABSOLUTE
+        return PathFlavor.NT_ABSOLUTE
+    if _DRIVE_ONLY.fullmatch(s):                     # [5] "C:" -> DRIVE_RELATIVE
+        return PathFlavor.DRIVE_RELATIVE
+    # 契约约束：_DRIVE_ABS 必须先于 _DRIVE_ANY 求值，保证 "C:\x" 命中 NT_ABSOLUTE (P0-3)
+    if _DRIVE_ABS.match(s):                          # [6] "C:/x" or "C:\x" -> NT_ABSOLUTE
+        return PathFlavor.NT_ABSOLUTE
+    if _DRIVE_ANY.match(s):                          # [7] "C:x" -> DRIVE_RELATIVE
+        return PathFlavor.DRIVE_RELATIVE
+    if s.startswith(_POSIX_ROOT_FS2):                # [8] "//..." -> POSIX_ABSOLUTE
+        return PathFlavor.POSIX_ABSOLUTE
+    if s.startswith(_FWD):                           # [9] "/x" -> POSIX_ABSOLUTE
+        return PathFlavor.POSIX_ABSOLUTE
+    return PathFlavor.SAFE_RELATIVE                  # [10] fallthrough
+
+
+class _ExemptInodeTracker:
+    """锁原语豁免追踪器。作用域限定于单次 poll/watch 调用，非长驻单例。"""
+    def __init__(self, maxsize: int = 256) -> None:
+        self._maxsize = maxsize
+        self._registered: set[tuple[int, int]] = set()
+        self._baseline_fp: dict[tuple[int, int], tuple[int, int]] = {}
+
+    def register(self, path: Path) -> None:
+        """登记 path 为锁原语豁免对象。立即执行 stat() 采样基线；失败时静默不写基线 (P1-1)。"""
+        try:
+            st = path.stat()
+            k = _inode_key(st.st_dev, st.st_ino)
+            self._registered.add(k)
+            self._baseline_fp[k] = (st.st_size, st.st_mtime_ns)
+            if sys.platform == "win32" and k != (0, 0):
+                k_win = _inode_key(0, 0)
+                self._registered.add(k_win)
+                self._baseline_fp[k_win] = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            pass
+
+    def is_exempt(self, key: tuple[int, int], size: int, mtime_ns: int) -> bool:
+        """单一 fail-closed 谓词：未注册、缺基线、漂移一律 False；完全吻合返回 True。"""
+        if key not in self._registered:
+            return False
+        base = self._baseline_fp.get(key)
+        if base is None:
+            return False
+        return base == (size, mtime_ns)
+
+    def baseline_keys(self) -> frozenset[tuple[int, int]]:
+        return frozenset(self._registered)
+
+
+def _new_tracker_for_poll(maxsize: int = 256) -> _ExemptInodeTracker:
+    """创建单次 poll/watch 调用的局部豁免追踪器实例 (R2 契约)。"""
+    return _ExemptInodeTracker(maxsize=maxsize)
+
+
+def _snapshot_business_state_scandir(
+    ws: Path, *, exempt: _ExemptInodeTracker | None = None
+) -> dict[tuple[int, int], tuple[int, int]]:
+    out: dict[tuple[int, int], tuple[int, int]] = {}
+    stack = [ws]
+    while stack:
+        curr = stack.pop()
+        try:
+            with os.scandir(curr) as it:
+                for entry in it:
+                    if entry.name in {".git", ".venv", "venv", "__pycache__"}:
+                        continue
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                            continue
+                        st = entry.stat(follow_symlinks=False)
+                        k = _inode_key(st.st_dev, st.st_ino)
+                        if exempt is not None and exempt.is_exempt(k, st.st_size, st.st_mtime_ns):
+                            continue
+                        # 锁原语豁免域 (W10 §3.3.1): Unix filelock (*.lock) 属于锁原语豁免域
+                        if entry.name.endswith(".lock"):
+                            continue
+                        out[k] = (st.st_size, st.st_mtime_ns)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return out
+
+
 def _assert_nonterminal_contract(d: Mapping[str, Any]) -> None:
     """运行时三重契约守卫 (24.3)：
     1. 白名单严格对称强校验：set(d) == POLL_NONTERMINAL_FIELDS（多键或缺键均硬失败）
-    2. 路径防泄漏与相对路径契约：断言 not os.path.isabs(d['log_ref'])，杜绝绝对路径
+    2. 路径防泄漏与跨平台相对路径契约：断言 _classify_log_ref_path(d['log_ref']) is PathFlavor.SAFE_RELATIVE
     3. 1024 字节预算硬断言：canonical_snapshot_bytes(d) <= MAX_NONTERMINAL_SNAPSHOT_BYTES
     违规抛出 SnapshotContractViolation (DRIFT-4)。
     """
@@ -309,13 +429,17 @@ def _assert_nonterminal_contract(d: Mapping[str, Any]) -> None:
             errs.append(f"extra keys: {extra}")
         raise SnapshotContractViolation(f"Nonterminal contract keys mismatch: {'; '.join(errs)}")
 
-    log_ref = str(d.get("log_ref", ""))
-    if os.path.isabs(log_ref) or ("\\" in log_ref and not os.path.basename(log_ref) == log_ref) or ("/" in log_ref and not os.path.basename(log_ref) == log_ref):
-        raise SnapshotContractViolation(f"log_ref must be relative path, got: '{log_ref}'")
+    raw_log_ref = d.get("log_ref")
+    if not isinstance(raw_log_ref, str):
+        raise SnapshotContractViolation(f"log_ref must be str, got {type(raw_log_ref).__name__}")
+
+    flavor = _classify_log_ref_path(raw_log_ref)
+    if flavor is not PathFlavor.SAFE_RELATIVE or "/" in raw_log_ref or "\\" in raw_log_ref:
+        raise SnapshotContractViolation(f"log_ref must be relative path, got: '{raw_log_ref}'")
 
     for k, v in d.items():
-        if isinstance(v, str):
-            if os.path.isabs(v):
+        if isinstance(v, str) and k != "log_ref":
+            if _classify_log_ref_path(v) in {PathFlavor.NT_ABSOLUTE, PathFlavor.POSIX_ABSOLUTE, PathFlavor.UNC}:
                 raise SnapshotContractViolation(f"String field '{k}' contains absolute path: '{v}'")
 
     size_bytes = canonical_snapshot_bytes(d)
@@ -323,6 +447,7 @@ def _assert_nonterminal_contract(d: Mapping[str, Any]) -> None:
         raise SnapshotContractViolation(
             f"Nonterminal snapshot size ({size_bytes} bytes) exceeds {MAX_NONTERMINAL_SNAPSHOT_BYTES} bytes limit"
         )
+
 
 
 def project_nonterminal(snapshot: PollSnapshot) -> dict[str, Any]:

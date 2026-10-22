@@ -20,6 +20,11 @@
    - [案例 5: Windows CMD/PowerShell 默认代码页 (GBK/CP936) 与 UTF-8 表情包编码冲突](#案例-5-windows-cmdpowershell-默认代码页-gbkcp936-与-utf-8-表情包编码冲突)
    - [案例 6: 生产 TOCTOU 违背零 stat 契约与测试全局 monkeypatch stdlib (os.stat) 导致 pytest session 级崩溃](#案例-6-生产-toctou-违背零-stat-契约与测试全局-monkeypatch-stdlib-osstat-导致-pytest-session-级崩溃)
    - [案例 7: 平台专属标准库属性 (ctypes.windll) 未做存在性守卫导致 mock.patch 在 POSIX 抛 AttributeError](#案例-7-平台专属标准库属性-ctypeswindll-未做存在性守卫导致-mockpatch-在-posix-抛-attributeerror)
+   - [案例 8: 测试断言紧贴超时边界导致 CI 虚拟化宿主调度抖动偶发 Flaky](#案例-8-测试断言紧贴超时边界导致-ci-虚拟化宿主调度抖动偶发-flaky)
+   - [案例 9: Python 3.11 与 3.12 PEP 701 差异导致 f-string 表达式内反斜杠触发编译期 SyntaxError](#案例-9-python-311-与-312-pep-701-差异导致-f-string-表达式内反斜杠触发编译期-syntaxerror)
+   - [案例 10: IDE 参数默认值剥离与 docstring 描述缺失引发大模型调用面漂移 (CI-2026-10-21-AST-01)](#案例-10-ide-参数默认值剥离与-docstring-描述缺失引发大模型调用面漂移-ci-2026-10-21-ast-01)
+   - [案例 11: FastMCP Context 形参注入的零 Schema 漂移契约与 report_progress 版本能力矩阵 (CI-2026-10-22-MCP-01)](#案例-11-fastmcp-context-形参注入的零-schema-漂移契约与-report_progress-版本能力矩阵-ci-2026-10-22-mcp-01)
+   - [案例 12: Python 3.12 跨平台路径分类器与 Unix Filelock 锁文件 W10 零写契约违规 (INC-20261022-01)](#案例-12-python-312-跨平台路径分类器与-unix-filelock-锁文件-w10-零写契约违规-inc-20261022-01)
 4. [跨平台编码安全准则 (Defensive Guidelines)](#4-跨平台编码安全准则-defensive-guidelines)
 5. [CI 验证与双向回归自检矩阵](#5-ci-验证与双向回归自检矩阵)
 6. [新增 CI 异常案例归档规范与模板](#6-新增-ci-异常案例归档规范与模板)
@@ -63,6 +68,8 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 | **INC-20260925-02** | 2026-09-25 | `8f97709` / `main` (Run 36143945613) | Windows Server (Py 3.11) | `assert elapsed < 2.5` 超时测试偶发 Flaky (2.609s) | [案例 8](#案例-8-测试断言紧贴超时边界导致-ci-虚拟化宿主调度抖动偶发-flaky) | `pending` (Step 06) | ✅ 已闭环 |
 | **INC-20260930-01** | 2026-09-30 | `b19e981` / `main` (Run 36718049950) | Ubuntu 3.11, Windows 3.11 | `SyntaxError: f-string expression part cannot include a backslash` | [案例 9](#案例-9-python-311-与-312-pep-701-差异导致-f-string-表达式内反斜杠触发编译期-syntaxerror) | `pending` (Hotfix) | ✅ 已闭环 |
 | **CI-2026-10-21-AST-01** | 2026-10-21 | Task 1.1 / `main` | Cross-Platform | IDE 剥离 default 导致大模型主动传入 `raw_text=True` <!-- quench-prompt-surface:historical --> 破坏结构化契约 | [案例 10](#案例-10-ide-参数默认值剥离与-docstring-描述缺失引发大模型调用面漂移-ci-2026-10-21-ast-01) | `main` | ✅ 已闭环 |
+| **CI-2026-10-22-MCP-01** | 2026-10-22 | Task 24.1 / `main` | Ubuntu 22.04 (All Py) | Context 形参注入零 Schema 漂移契约 | [案例 11](#案例-11-fastmcp-context-形参注入的零-schema-漂移契约与-report_progress-版本能力矩阵-ci-2026-10-22-mcp-01) | `main` | ✅ 已闭环 |
+| **INC-20261022-01** | 2026-10-22 | Task 1.1 / `main` | Linux CI (Py 3.12) | 路径分类器跨平台歧义与 Unix FileLock W10 零写契约假红 | [案例 12](#案例-12-python-312-跨平台路径分类器与-unix-filelock-锁文件-w10-零写契约违规-inc-20261022-01) | `main` | ✅ 已闭环 |
 
 ---
 
@@ -324,6 +331,9 @@ foreach ($job in $jobs.jobs) {
 8. **最低支持 Python 版本基线与版本下限纪律 (Minimum Python Version Floor Discipline)**:
    - 代码库最低支持基线正式提升至 **Python >= 3.12**，彻底解锁 PEP 701 现代 f-string 语法（表达式内部允许反斜杠与嵌套引号）。
    - 旧版 3.11 语法守卫已退役，由 `test_python_floor_discipline.py` 纪律性断言守护最低版本下限，阻止 CI 与配置回退。
+9. **跨平台路径识别与 W10 锁原语豁免纪律 (Cross-Platform Path Flavor & W10 Lock Primitive Exemption)**:
+   - 跨平台路径安全校验严禁依赖平台专属的 `os.path.isabs`；必须使用跨平台统一分类器（如 `_classify_log_ref_path`），且必须由命名常量 `_BACKSLASH = chr(0x5C)` 与 `re.escape` 构建字符类，严格保证 Windows 盘符绝对路径 (`_DRIVE_ABS`) 优先于盘符相对路径 (`_DRIVE_ANY`) 判定。
+   - 任何针对“零磁盘写入 (W10)”的全局快照审计，必须在逻辑上划分**业务数据域**与**锁原语豁免域 (W10 Exclusion Domain)**：`*.lock` 文件及未漂移的受控锁 inode 属于底层进程互斥原语，绝不允许误报为业务写入故障。
 
 ---
 
@@ -417,7 +427,7 @@ foreach ($job in $jobs.jobs) {
 
 ---
 
-### 案例 9: 跨环境 CI Scope 平价偏移与 Preflight 目录探测 Windows 句柄锁定假阴性
+### 案例 9 附录: 跨环境 CI Scope 平价偏移与 Preflight 目录探测 Windows 句柄锁定假阴性
 
 - **首次触发节点**: GitHub Actions CI 矩阵中 `test_no_vendor_literals_in_core.py`、`test_no_api_bypass.py` 及 Windows 安装 preflight 测试失败
 - **现象**:
@@ -487,6 +497,27 @@ foreach ($job in $jobs.jobs) {
      - 在 `scripts/check_prompt_surface.py` 中引入 `INJECTED_FRAMEWORK_PARAMS = frozenset({"self", "ctx", "context"})`，对框架注入参数提供确定性豁免，允许在 docstring 中声明说明而不触发 `P1_PARAM_UNKNOWN`。
   3. **运行时动态能力探测与自适应降级 (`ProgressBridge`)**:
      - 通过 `inspect.signature(ctx.report_progress)` 动态嗅探 `supports_message`，不支持时安全降级为仅发送浮点标量，避免破坏长轮询 RPC 主循环。
+
+---
+
+### 案例 12: Python 3.12 跨平台路径分类器与 Unix Filelock 锁文件 W10 零写契约违规 (INC-20261022-01)
+
+- **首次触发节点**: GitHub Actions Linux CI 运行 `test_poll_nonterminal_contract_v2.py` 与 `test_reviewer_poll_longpoll_v124.py`
+- **现象**:
+  1. Linux CI 环境下 `dev_reviewer_poll` 违背 W10 零写契约：`test_watch_zero_disk_writes_during_poll` 检测到临时工作区内有文件产生变动，原因是 Unix `filelock` 在无并发锁竞争时在 POSIX 平台生成了 `*.lock` 锁原语；
+  2. 跨平台路径分类器 `_classify_log_ref_path` 在 Windows NT 盘符绝对路径（如 `C:/...` 与 `C:\...`）在 POSIX / Linux CI 运行时因缺少反斜杠转义规范化常量导致判定偏离，或盘符相对路径（如 `C:x`）与绝对路径（如 `C:\x`）求值顺序冲突。
+- **根因深度复盘与机制原理**:
+  1. **锁原语属于 W10 豁免域**: W10（零磁盘写入）契约旨在杜绝业务日志刷新、数据重写或状态持久化导致磁盘颠簸，但进程间锁机制（如 `filelock` 在 Linux 下依赖的锁文件）属于底层锁原语，不可与业务写入混为一谈。全盘扫描必须将锁原语纳入 W10 Exclusion Domain（锁原语豁免域）。
+  2. **字符类真值与转义歧义**: 正则表达式中直接使用未经 `re.escape` 的反斜杠字符串容易在不同层级的解析器中丢失转义。必须通过显式字符常量 `_BACKSLASH = chr(0x5C)` 与 `_FWD = chr(0x2F)` 构造字符类 `_SEP_CLASS = re.escape(_FWD) + re.escape(_BACKSLASH)`，并保证 `_DRIVE_ABS` 优先于 `_DRIVE_ANY` 求值。
+- **加固方案 (三重闭环)**:
+  1. **生产分类器与豁免追踪器加固 (`reviewer_jobs.py`)**:
+     - 明确 `_classify_log_ref_path` 10 步求值契约，强保证 `_DRIVE_ABS` 先于 `_DRIVE_ANY`；
+     - 实现 `_ExemptInodeTracker` 追踪器与 `_snapshot_business_state_scandir`，自动排除 `.lock` 锁原语并对豁免 inode 进行无写漂移豁免。
+  2. **跨平台边界单测与 AST 门禁 (`test_ci_case6_zero_stat_harness.py`)**:
+     - 引入 23 项无重复权威分类向量；
+     - 静态 AST 扫描确保 `_snapshot_business_state_scandir` 无显式 `os.stat` / `Path.stat` 冗余系统调用开销，确保零 stat 契约与 W10 兼容性。
+  3. **防御准则沉淀 (Guideline 9)**:
+     - 跨平台路径识别与 W10 锁原语豁免纪律。
 
 
 

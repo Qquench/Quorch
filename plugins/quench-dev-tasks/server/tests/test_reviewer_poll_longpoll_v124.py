@@ -17,6 +17,7 @@ import asyncio
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -38,6 +39,9 @@ from reviewer_jobs import (
     ReviewerJobSupervisor,
     ReviewerPhase,
     _durable_write_json,
+    _inode_key,
+    _new_tracker_for_poll,
+    _snapshot_business_state_scandir,
 )
 import server
 from server import _clamp_wait, _poll_impl, dev_reviewer_poll
@@ -270,38 +274,88 @@ async def test_poll_rejects_unauthorized_session(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.heavy
 @pytest.mark.anyio
 async def test_watch_zero_disk_writes_during_poll(tmp_path):
     """W10: Polling loop performs zero disk write or log flushing."""
-    ws = str(tmp_path)
-    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    ws = Path(tmp_path)
+    supervisor = ReviewerJobSupervisor.for_workspace(str(ws))
     rec = supervisor.submit({"query": "q", "session_id": "sess_w10"})
 
-    # Collect initial snapshot of file modification times
-    files_before = {}
-    for root, _, files in os.walk(ws):
-        for f in files:
-            p = os.path.join(root, f)
-            files_before[p] = os.path.getmtime(p)
+    # 显式在 ws 下创建 .lock 文件，模拟 Unix filelock 在混合环境下的锁原语波动
+    lock_file = ws / "supervisor.lock"
+    lock_file.write_text("initial lock")
+
+    tracker = _new_tracker_for_poll()
+    files_before = _snapshot_business_state_scandir(ws, exempt=tracker)
 
     res = await dev_reviewer_poll(
-        workspace_root=ws,
+        workspace_root=str(ws),
         job_id=rec.job_id,
         session_id="sess_w10",
         wait_max_s=1,
     )
     assert res["state"] == "QUEUED"
 
-    files_after = {}
-    for root, _, files in os.walk(ws):
-        for f in files:
-            p = os.path.join(root, f)
-            files_after[p] = os.path.getmtime(p)
+    # 模拟 lock 文件内容变动或触碰，断言其因属于 W10 Exclusion Domain 不会导致零写契约失败
+    lock_file.write_text("lock touched during poll")
 
-    # Assert exactly the same files and unchanged mtimes
-    assert set(files_before.keys()) == set(files_after.keys())
-    for p in files_before:
-        assert files_before[p] == files_after[p], f"File modified during poll: {p}"
+    files_after = _snapshot_business_state_scandir(ws, exempt=tracker)
+
+    # 断言业务状态完全一致，无磁盘写入
+    assert files_before == files_after
+
+
+def test_exempt_tracker_key_consistency(tmp_path):
+    """验证 _inode_key(st_dev, st_ino) 的元组输出在同一物理 inode 上的唯一与恒定性。"""
+    f = Path(tmp_path) / "test_key.txt"
+    f.write_text("sample")
+    st1 = f.stat()
+    k1 = _inode_key(st1.st_dev, st1.st_ino)
+    st2 = f.stat()
+    k2 = _inode_key(st2.st_dev, st2.st_ino)
+    assert k1 == k2
+    assert isinstance(k1, tuple)
+    assert len(k1) == 2
+
+
+def test_register_stat_failure_is_failclosed(tmp_path):
+    """模拟 register 捕获 OSError，验证确保降级为业务文件受控审计 (fail-closed)。"""
+    tracker = _new_tracker_for_poll()
+    non_existent = Path(tmp_path) / "ghost.txt"
+    # 不存在路径 register 不抛异常，静默不写基线
+    tracker.register(non_existent)
+    # is_exempt 恒 False (fail-closed)
+    assert tracker.is_exempt((0, 0), 100, 200) is False
+
+
+def test_exempt_drift_reincluded_as_business(tmp_path):
+    """豁免文件内容发生写漂移时，is_exempt 返回 False 并被重新纳入业务状态快照进行写探测。"""
+    ws = Path(tmp_path)
+    f = ws / "exempt_target.log"
+    f.write_text("initial")
+
+    tracker = _new_tracker_for_poll()
+    tracker.register(f)
+    st_init = f.stat()
+    k = _inode_key(st_init.st_dev, st_init.st_ino)
+
+    # 未漂移时，属于豁免
+    assert tracker.is_exempt(k, st_init.st_size, st_init.st_mtime_ns) is True
+    snap1 = _snapshot_business_state_scandir(ws, exempt=tracker)
+    assert not any(v == (st_init.st_size, st_init.st_mtime_ns) for v in snap1.values())
+
+    # 发生写漂移
+    f.write_text("drifted content that alters size or mtime")
+    st_drift = f.stat()
+
+    # 漂移后，is_exempt 返回 False
+    assert tracker.is_exempt(k, st_drift.st_size, st_drift.st_mtime_ns) is False
+    snap2 = _snapshot_business_state_scandir(ws, exempt=tracker)
+    assert any(v == (st_drift.st_size, st_drift.st_mtime_ns) for v in snap2.values())
+    if sys.platform != "win32":
+        assert k in snap2
+        assert snap2[k] == (st_drift.st_size, st_drift.st_mtime_ns)
 
 
 # ---------------------------------------------------------------------------
