@@ -3,6 +3,15 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-22] 2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming.md
+
+- **Task 24.1**: FastMCP Context 注入零 Schema 漂移验证与 report_progress 版本能力矩阵（前置阻塞）
+- **Task 24.2**: ReviewerJobSupervisor.watch() 异步观察原语与 PollSnapshot 共享契约冻结（无锁跨 await / 代际自愈 / 探针节流）
+- **Task 24.3**: 非终态快照 V2 瘦身（剥离嵌套 progress，引入 elapsed_s 标量 + 三重契约守卫）
+- **Task 24.4**: ProgressBridge 进度桥接器（token 嗅探 / 单调计数 / 1s 合流 / fail-open / 取消透传 / 版本降级）
+- **Task 24.5**: dev_reviewer_poll 长轮询主循环重构接入与 E1.5 回归守门（零回归 / 零容量占用 / 零写盘）
+- **Task 24.6**: v1.24 契约文档三同步与 IDE 端到端走查规范固化
+
 ## [2026-10-22] 2026-10-22_hermetic_asset_inventory_pure_projection.md
 
 - **Task 1.1**: 资产清单门禁密封化重构：语义投影哈希取代文本剥离比对与测试解耦
