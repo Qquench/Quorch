@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Final, List, Optional, Sequence, Tuple
+from typing import Final, List, Optional, Sequence, Tuple, Union
 
 if sys.version_info >= (3, 7):
     try:
@@ -123,6 +123,37 @@ class PromptSurfaceOutcome(enum.Enum):
     GUARD_ERROR = "guard_error"    # 仅变更集获取失败 → fail-open
 
 
+QUENCH_CORE_STRONG_ANCHORS: Final[Tuple[str, ...]] = (
+    # 强锚点 = 不随插件分发、仅核心宿主拥有的 CI 脚本与小制品。
+    # 依据 docs/architecture/README.md §5：scripts/* 属客户端宿主脚本，
+    # 不属于 plugins/quench-dev-tasks/ 分发单元。
+    "scripts/check_prompt_surface.py",
+    "scripts/check_test_tiering_invariants.py",
+    "scripts/check_test_duration_baselines.py",
+    "docs/architecture/ide_tool_schemas.json",
+)
+
+
+def is_quorch_core_repo(repo_root: Union[Path, str]) -> bool:
+    """Host classification via STRONG anchors (not vendor-distributed).
+
+    Returns True iff at least one strong anchor exists under repo_root.
+    Vendored-plugin downstream repos (which contain plugins/quench-dev-tasks/scripts/
+    git_pre_commit_guard.py but none of the strong anchors) correctly classify as
+    downstream -> transparent SKIP, eliminating the ModuleNotFoundError/UNVERIFIABLE
+    false-positive that blocked all .md commits.
+
+    Security trade-off (explicit): all strong anchors absent => False (downstream).
+    This is intentionally fail-open for the gate, accepted because:
+      (a) strong anchors are client-side host CI artifacts NOT distributed with the plugin;
+      (b) any attempt to fake downstream by deleting strong anchors must itself modify
+          out-of-whitelist files, intercepted upstream by file_scope_guard (Tier-1) and
+          reconcile_workspace_against_whitelist (§3.2).
+    """
+    root = Path(repo_root)
+    return any((root / anchor).is_file() for anchor in QUENCH_CORE_STRONG_ANCHORS)
+
+
 PROMPT_SURFACE_TRIGGER_PATHS: Final[frozenset[str]] = frozenset({
     "plugins/quench-dev-tasks/server/server.py",
     "plugins/quench-dev-tasks/server/tool_surface_constants.py",
@@ -157,6 +188,9 @@ def evaluate_prompt_surface_check(
     changed_paths: Optional[Sequence[str]], *, repo_root: Path
 ) -> PromptSurfaceOutcome:
     """Evaluate Prompt-Surface contract gate (P1~P5). Fail-closed on violation/error."""
+    if not is_quorch_core_repo(repo_root):
+        return PromptSurfaceOutcome.SKIP
+
     if changed_paths is None:
         return PromptSurfaceOutcome.GUARD_ERROR
 
@@ -169,6 +203,10 @@ def evaluate_prompt_surface_check(
             scripts_dir = repo_root / "scripts"
             if str(scripts_dir) not in sys.path:
                 sys.path.insert(0, str(scripts_dir))
+            import importlib.util
+            spec = importlib.util.find_spec("check_prompt_surface")
+            if not spec or not spec.origin or str(repo_root) not in spec.origin:
+                return PromptSurfaceOutcome.UNVERIFIABLE
             import check_prompt_surface
             rc = check_prompt_surface.main(["--check", "--workspace", str(repo_root)])
             if rc == 0:

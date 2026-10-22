@@ -234,6 +234,7 @@ To permanently guard against model prompt surface drift, IDE schema divergence, 
 - **P4 (Workspace Example Call Legality)**: AST check ensuring all markdown Python code fences call MCP tools with valid keywords, protected by R2 anti-self-lock exclusions (`docs/dev_tasks/`, `docs/archive/`).
 - **P5 (Historical Allowlist Exemption Discipline)**: Strictly enforces line-level exemption markers (`<!-- quench-prompt-surface:historical -->`) for audited historical references in `CHANGELOG.md` and compatibility guides.
 - **Pre-commit Guard Integration**: Physical intercept in `git_pre_commit_guard.py` before any commit touches code or documentation.
+- **Host Boundary**: This gate is active only in the Quench core repository; identified via strong anchor probes (`scripts/check_prompt_surface.py`, `scripts/check_test_tiering_invariants.py`, `scripts/check_test_duration_baselines.py`, `docs/architecture/ide_tool_schemas.json`). Downstream repositories that vendor the guard but lack strong anchors transparently `SKIP` with sub-millisecond overhead.
 
 ---
 

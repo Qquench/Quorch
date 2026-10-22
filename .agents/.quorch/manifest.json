@@ -1254,6 +1254,17 @@
       "git_head_sha": "bbeb11d74d33347d8985655cf5ddf9da74828d68",
       "git_index_mtime": 1792623337.7564096,
       "released": true
+    },
+    "2026-10-22_fix_git_pre_commit_guard_downstream_isolation::1.1": {
+      "task_id": "2026-10-22_fix_git_pre_commit_guard_downstream_isolation::1.1",
+      "md_sha256": "85e4277d8a16f5296a1d78477a94b74c398af5d1702a4de235462fb583dd4526",
+      "generation": 1,
+      "holder_token": "token_1792631951019_9916",
+      "last_heartbeat_monotonic_ns": 498044484000000,
+      "last_heartbeat_wall_utc": "2026-10-22T01:25:56.804772+00:00",
+      "git_head_sha": "ae1387f1e7d01ea7d33c71209b99445c3868aa0a",
+      "git_index_mtime": 1792627435.5617075,
+      "released": true
     }
   }
 }

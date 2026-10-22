@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-22] 2026-10-22_fix_git_pre_commit_guard_downstream_isolation.md
+
+- **Task 1.1**: 修复 git_pre_commit_guard 对下游业务工程的 Prompt Surface 误伤拦截（终审补丁版）
+
 ## [2026-10-22] 2026-10-22_v1.24_mcp_progress_heartbeat_and_poll_slimming.md
 
 - **Task 24.1**: FastMCP Context 注入零 Schema 漂移验证与 report_progress 版本能力矩阵（前置阻塞）
