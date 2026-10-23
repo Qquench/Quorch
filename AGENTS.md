@@ -40,6 +40,12 @@
 - Spec: `dev_tasks_mcp_specification.md`
 Rules > Skills > `AGENTS.md`. Rules win on conflict.
 
+---
+## 4. Subagent Protocol & Envelope Dispatch
+- **Status Call Ownership**: ONLY the main session invokes `dev_tasks_status` and is driven by `harness_next_action`. All Subagents are strictly exempt from calling `dev_tasks_status` (子代理免调 status).
+- **Fallback Notice Transfer**: If `dev_tasks_status` returns `fallback_notice`, the main session must verbatim relay it to the user in its first turn.
+- **Envelope Routing**: Structured delegation uses `[QUENCH-DISPATCH: RUNNER | REVIEWER | RESEARCH]` envelope routing with host-neutral abstract verbs.
+
 <!-- QUENCH-CORE-INVARIANTS:BEGIN -->
 ## 5. Reminder: What You Must NOT Do
 
@@ -54,7 +60,8 @@ Rules > Skills > `AGENTS.md`. Rules win on conflict.
 
 ---
 ## 6. C3 Delivery Card (极简完工交付卡)
-Upon `dev_tasks_complete`, final response MUST be ≤5 lines:
+- **Output Timing**: The C3 delivery card MUST ONLY be output at stopping points or terminal states (`PAUSE_FOR_ACCEPTANCE`, `BLOCKED`, `ROADMAP_DONE`). In continuous relay states (`PROPOSE`, `REVIEW`, `CONFIRM`, `CHECKOUT`, `DISPATCH_RUNNER`, `SYNC_DOCS`, `ARCHIVE`, `NEXT_BATCH_PROPOSE`), agents MUST NOT prematurely end turns to dump C3 cards.
+- **Format**: Upon stopping or task completion, final response MUST be ≤5 lines:
 1. `[Task ID] ✔️ Completed` / `[Task ID] ✔️ 已完成`
 2. **Files**: Clickable links to touched files
 3. **Verify**: Test summary (`N passed, 0 failed`)

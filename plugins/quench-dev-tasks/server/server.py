@@ -117,8 +117,34 @@ from manifest import (
     capture_baseline,
     get_baseline_path,
 )
-
 from manifest_lease import reclaim_stale_task, probe_lease_health, HealthVerdict
+from runtime_mode import (
+    load_runtime_mode,
+    update_runtime_mode,
+    OrchestrationMode,
+    ReviewerChannel,
+    StopAtStage,
+    EffectiveModeSnapshot,
+)
+from dataclasses import replace
+from autopilot_harness import (
+    compute_next_action,
+    HarnessNextAction,
+    HarnessActionType,
+    TaskStateSnapshot,
+    LastEventSnapshot,
+)
+
+
+def _is_external_api_available(workspace_root: str, config: Optional[Any] = None) -> bool:
+    try:
+        if config is None:
+            config = load_project_config(workspace_root)
+        client = ReviewerClient.from_config(config)
+        return bool(client.resolve_api_key()) or client.is_available()
+    except Exception:
+        return False
+
 from task_writer import (
     write_task_file_guarded,
     split_task_document,
@@ -440,14 +466,22 @@ def _get_recent_hook_logs(workspace_root: str, max_lines: int = 10) -> List[str]
 def dev_tasks_status(
     workspace_root: str,
     include_drafts: bool = False,
+    switch_mode: Optional[Literal["standard", "inverted"]] = None,
+    switch_reviewer_channel: Optional[Literal["external_api", "host_subagent"]] = None,
+    stop_at: Optional[Literal["none", "after_propose", "after_review", "after_confirm", "before_archive", "after_batch"]] = None,
+    task_file: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks.
+    """Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks. Supports runtime orchestration mode switching and autopilot breakpoint configuration.
 
-    [中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务。
+    [中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务，支持双模运行时切换与 Autopilot 断点配置。
 
     Args:
         workspace_root: Root path of the target workspace / 项目根目录绝对路径。
         include_drafts: Whether to include draft tasks in pending queue (default False) / 是否在待领队列中包含草案任务（默认隔离）。
+        switch_mode: Target orchestration mode ('standard', 'inverted') / 目标编排模式。
+        switch_reviewer_channel: Target reviewer channel ('external_api', 'host_subagent') / 目标审查通信渠道。
+        stop_at: Autopilot breakpoint stage ('none', 'after_propose', 'after_review', 'after_confirm', 'before_archive', 'after_batch') / Autopilot 停靠断点阶段。
+        task_file: Optional target task file name to bind / 可选绑定的任务单文件名。
     """
     try:
         config = load_project_config(workspace_root)
@@ -492,9 +526,39 @@ def dev_tasks_status(
             pass
 
     dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+    ext_available = _is_external_api_available(workspace_root, config)
+    snapshot = load_runtime_mode(workspace_root, ext_available)
+    has_mutation = (
+        switch_mode is not None
+        or switch_reviewer_channel is not None
+        or stop_at is not None
+        or task_file is not None
+    )
+
     if not os.path.exists(dev_tasks_dir):
         os.makedirs(dev_tasks_dir, exist_ok=True)
-        return {
+        runtime_mode_changed = False
+        rejection_reason: Optional[str] = None
+        runtime_mode_warning: Optional[str] = snapshot.runtime_mode_warning
+        if has_mutation:
+            if snapshot.effective_mode == "inverted" and switch_reviewer_channel is not None and switch_mode != "standard":
+                runtime_mode_changed = False
+                rejection_reason = "switch_denied_mode_inverted"
+                runtime_mode_warning = "reviewer_channel 仅在 standard 模式下有效；当前为 inverted。"
+            else:
+                new_snapshot, applied, _ = update_runtime_mode(
+                    workspace_root=workspace_root,
+                    switch_mode=switch_mode,
+                    switch_reviewer_channel=switch_reviewer_channel,
+                    stop_at=stop_at,
+                    task_file=task_file,
+                    external_api_available=ext_available,
+                )
+                snapshot = new_snapshot
+                runtime_mode_changed = applied
+                runtime_mode_warning = snapshot.runtime_mode_warning
+
+        empty_res = {
             "project_name": config.project_name,
             "dev_tasks_dir": dev_tasks_dir,
             "files": [],
@@ -509,8 +573,22 @@ def dev_tasks_status(
                 "matched_queue": [],
             },
             "bypass_queue": [],
+            "effective_mode": snapshot.effective_mode,
+            "mode_source": snapshot.mode_source,
+            "effective_reviewer_channel": snapshot.effective_reviewer_channel,
+            "runner_subagent_model_hint": snapshot.runner_subagent_model_hint,
+            "fallback_notice": snapshot.fallback_notice,
+            "runtime_mode_warning": runtime_mode_warning,
+            "session_role_contract": snapshot.session_role_contract,
+            "autopilot": snapshot.autopilot.to_dict(),
             "message": f"Tasks directory created: {dev_tasks_dir}. No task files currently found. / 任务目录已创建: {dev_tasks_dir}，当前暂无任务单。",
         }
+        if has_mutation:
+            empty_res["runtime_mode_changed"] = runtime_mode_changed
+            if rejection_reason is not None:
+                empty_res["reason"] = rejection_reason
+        _inject_harness_next_action(workspace_root, "dev_tasks_status", empty_res, last_success=True, task_file=task_file, config=config)
+        return empty_res
 
     md_files = glob.glob(os.path.join(dev_tasks_dir, "*.md"))
     file_records = []
@@ -595,6 +673,31 @@ def dev_tasks_status(
         except Exception:
             continue
 
+    runtime_mode_changed = False
+    rejection_reason: Optional[str] = None
+    runtime_mode_warning: Optional[str] = snapshot.runtime_mode_warning
+
+    if has_mutation:
+        if snapshot.effective_mode == "inverted" and switch_reviewer_channel is not None and switch_mode != "standard":
+            runtime_mode_changed = False
+            rejection_reason = "switch_denied_mode_inverted"
+            runtime_mode_warning = "reviewer_channel 仅在 standard 模式下有效；当前为 inverted。"
+        elif active_task is not None and (switch_mode is not None or switch_reviewer_channel is not None):
+            runtime_mode_changed = False
+            rejection_reason = "switch_denied_task_in_progress"
+        else:
+            new_snapshot, applied, _ = update_runtime_mode(
+                workspace_root=workspace_root,
+                switch_mode=switch_mode,
+                switch_reviewer_channel=switch_reviewer_channel,
+                stop_at=stop_at,
+                task_file=task_file,
+                external_api_available=ext_available,
+            )
+            snapshot = new_snapshot
+            runtime_mode_changed = applied
+            runtime_mode_warning = snapshot.runtime_mode_warning
+
     result_data = {
         "project_name": config.project_name,
         "dev_tasks_dir": dev_tasks_dir,
@@ -610,12 +713,33 @@ def dev_tasks_status(
             "matched_queue": list(reconcile_report.matched_queue),
         },
         "bypass_queue": list(reconcile_report.bypass_queue),
+        "effective_mode": snapshot.effective_mode,
+        "mode_source": snapshot.mode_source,
+        "effective_reviewer_channel": snapshot.effective_reviewer_channel,
+        "runner_subagent_model_hint": snapshot.runner_subagent_model_hint,
+        "fallback_notice": snapshot.fallback_notice,
+        "runtime_mode_warning": runtime_mode_warning,
+        "session_role_contract": snapshot.session_role_contract,
+        "autopilot": snapshot.autopilot.to_dict(),
     }
+    if has_mutation:
+        result_data["runtime_mode_changed"] = runtime_mode_changed
+        if rejection_reason is not None:
+            result_data["reason"] = rejection_reason
     if reconcile_report.bypass_queue:
         result_data["bypass_warning"] = (
             f"⚠️ Detected {len(reconcile_report.bypass_queue)} unauthorized rogue task files quarantined in bypass_queue: "
             f"{list(reconcile_report.bypass_queue)} / 检测到未授权旁路任务单已物理隔离"
         )
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_status",
+        result_data,
+        last_success=True,
+        task_file=task_file,
+        current_task_id=(active_task.get("id") if active_task else None),
+        config=config,
+    )
     return result_data
 
 
@@ -668,15 +792,24 @@ def dev_tasks_propose(
             mode=mode,
         )
     except Exception as e:
-        return {
+        err_res = {
             "created": False,
             "errors": [str(e)],
             "message": f"Failed to propose tasks: {e} / 提交任务单失败: {e}",
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_propose",
+            err_res,
+            last_success=False,
+            task_file=task_file_name,
+            config=config,
+        )
+        return err_res
 
     written = res.get("written", [])
     skipped = res.get("skipped", [])
-    return {
+    res_dict = {
         "created": True,
         "file_path": target_path,
         "created_count": len(written),
@@ -686,6 +819,15 @@ def dev_tasks_propose(
         "warnings": [],
         "message": f"Successfully executed '{mode}' for {len(written)} tasks in {target_path} / 成功在 {target_path} 执行 '{mode}' 写入 {len(written)} 项任务",
     }
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_propose",
+        res_dict,
+        last_success=True,
+        task_file=task_file_name,
+        config=config,
+    )
+    return res_dict
 
 
 ReadStatus = Literal["ok", "missing", "unparsable", "truncated"]
@@ -828,6 +970,19 @@ def _read_recent_audit_records(path: str, max_tail_bytes: int) -> tuple[list[dic
         return records, "unparsable", parse_skipped_lines
 
     return records, "ok", parse_skipped_lines
+
+
+def _resolve_record_source(rec: Mapping[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """返回 (source, degraded_reason)。
+    source 缺失（key 不存在或 None）→ ("reviewer_client", None)。
+    source 存在但非 str 或为空串 → (None, "record_unparsable")。
+    """
+    if "source" not in rec or rec["source"] is None:
+        return ("reviewer_client", None)
+    val = rec["source"]
+    if not isinstance(val, str) or not val.strip():
+        return (None, "record_unparsable")
+    return (val.strip(), None)
 
 
 def _check_audit_gate(
@@ -1024,6 +1179,55 @@ def _check_audit_gate(
                     "parse_skipped_lines": parse_skipped_lines,
                 }
 
+            # 来源解析与校验 (三态解析: missing/None 为 reviewer_client 兼容历史, 非 str 或空串为 record_unparsable)
+            source, source_degraded_reason = _resolve_record_source(matching_rec)
+            if source_degraded_reason == "record_unparsable":
+                return {
+                    "allowed": effective_on_degraded != "block",
+                    "reason": "record_unparsable",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            accepted_sources = getattr(policy, "accepted_sources", ("reviewer_client",))
+            if source not in accepted_sources:
+                return {
+                    "allowed": False,
+                    "reason": "record_source_not_accepted",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            # auto_fallback 模式源硬门禁: auto_fallback 状态下的非 reviewer_client 凭据永不接受
+            current_mode_source = None
+            try:
+                ext_avail = _is_external_api_available(workspace_root, config)
+                snap = load_runtime_mode(workspace_root, ext_avail)
+                current_mode_source = snap.mode_source
+            except Exception:
+                pass
+            effective_rec_mode_source = matching_rec.get("mode_source") or current_mode_source
+            if effective_rec_mode_source == "auto_fallback" and source != "reviewer_client":
+                return {
+                    "allowed": False,
+                    "reason": "record_auto_fallback_not_accepted",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
+            # verdict rework 硬拒绝
+            if matching_rec.get("verdict") == "rework":
+                return {
+                    "allowed": False,
+                    "reason": "record_rework",
+                    "artifact_ref": target_ref,
+                    "audit_ref": audit_ref_val,
+                    "parse_skipped_lines": parse_skipped_lines,
+                }
+
             # 降级判断
             is_degraded = bool(matching_rec.get("degraded_reason")) or matching_rec.get("status") == "degraded" or matching_rec.get("state") == "degraded"
 
@@ -1083,6 +1287,144 @@ def _check_audit_gate(
         }
 
 
+def _scan_active_roadmap(workspace_root: str) -> tuple[Optional[str], list[str]]:
+    """扫描 docs/roadmap/ 中处于 ACTIVE 状态的路线图文件及其待规划批次任务。"""
+    roadmap_dir = os.path.join(workspace_root, "docs", "roadmap")
+    if not os.path.isdir(roadmap_dir):
+        return (None, [])
+
+    for f in glob.glob(os.path.join(roadmap_dir, "*.md")):
+        if "archive" in f.replace("\\", "/").lower():
+            continue
+        try:
+            with open(f, "r", encoding="utf-8") as rf:
+                content = rf.read()
+            if "Status**: 🟡 ACTIVE" in content or "Status**: ACTIVE" in content:
+                rel_file = os.path.relpath(f, workspace_root).replace("\\", "/")
+                pending_batches: list[str] = []
+                for line in content.splitlines():
+                    if "⬜ 待规划" in line:
+                        clean_line = line.strip().lstrip("-* ").rstrip("*- ")
+                        pending_batches.append(clean_line)
+                return (rel_file, pending_batches)
+        except Exception:
+            continue
+    return (None, [])
+
+
+def _inject_harness_next_action(
+    workspace_root: str,
+    tool_name: str,
+    result_data: Dict[str, Any],
+    last_success: bool = True,
+    task_file: Optional[str] = None,
+    current_task_id: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> None:
+    try:
+        if config is None:
+            config = load_project_config(workspace_root)
+
+        ext_available = _is_external_api_available(workspace_root, config)
+        snapshot = load_runtime_mode(workspace_root, ext_available)
+
+        resolved_task_file = task_file or snapshot.autopilot.task_file
+        dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+        if not resolved_task_file and os.path.isdir(dev_tasks_dir):
+            md_files = [
+                f for f in glob.glob(os.path.join(dev_tasks_dir, "*.md"))
+                if "archive" not in f.replace("\\", "/").lower()
+            ]
+            if md_files:
+                md_files.sort(key=os.path.getmtime, reverse=True)
+                resolved_task_file = os.path.relpath(md_files[0], workspace_root).replace("\\", "/")
+
+        task_states: List[TaskStateSnapshot] = []
+        if resolved_task_file:
+            tf_abs = _resolve_task_file_path(workspace_root, resolved_task_file)
+            if os.path.isfile(tf_abs):
+                try:
+                    tasks = parse_task_file(tf_abs)
+                    for pt in tasks:
+                        task_states.append(
+                            TaskStateSnapshot(task_id=str(pt.id), status=pt.status, title=pt.title)
+                        )
+                except Exception:
+                    pass
+
+        roadmap_file, pending_batches = _scan_active_roadmap(workspace_root)
+
+        last_event = LastEventSnapshot(
+            tool_name=tool_name,
+            success=last_success,
+            result_data=result_data,
+        )
+
+        action, consume_stop_at = compute_next_action(
+            task_states=task_states,
+            effective_mode=snapshot.effective_mode,
+            reviewer_channel=snapshot.effective_reviewer_channel,
+            mode_source=snapshot.mode_source,
+            stop_at=snapshot.autopilot.stop_at,
+            stop_at_consumed=snapshot.autopilot.consumed,
+            consumed_for=snapshot.autopilot.consumed_for,
+            current_task_id=current_task_id,
+            autopilot_set_at=snapshot.autopilot.set_at,
+            review_round=1,
+            last_event=last_event,
+            roadmap_pending_batches=pending_batches,
+            roadmap_file=roadmap_file,
+            task_file=resolved_task_file,
+        )
+
+        if consume_stop_at:
+            new_snap, applied, mut = update_runtime_mode(
+                workspace_root=workspace_root,
+                external_api_available=ext_available,
+                consume_stop_at=True,
+                expect_set_at=snapshot.autopilot.set_at,
+                consumed_for=action.consume_for,
+            )
+            if mut.get("consume_mismatch") is True:
+                fresh_snap = load_runtime_mode(workspace_root, ext_available)
+                fresh_action, _ = compute_next_action(
+                    task_states=task_states,
+                    effective_mode=fresh_snap.effective_mode,
+                    reviewer_channel=fresh_snap.effective_reviewer_channel,
+                    mode_source=fresh_snap.mode_source,
+                    stop_at=fresh_snap.autopilot.stop_at,
+                    stop_at_consumed=fresh_snap.autopilot.consumed,
+                    consumed_for=fresh_snap.autopilot.consumed_for,
+                    current_task_id=current_task_id,
+                    autopilot_set_at=fresh_snap.autopilot.set_at,
+                    review_round=1,
+                    last_event=last_event,
+                    roadmap_pending_batches=pending_batches,
+                    roadmap_file=roadmap_file,
+                    task_file=resolved_task_file,
+                )
+                action = replace(
+                    fresh_action,
+                    expect_set_at=fresh_snap.autopilot.set_at,
+                    reason=f"{fresh_action.reason} [recomputed after CAS mismatch]",
+                )
+
+        if action.action == "ROADMAP_DONE":
+            try:
+                update_runtime_mode(
+                    workspace_root=workspace_root,
+                    stop_at="none",
+                    task_file="",
+                    external_api_available=ext_available,
+                )
+            except Exception:
+                pass
+
+        result_data["harness_next_action"] = action.to_dict()
+    except Exception:
+        pass
+
+
 @mcp.tool()
 def dev_tasks_confirm(
     workspace_root: str,
@@ -1135,12 +1477,20 @@ def dev_tasks_confirm(
                 ),
             })
     if errors:
-        return {
+        res_dict = {
             "file": target_path,
             "action": action,
             "updated": updated,
             "errors": errors,
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_confirm",
+            res_dict,
+            last_success=False,
+            task_file=task_file,
+        )
+        return res_dict
 
     # 1. 门禁仅在 action == 'confirm' 时生效 (rework / skip / revoke 不受门禁阻断)
     # 门禁在 manifest 锁外只读决策 (INV-1 / R11 锁序)
@@ -1222,12 +1572,20 @@ def dev_tasks_confirm(
             except Exception as e:
                 errors.append({"id": tid, "error": str(e)})
 
-    return {
+    res_dict = {
         "file": target_path,
         "action": action,
         "updated": updated,
         "errors": errors,
     }
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_confirm",
+        res_dict,
+        last_success=(len(errors) == 0),
+        task_file=task_file,
+    )
+    return res_dict
 
 
 DispatchStrategy = Literal["subagent", "engine", "manual"]
@@ -1566,6 +1924,15 @@ def dev_tasks_checkout(
                             resp["generation"] = existing_rec.generation
                         if clean_session_id:
                             resp["session_id"] = clean_session_id
+                        _inject_harness_next_action(
+                            workspace_root,
+                            "dev_tasks_checkout",
+                            resp,
+                            last_success=True,
+                            task_file=f_path,
+                            current_task_id=t.id,
+                            config=config,
+                        )
                         return resp
                     if t.status == STATUS_CONFIRMED:
                         try:
@@ -1587,6 +1954,15 @@ def dev_tasks_checkout(
                             }
                             if clean_session_id:
                                 resp_data["session_id"] = clean_session_id
+                            _inject_harness_next_action(
+                                workspace_root,
+                                "dev_tasks_checkout",
+                                resp_data,
+                                last_success=True,
+                                task_file=f_path,
+                                current_task_id=updated.id,
+                                config=config,
+                            )
                             return resp_data
                         except Exception as e:
                             return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
@@ -1626,6 +2002,15 @@ def dev_tasks_checkout(
                     }
                     if clean_session_id:
                         resp_data["session_id"] = clean_session_id
+                    _inject_harness_next_action(
+                        workspace_root,
+                        "dev_tasks_checkout",
+                        resp_data,
+                        last_success=True,
+                        task_file=f_path,
+                        current_task_id=updated.id,
+                        config=config,
+                    )
                     return resp_data
                 except Exception as e:
                     return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
@@ -1655,7 +2040,7 @@ def dev_tasks_checkout(
             reason=handoff_reason,
         )
 
-        return {
+        res_handoff = {
             "task_id": None,
             "batch_finished": True,
             "has_pending_tasks": len(pending_tasks) > 0,
@@ -1677,8 +2062,17 @@ def dev_tasks_checkout(
             ),
             "message": f"Current batch has no '✅ Confirmed' tasks. (Pending: {len(pending_tasks)}, Rework: {len(rework_tasks)}) / 当前批次已无 '✅ 已确认' 任务。(待终审: {len(pending_tasks)} 项, 需返工: {len(rework_tasks)} 项)",
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_checkout",
+            res_handoff,
+            last_success=True,
+            task_file=(os.path.basename(primary_file) if primary_file else None),
+            config=config,
+        )
+        return res_handoff
 
-    return {
+    res_completed = {
         "task_id": None,
         "batch_finished": True,
         "all_completed": True,
@@ -1694,6 +2088,14 @@ def dev_tasks_checkout(
         ),
         "message": "All tasks are completed. Prompt user for verification or ask to archive / 当前所有任务均已闭环完成。请根据任务性质提醒用户必要验收，或主动询问是否更新文档并归档。",
     }
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_checkout",
+        res_completed,
+        last_success=True,
+        config=config,
+    )
+    return res_completed
 
 
 @mcp.tool()
@@ -1784,12 +2186,22 @@ def dev_tasks_complete(
             "   - [EXEMPTION: non-behavioral-refactor]\n"
             "3. 补充测试或声明豁免后重新调用 dev_tasks_complete。"
         )
-        return {
+        rej_res = {
             "status": "rejected",
             "audit": audit,
             "guidance": guidance,
             "reason": "Governed code changed without new test assertions or valid exemption / 受管代码发生变更但缺少单测断言且未提供合法豁免",
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_complete",
+            rej_res,
+            last_success=False,
+            task_file=task_file,
+            current_task_id=task_id,
+            config=config,
+        )
+        return rej_res
 
     try:
         updated = transition_task(target_path, task_id, STATUS_COMPLETED, workspace_root=workspace_root)
@@ -1807,7 +2219,7 @@ def dev_tasks_complete(
         except OSError:
             pass
 
-        return {
+        res_completed = {
             "status": "completed",
             "task_id": updated.id,
             "title": updated.title,
@@ -1815,9 +2227,29 @@ def dev_tasks_complete(
             "audit": audit,
             "dod_output_recorded": bool(dod_output),
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_complete",
+            res_completed,
+            last_success=True,
+            task_file=task_file,
+            current_task_id=updated.id,
+            config=config,
+        )
+        return res_completed
 
     except Exception as e:
-        return {"status": "rejected", "reason": f"Failed to transition task to completed / 流转为已完成失败: {e}"}
+        err_res = {"status": "rejected", "reason": f"Failed to transition task to completed / 流转为已完成失败: {e}"}
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_complete",
+            err_res,
+            last_success=False,
+            task_file=task_file,
+            current_task_id=task_id,
+            config=config,
+        )
+        return err_res
 
 
 @mcp.tool()
@@ -2289,7 +2721,7 @@ async def dev_tasks_refine_spec(
             )
             persisted = True
 
-        return {
+        res_dict = {
             "ok": True,
             "refined": True,
             "degraded": True,
@@ -2313,6 +2745,16 @@ async def dev_tasks_refine_spec(
             "engine": "fallback_offline",
             "degraded_card": degraded_info,
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_refine_spec",
+            res_dict,
+            last_success=True,
+            task_file=task_file,
+            current_task_id=task_id,
+            config=config,
+        )
+        return res_dict
 
     # 2. 组装 System Prompt 与代码上下文 (四段式稳定性梯度拓扑)
     static_prefix = PromptAssembler.build_static_system_prefix(workspace_root, config)
@@ -2388,7 +2830,7 @@ async def dev_tasks_refine_spec(
             )
             persisted = True
 
-        return {
+        res_dict = {
             "ok": True,
             "refined": True,
             "degraded": not val_res.is_valid or not lint_res.passed,
@@ -2424,13 +2866,33 @@ async def dev_tasks_refine_spec(
             },
             "engine": config.reviewer_engine.provider,
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_refine_spec",
+            res_dict,
+            last_success=True,
+            task_file=task_file,
+            current_task_id=task_id,
+            config=config,
+        )
+        return res_dict
     except Exception as e:
-        return {
+        err_dict = {
             "ok": False,
             "degraded": True,
             "error": f"Reviewer engine execution failed / 审查引擎执行异常: {e}",
             "task_id": task_id,
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_refine_spec",
+            err_dict,
+            last_success=False,
+            task_file=task_file,
+            current_task_id=task_id,
+            config=config,
+        )
+        return err_dict
 
 
 @mcp.tool()
@@ -2624,13 +3086,22 @@ def dev_tasks_archive(workspace_root: str, task_file: str) -> Dict[str, Any]:
         t for t in tasks if t.status not in (STATUS_COMPLETED, STATUS_SKIPPED)
     ]
     if unclosed:
-        return {
+        res_unclosed = {
             "archived": False,
             "error": "There are still unclosed tasks in the task file, archival blocked / 任务单中仍有未关闭的任务，禁止归档。",
             "unclosed_tasks": [
                 {"id": t.id, "status": t.status, "title": t.title} for t in unclosed
             ],
         }
+        _inject_harness_next_action(
+            workspace_root,
+            "dev_tasks_archive",
+            res_unclosed,
+            last_success=False,
+            task_file=task_file,
+            config=config,
+        )
+        return res_unclosed
 
     completed = [t for t in tasks if t.status == STATUS_COMPLETED]
     changelog_abs = config.resolve_path("changelog_path")
@@ -2654,13 +3125,22 @@ def dev_tasks_archive(workspace_root: str, task_file: str) -> Dict[str, Any]:
 
     shutil.move(target_path, target_archive_path)
 
-    return {
+    res_success = {
         "archived": True,
         "original_path": target_path,
         "archive_path": target_archive_path,
         "changelog_updated": changelog_ok,
         "completed_count": len(completed),
     }
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_archive",
+        res_success,
+        last_success=True,
+        task_file=task_file,
+        config=config,
+    )
+    return res_success
 
 
 BYPASS_PRESET_CATEGORIES: Dict[str, List[str]] = {
@@ -3069,13 +3549,28 @@ async def dev_reviewer_poll(
 
     bridge = ProgressBridge.from_context(ctx)
 
-    return await _poll_impl(
+    res = await _poll_impl(
         workspace_root=workspace_root,
         job_id=job_id,
         session_id=session_id,
         wait_max_s=timeout_s,
         bridge=bridge,
     )
+    if isinstance(res, dict) and res.get("status") != "error":
+        try:
+            cfg = load_project_config(workspace_root)
+            snap = load_runtime_mode(workspace_root, _is_external_api_available(workspace_root, cfg))
+            if snap.autopilot.is_enabled:
+                _inject_harness_next_action(
+                    workspace_root,
+                    "dev_reviewer_poll",
+                    res,
+                    last_success=True,
+                    config=cfg,
+                )
+        except Exception:
+            pass
+    return res
 
 
 @mcp.tool()

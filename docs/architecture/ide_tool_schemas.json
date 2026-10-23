@@ -658,7 +658,7 @@
     }
   },
   "dev_tasks_status": {
-    "description": "Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks.\n\n[中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务。",
+    "description": "Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks. Supports runtime orchestration mode switching and autopilot breakpoint configuration.\n\n[中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务，支持双模运行时切换与 Autopilot 断点配置。",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -666,6 +666,70 @@
           "default": false,
           "description": "Whether to include draft tasks in pending queue (default False) / 是否在待领队列中包含草案任务（默认隔离）。",
           "type": "boolean"
+        },
+        "stop_at": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "after_propose",
+                "after_review",
+                "after_confirm",
+                "before_archive",
+                "after_batch"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Autopilot breakpoint stage ('none', 'after_propose', 'after_review', 'after_confirm', 'before_archive', 'after_batch') / Autopilot 停靠断点阶段。"
+        },
+        "switch_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "standard",
+                "inverted"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target orchestration mode ('standard', 'inverted') / 目标编排模式。"
+        },
+        "switch_reviewer_channel": {
+          "anyOf": [
+            {
+              "enum": [
+                "external_api",
+                "host_subagent"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target reviewer channel ('external_api', 'host_subagent') / 目标审查通信渠道。"
+        },
+        "task_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional target task file name to bind / 可选绑定的任务单文件名。"
         },
         "workspace_root": {
           "description": "Root path of the target workspace / 项目根目录绝对路径。",

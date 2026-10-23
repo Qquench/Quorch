@@ -107,24 +107,36 @@ Pre-commit guard blocks commits modifying out-of-scope files or without an activ
 ### ① 拦截目标与定位
 在执行 `dev_tasks_confirm` 时，验证受管路径任务具备真实的外部审查记录（诚实成本 < 绕过成本）。
 
-### ② 确定性守卫序阶梯 (R11 互斥完备)
+### ② 审查凭据通道与来源策略 (Attestation Channels & Accepted Sources)
+- **审查凭据通道**:
+  1. `dev_reviewer_poll`: 异步审查轮询终态记录；
+  2. `dev_tasks_refine_spec`: 规约强化与 AST 审查引擎生成的审查记录 (`source="refine_spec"`)。
+- **accepted_sources 来源控制**:
+  由 `quench_stack.yaml` 中 `audit_gate.accepted_sources` 配置（默认 `["reviewer_poll", "refine_spec"]`）。仅受信任来源的审查记录被接纳为有效放行凭据。
+- **SAFETY_DOWNGRADE_DENIED 防降级膨胀**:
+  当审查记录来源不在 `accepted_sources` 时阻断（拒绝原因 `record_source_not_accepted`）；当自动回退来源不被接纳时阻断（拒绝原因 `record_auto_fallback_not_accepted`）；当审查判定包含需返工结论时阻断（拒绝原因 `record_rework`）。
+
+### ③ 确定性守卫序阶梯 (R11 互斥完备)
 1. **disabled**: 门禁未开启时放行；
 2. **not_managed_scope**: 未涉及受管路径时放行；
 3. **session_bypass_active**: Tier-2 旁路有效且 session_id 匹配时放行；
 4. **日志完整性与记录匹配**:
    - 降级族 (`log_missing`, `log_unparsable`, `record_degraded`, `record_timestamp_invalid`, `tail_window_exhausted`) 受 `effective_on_degraded` 策略控制；
-   - 缺失族 (`record_stale`, `no_matching_record`) 受 `on_missing_record` 控制；
+   - 缺失族 (`record_stale`, `no_matching_record`, `record_source_not_accepted`, `record_auto_fallback_not_accepted`, `record_rework`) 受 `on_missing_record` 控制；
    - 内部错误 (`internal_error`) fail-open 放行；
 5. **matched**: 尾部记录逆序扫描匹配到未过期的有效审查记录时放行。
 
-### ③ 锁内重校验与 precondition_changed
+### ④ 锁内重校验与 precondition_changed
 `dev_tasks_confirm` 获锁后重算 `canonical_artifact_ref` 并断言状态仍为 `⬜ 待确认`，不满足时阻断。
 
 ---
 
 ## 8. Runner Completion Delivery Card Contract (C3 完工交付卡契约)
 
-- **Compact 4-Line Output / 极简 4 行卡（≤5行）**：Upon calling `dev_tasks_complete`, final response MUST adhere to:
+- **Output Timing / 交付卡输出时机**:
+  - The C3 delivery card MUST ONLY be output at stopping points or terminal states (`PAUSE_FOR_ACCEPTANCE`, `BLOCKED`, `ROADMAP_DONE`).
+  - In continuous relay states (`PROPOSE`, `REVIEW`, `CONFIRM`, `CHECKOUT`, `DISPATCH_RUNNER`, `SYNC_DOCS`, `ARCHIVE`, `NEXT_BATCH_PROPOSE`), agents MUST NOT prematurely end turns to dump C3 cards.
+- **Compact 4-Line Output / 极简 4 行卡（≤5行）**：Upon reaching a stopping state or roadmap completion, final response MUST adhere to:
   1. `[Task ID] ✔️ Completed` / `[Task ID] ✔️ 已完成`
   2. **Affected Files / 涉及文件**：Compact list of touched files with clickable markdown links
   3. **Verification / 自动化验证**：Summary of passed assertions (`N passed, 0 failed`)

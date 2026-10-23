@@ -511,12 +511,16 @@ def test_corrupt_line_yields_parse_skipped_diagnostics(tmp_path):
 
 def test_ladder_predicate_exclusivity_matrix():
     reasons = typing.get_args(AuditGateReason)
-    assert len(reasons) == 13
-    assert len(set(reasons)) == 13
+    assert len(reasons) == 17
+    assert len(set(reasons)) == 17
     # R11 读序互斥梯次防短路（优先匹配，无匹配且截断落入 tail_window_exhausted，无匹配且未截断落入 no_matching_record）
     assert "matched" in reasons
     assert "tail_window_exhausted" in reasons
     assert "no_matching_record" in reasons
+    assert "record_unparsable" in reasons
+    assert "record_source_not_accepted" in reasons
+    assert "record_auto_fallback_not_accepted" in reasons
+    assert "record_rework" in reasons
 
 
 def test_freshness_boundary_max_age_minus_epsilon_allows():

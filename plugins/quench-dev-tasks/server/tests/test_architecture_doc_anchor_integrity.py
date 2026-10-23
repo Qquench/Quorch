@@ -158,3 +158,13 @@ def test_architecture_section5_heading_no_absolute_contradiction() -> None:
     assert "plugins/quench-dev-tasks/" in doc_text
     assert "scripts/" in doc_text
     assert "hooks" in doc_text
+
+
+def test_dual_mode_and_autopilot_anchors_present() -> None:
+    """Assert docs/architecture/README.md documents dual-mode orchestration, runtime mode, and autopilot harness."""
+    doc_text = _read_architecture_doc()
+    assert "Dual-Mode Orchestration & Autopilot Harness" in doc_text
+    assert "runtime_mode.py" in doc_text
+    assert "autopilot_harness.py" in doc_text
+    assert "Trust Model & Non-Security Boundary Declaration" in doc_text
+

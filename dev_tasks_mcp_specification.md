@@ -132,7 +132,7 @@ The DevTasks state machine defines strict valid transitions enforced by `state_m
 
 The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_COUNT`; code is authoritative, JSON snapshot is derived mirror evidence):
 
-1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation.
+1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation. In v1.25+, supports dual-mode runtime configuration and Autopilot harness orchestration via optional arguments: `switch_mode` ('standard'|'inverted'), `switch_reviewer_channel` ('direct_api'|'subagent_delegate'), `stop_at` ('CONSUMED_ALL'|'CONSUMED_FILE'|'CONSUMED_TASK'|'NEVER'|'ALWAYS'), and `task_file` (scoped inspection). Returns an enriched snapshot containing the `autopilot` state and the `harness_next_action` baton. Across the server, 8 operational tools (`dev_tasks_status`, `dev_tasks_propose`, `dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_archive`, `dev_reviewer_poll`, `dev_tasks_refine_spec`) dynamically return `harness_next_action` to drive continuous relay without premature stops.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status (supporting mode='append'|'overwrite'|'upsert').
 3. **`dev_tasks_confirm`**: Advances tasks to `[Confirmed]`, `[Skipped]`, or transitions them to `[Rework]`. Enforces Pre-Confirm audit gate policy on Tier-1 managed paths outside manifest lock, validating against verdicts ledger with exact 5-key blocking payload (`ok`, `reason`, `artifact_ref`, `audit_ref`, `parse_skipped_lines`) and lock-time `precondition_changed` re-validation.
 4. **`dev_tasks_checkout`**: Checks out the next confirmed task, sets its state to `[In Progress]`, captures a physical baseline snapshot, and provides step-by-step guidance.
@@ -219,7 +219,11 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
     "user_authorized": false
   },
   "dev_tasks_status": {
-    "include_drafts": false
+    "include_drafts": false,
+    "stop_at": null,
+    "switch_mode": null,
+    "switch_reviewer_channel": null,
+    "task_file": null
   }
 }
 ```

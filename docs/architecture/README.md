@@ -6,6 +6,17 @@
 
 ---
 
+## 0. Trust Model & Scope Declarations
+
+### 0.1 Trust Model & Non-Security Boundary Declaration
+
+Quench governance enforces **operational hygiene, collaborative consensus, and workflow reliability**, rather than cryptographic or hostile-process isolation:
+- **Collaborative Hygiene**: Role declarations, verdict audit logs, and whitelist guards are mechanisms to prevent accidental developer errors, state drift, and AI hallucination loops.
+- **Process Boundaries**: Quench does NOT sandbox unconfined hostile operating system subprocesses. Security must be established via host operating system controls, containerization, and repository permissions.
+- **Audit Trails**: Verdict logs (`verdicts.jsonl`) provide structured replayability and accidental degradation detection rather than zero-trust cryptographic proofs.
+
+---
+
 ## 1. System Vision & Core Problem
 
 ### 1.1 The Dual-Model Decoupling Philosophy
@@ -27,6 +38,28 @@ A core design axiom: **verbal promises are not guarantees**. Every critical inva
 - "Only one task at a time" → cross-process `filelock` on the manifest  
 - "State changes only via MCP" → server validates every transition; Markdown is write-only output  
 - "Vendor neutrality" → static AST scan gate runs in CI  
+
+### 1.3 Dual-Mode Orchestration & Autopilot Harness (双模编排与 Autopilot 接力棒)
+
+To adapt to both single-model agile development and multi-agent team workflows, Quench v1.25+ establishes a dual-mode orchestration topology:
+
+1. **Standard Mode (`standard`)**:
+   - Primary IDE session acts as the agile **Runner**, executing sequential task implementations.
+   - Architectural review is delegated on demand to an external model endpoint (`direct_api`) or an isolated subagent (`subagent_delegate`).
+
+2. **Inverted Mode (`inverted`)**:
+   - Primary IDE session acts as the strategic **Reviewer / Orchestrator**, coordinating tasks, assessing risks, and planning evolution.
+   - Code reading, AST exploration, and implementation are delegated to specialized subagents via `[QUENCH-DISPATCH: ...]` envelopes.
+
+3. **Dynamic Mode Switching (`runtime_mode.py`)**:
+   - Orchestration mode and reviewer channel are switched dynamically without server restarts via `.quench_runtime_mode.json`.
+   - Controlled via `dev_tasks_status(switch_mode="...", switch_reviewer_channel="...")`.
+
+4. **Autopilot Continuous Relay (`autopilot_harness.py`)**:
+   - Driven by the `harness_next_action` baton returned by operational MCP tools (`dev_tasks_status`, `dev_tasks_propose`, `dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_archive`, `dev_reviewer_poll`, `dev_tasks_refine_spec`).
+   - States: `PROPOSE` -> `REVIEW` -> `CONFIRM` -> `CHECKOUT` -> `DISPATCH_RUNNER` -> `SYNC_DOCS` -> `ARCHIVE` -> `NEXT_BATCH_PROPOSE` -> `PAUSE_FOR_ACCEPTANCE` / `BLOCKED` / `ROADMAP_DONE`.
+   - Continuous non-stop relay: The agent executes sequential phases without stopping across tasks and batches (`NEXT_BATCH_PROPOSE`).
+   - Stopping points: Execution pauses and presents a concise C3 delivery card or status report only at `PAUSE_FOR_ACCEPTANCE`, `BLOCKED`, or `ROADMAP_DONE`.
 
 ---
 
@@ -282,6 +315,8 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `consultation.py` | T4 | Reviewer sandbox guards (`assert_read_only_sandbox`) & context slice assembly (`assemble_reviewer_context`) | Read-only guard enforced before any context injection |
 | `manifest_lease.py` | T3 | Lease management, liveness probing (`probe_lease_health`), and CAS stale task reclamation (`reclaim_stale_task`) | Strict lock ordering (Markdown -> Manifest); generation CAS |
 | `log_naming.py` | T4 | Reviewer log naming, rotation, and zero-stat GC primitives (`gc_by_filename_order`, `enforce_unified_log_quota`) | Zero-stat contract; strict slug sanitization; deterministic quota |
+| `runtime_mode.py` | T2/T3 | Dynamic runtime mode state management (`.quench_runtime_mode.json`), mode & reviewer channel switching | In-memory atomic cache; fallback-safe |
+| `autopilot_harness.py` | T2/T3 | Autopilot baton transitions, `harness_next_action` evaluation, stopping states | Pure state machine; deterministic action resolution |
 | `path_guard.py` | T2 | Cross-platform path safety; traversal defenses | Called on every tool invocation involving file paths |
 | `project_config.py` | T2/T3 | `quench_stack.yaml` loading, validation, migration | Single parse per session; cached after first load |
 | `observability_policy.py` | T4 | Verdict sink policy; log rotation policy | Append-only verdicts; policy-driven, not hard-coded |
@@ -308,6 +343,8 @@ server.py → state_machine.py   (read/write state)
 server.py → schema_validator.py (validate before write)
 server.py → task_writer.py     (guarded atomic propose/refine_spec persist)
 server.py → task_status.py     (task status SSOT)
+server.py → runtime_mode.py    (read/switch runtime mode and reviewer channel)
+server.py → autopilot_harness.py (evaluate harness_next_action baton)
 server.py → consultation.py    (Reviewer consult path)
 server.py → reviewer_engine.py (ReviewerClient factory)
 server.py → manifest.py        (task CRUD)

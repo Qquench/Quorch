@@ -36,11 +36,13 @@ source .venv/bin/activate
 pip install -r plugins/quench-dev-tasks/server/requirements.txt
 ```
 
-### 2.2 Dual MCP Configuration Contract (双条目配置契约)
+### 2.2 Session Role Contract & Deprecated Dual-Entry Scheme (会话角色契约与废弃双条目方案)
 
-To separate implementation and architectural review capabilities without leaky runtime roleplay, the client configuration MUST declare **two distinct MCP server entries**: `quench-runner` and `quench-reviewer`.
+#### [DEPRECATED] Static QUENCH_ROLE Dual-Entry Contract
+*(Historical note: Pre-v1.25 dual-entry configuration used `QUENCH_ROLE` environment variables (`QUENCH_ROLE: runner` / `QUENCH_ROLE: reviewer`) across two separate MCP server configurations. This approach is marked `[DEPRECATED]` in favor of dynamic runtime contracts).*
 
 ```jsonc
+// [DEPRECATED] Legacy static configuration (for backward reference only)
 {
   "mcpServers": {
     "quench-runner": {
@@ -57,9 +59,38 @@ To separate implementation and architectural review capabilities without leaky r
 }
 ```
 
+#### Dynamic Session Role Contract (v1.25+ 动态会话角色契约)
+In v1.25+, the client configuration declares a unified server entry, and capability boundaries are governed dynamically via `session_role_contract`:
+- Uses **host-neutral abstract verbs** (`read`, `write`, `execute_test`, `search`, `mcp_call`, `consult_review`) with zero host-specific tool names (INV-5 vendor neutrality).
+- Single-role sessions or multi-agent topologies are governed by dynamic runtime contracts without needing hard-coded process-level environment splits.
+
 > 🛡️ **Explicit Non-Security Boundary Declaration (非安全边界声明)**:  
-> Role declarations (`QUENCH_ROLE: runner` / `QUENCH_ROLE: reviewer`) and verdict logs are **collaborative convenience and operational hygiene mechanisms**, NOT hardened cryptographic or operating system security boundaries.  
-> The physical capability separation is achieved by declaring **two independent MCP entries** in the host configuration and running single-role execution sessions. Quench does not sandbox unconfined hostile subprocesses. Verdict audit logs provide structured replayability and accidental degradation detection rather than adversarial zero-trust proofs.
+> Role declarations and verdict logs are **collaborative convenience and operational hygiene mechanisms**, NOT hardened cryptographic or operating system security boundaries. Quench does not sandbox unconfined hostile subprocesses. Verdict audit logs provide structured replayability and accidental degradation detection rather than adversarial zero-trust proofs.
+
+### 2.3 Envelope Routing & Dispatch Contracts (信封路由与调度契约)
+
+Delegation between main sessions and subagents is structured via dispatch envelopes:
+- `[QUENCH-DISPATCH: RUNNER]`
+- `[QUENCH-DISPATCH: REVIEWER]`
+- `[QUENCH-DISPATCH: RESEARCH]`
+
+Example Runner dispatch:
+```markdown
+[QUENCH-DISPATCH: RUNNER]
+Task: 25.5
+Verbs: read, write, execute_test
+Context: Follow instructions in active task specification
+```
+
+Example Reviewer dispatch:
+```markdown
+[QUENCH-DISPATCH: REVIEWER]
+Query: Evaluate concurrency boundaries for dual-mode runtime switch
+Verbs: read, search, consult_review
+```
+
+Subagents receiving these envelopes must NEVER call `dev_tasks_status` (子代理免调 status 铁律). Only the main session invokes `dev_tasks_status` and follows the `harness_next_action` baton.
+
 
 ---
 

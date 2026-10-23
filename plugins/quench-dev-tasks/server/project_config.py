@@ -499,10 +499,33 @@ def canonical_artifact_ref(workspace_root: str, task_file: str, task_id: str) ->
     return f"{rel_posix}#{str(task_id).strip()}"
 
 
+_MODE_ACCEPTED_SOURCES: Final[Mapping[str, frozenset[str]]] = MappingProxyType({
+    "standard": frozenset({"reviewer_client"}),
+    "inverted": frozenset({"reviewer_client", "host_subagent"}),
+    "auto_fallback": frozenset({"reviewer_client"}),
+})
+
+
+def _validate_accepted_sources(accepted: Sequence[str], effective_mode: str) -> None:
+    """fail-closed：越界 accepted_sources 触发 ConfigError(SAFETY_DOWNGRADE_DENIED)。"""
+    allowed = _MODE_ACCEPTED_SOURCES.get(effective_mode)
+    if allowed is None:
+        allowed = frozenset({"reviewer_client"})
+    accepted_set = set(accepted)
+    if not accepted_set.issubset(allowed):
+        disallowed = accepted_set - allowed
+        raise ConfigError(
+            f"{ConfigFault.SAFETY_DOWNGRADE_DENIED.value}: accepted_sources contains disallowed sources {disallowed} for mode '{effective_mode}' / "
+            f"模式 '{effective_mode}' 下不允许的审计来源: {disallowed}"
+        )
+
+
 AuditGateReason = Literal[
     "disabled", "not_managed_scope", "session_bypass_active", "matched",
     "no_matching_record", "record_stale", "record_timestamp_invalid", "record_degraded",
-    "tail_window_exhausted", "log_missing", "log_unparsable", "precondition_changed", "internal_error",
+    "tail_window_exhausted", "log_missing", "log_unparsable", "record_unparsable",
+    "precondition_changed", "internal_error",
+    "record_source_not_accepted", "record_auto_fallback_not_accepted", "record_rework",
 ]
 
 
@@ -519,6 +542,18 @@ class AuditGatePolicy(BaseModel):
     require_undegraded_record: bool = True
     clock_skew_tolerance_seconds: int = 2
     tail_window_exhausted_policy: Optional[Literal["block", "warn", "allow"]] = None  # DEPRECATED alias
+    accepted_sources: tuple[str, ...] = ("reviewer_client",)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_accepted_sources(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "accepted_sources" in data:
+            val = data["accepted_sources"]
+            if isinstance(val, str):
+                data["accepted_sources"] = (val,)
+            elif isinstance(val, (list, set)):
+                data["accepted_sources"] = tuple(val)
+        return data
 
     @model_validator(mode="after")
     def validate_audit_gate_policy(self) -> "AuditGatePolicy":
@@ -602,6 +637,7 @@ class QuenchStackConfig:
     project_name: str
     schema_version: str = "1.0"
     config_version: int = CURRENT_CONFIG_VERSION
+    orchestration_mode: Literal["standard", "inverted"] = "standard"
     dev_tasks_dir: str = "docs/dev_tasks"
     archive_dir: str = "docs/dev_tasks/archive"
     test_runner: str | None = None
@@ -735,6 +771,7 @@ KNOWN_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset({
     "runner_profile",
     "observability",
     "audit_gate",
+    "orchestration_mode",
     "workspace_root",
     "api_key",
 })
@@ -894,11 +931,16 @@ def _build_quench_stack_config(
     else:
         audit_gate = AuditGatePolicy()
 
+    orchestration_mode_raw = str(data.get("orchestration_mode", "standard")).strip().lower()
+    orchestration_mode: Literal["standard", "inverted"] = "inverted" if orchestration_mode_raw == "inverted" else "standard"
+    _validate_accepted_sources(audit_gate.accepted_sources, orchestration_mode)
+
     return QuenchStackConfig(
         workspace_root=root,
         project_name=project_name,
         schema_version=str(data.get("schema_version", CURRENT_SCHEMA_VERSION)),
         config_version=config_version,
+        orchestration_mode=orchestration_mode,
         dev_tasks_dir=str(data.get("dev_tasks_dir", "docs/dev_tasks")),
         archive_dir=str(data.get("archive_dir", "docs/dev_tasks/archive")),
         test_runner=data.get("test_runner"),
@@ -1146,6 +1188,16 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
                         f"Local override cannot loosen audit_gate.{policy} from '{base_val}' to '{over_val}' ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
                         f"本地覆盖不得将 audit_gate.{policy} 从 '{base_val}' 放宽至 '{over_val}'"
                     )
+
+        if "accepted_sources" in over_ag and "accepted_sources" in base_ag:
+            base_acc = set(base_ag.get("accepted_sources") or ["reviewer_client"])
+            over_acc = set(over_ag.get("accepted_sources") or ["reviewer_client"])
+            if not over_acc.issubset(base_acc):
+                widened = over_acc - base_acc
+                raise ConfigError(
+                    f"Local override cannot widen audit_gate.accepted_sources (added {widened}) ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                    f"本地覆盖不得放宽 audit_gate.accepted_sources: {widened}"
+                )
 
         base_scope = base.get("governance_scope") if isinstance(base.get("governance_scope"), dict) else {}
         over_scope = overlay.get("governance_scope") if isinstance(overlay.get("governance_scope"), dict) else {}

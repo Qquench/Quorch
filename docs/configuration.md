@@ -79,6 +79,26 @@ governance_scope:
 - **Tier 2 (Session Bypass)**: Agents can request temporary fast-track bypass (`dev_tasks_set_bypass`) for micro-edits (e.g. typo fixes). Sessions are time-bounded (default 4 hours) with anti-abuse guards.
 - **Tier 3 (Interactive Ask Modal)**: Out-of-scope edits trigger an interactive prompt in the IDE, requiring developer confirmation before modification touches disk.
 
+### 4.1 Pre-Confirm Audit Gate Policy (`audit_gate`)
+
+The audit gate verifies that tasks touching managed scope have genuine external review records before confirmation (`dev_tasks_confirm`):
+
+```yaml
+audit_gate:
+  enabled: true
+  # Accepted review attestation sources for pre-confirm gate
+  # "reviewer_poll": Async Reviewer jobs polled to terminal verdict
+  # "refine_spec": Spec refinement via ReviewerEngine AST exploration
+  accepted_sources:
+    - "reviewer_poll"
+    - "refine_spec"
+  on_missing_record: "block"      # "block" | "warn" | "allow"
+  effective_on_degraded: "block"  # "block" | "warn" | "allow"
+  tail_records_window: 50
+  record_ttl_seconds: 86400
+```
+
+
 ---
 
 ## 5. Reviewer Engine & External Architect Dispatch (`reviewer_engine`)
@@ -194,4 +214,18 @@ quench check
 # Test Reviewer Engine connectivity, API key validity, and latency
 quench check-engine
 ```
+
+---
+
+## 9. Dynamic Runtime Mode (`.quench_runtime_mode.json`)
+
+Quench v1.25+ supports dynamic orchestration mode switching without restarting the MCP server or modifying git-tracked configuration. Runtime state is stored locally in `.quench_runtime_mode.json`:
+
+| Field | Type | Values | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `mode` | `string` | `"standard"` \| `"inverted"` | `"standard"` | Orchestration topology mode. |
+| `reviewer_channel` | `string` | `"direct_api"` \| `"subagent_delegate"` | `"direct_api"` | External reviewer transport channel. |
+
+Switching can be executed dynamically via `dev_tasks_status(switch_mode="inverted", switch_reviewer_channel="subagent_delegate")`.
+
 

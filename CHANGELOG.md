@@ -3,6 +3,17 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-24] 2026-10-24_v1_25_batch3_docs_skills_and_integration.md
+
+- **Task 25.5**: AGENTS.md、工作流 Skill 与纪律规范的三层隔离、双层探查及 Autopilot 闭环契约升级
+- **Task 25.6**: 架构规范、MCP 协议规格与配置文档同步及全量测试收口
+
+## [2026-10-24] 2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness.md
+
+- **Task 25.2**: 持久化双模运行时状态（.quench_runtime_mode.json）、可见自动回退与 dev_tasks_status 热切换及角色契约下发
+- **Task 25.3**: Autopilot compute_next_action 纯函数引擎与状态转移表测试
+- **Task 25.4**: 接力棒工具接入、audit_gate.accepted_sources 来源策略与 CAS 失配重封包
+
 ## [2026-10-23] 2026-10-23_v1_25_batch1_reviewer_prompt_proportionality.md
 
 - **Task 25.1**: 审查引擎、工具描述与 Skill 提示词去诱导化（Context-Proportional 重塑）

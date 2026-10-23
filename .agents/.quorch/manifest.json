@@ -1287,6 +1287,61 @@
       "git_head_sha": "ffdae653ec65638937b168e86a88d4cea1a9311f",
       "git_index_mtime": 1792755930.1602926,
       "released": true
+    },
+    "2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness::25.2": {
+      "task_id": "2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness::25.2",
+      "md_sha256": "e1f2554639db4369dc2a73d857d9b8740d6db00ba872531fc50c8a11a3185223",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 630472109000000,
+      "last_heartbeat_wall_utc": "2026-10-23T14:13:04.427949+00:00",
+      "git_head_sha": "6204d5ddbaf7385657edaaa8d9f0e93912cfc017",
+      "git_index_mtime": 1792763275.4652028,
+      "released": true
+    },
+    "2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness::25.3": {
+      "task_id": "2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness::25.3",
+      "md_sha256": "e1f2554639db4369dc2a73d857d9b8740d6db00ba872531fc50c8a11a3185223",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 630472140000000,
+      "last_heartbeat_wall_utc": "2026-10-23T14:13:04.466503+00:00",
+      "git_head_sha": "6204d5ddbaf7385657edaaa8d9f0e93912cfc017",
+      "git_index_mtime": 1792763275.4652028,
+      "released": true
+    },
+    "2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness::25.4": {
+      "task_id": "2026-10-24_v1_25_batch2_dual_mode_and_autopilot_harness::25.4",
+      "md_sha256": "e1f2554639db4369dc2a73d857d9b8740d6db00ba872531fc50c8a11a3185223",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 630472187000000,
+      "last_heartbeat_wall_utc": "2026-10-23T14:13:04.501195+00:00",
+      "git_head_sha": "6204d5ddbaf7385657edaaa8d9f0e93912cfc017",
+      "git_index_mtime": 1792763275.4652028,
+      "released": true
+    },
+    "2026-10-24_v1_25_batch3_docs_skills_and_integration::25.5": {
+      "task_id": "2026-10-24_v1_25_batch3_docs_skills_and_integration::25.5",
+      "md_sha256": "ff017f39496907e695a48618dbc6880a8a8f00afcd57a056ba453ae8975f2ef7",
+      "generation": 1,
+      "holder_token": "token_1792768797215_6460",
+      "last_heartbeat_monotonic_ns": 635019031000000,
+      "last_heartbeat_wall_utc": "2026-10-23T15:28:51.349393+00:00",
+      "git_head_sha": "6204d5ddbaf7385657edaaa8d9f0e93912cfc017",
+      "git_index_mtime": 1792763275.4652028,
+      "released": true
+    },
+    "2026-10-24_v1_25_batch3_docs_skills_and_integration::25.6": {
+      "task_id": "2026-10-24_v1_25_batch3_docs_skills_and_integration::25.6",
+      "md_sha256": "ff017f39496907e695a48618dbc6880a8a8f00afcd57a056ba453ae8975f2ef7",
+      "generation": 1,
+      "holder_token": "token_1792769339168_6460",
+      "last_heartbeat_monotonic_ns": 636039656000000,
+      "last_heartbeat_wall_utc": "2026-10-23T15:45:51.980551+00:00",
+      "git_head_sha": "6204d5ddbaf7385657edaaa8d9f0e93912cfc017",
+      "git_index_mtime": 1792763275.4652028,
+      "released": true
     }
   }
 }
