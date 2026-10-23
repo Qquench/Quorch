@@ -2207,10 +2207,10 @@ async def dev_tasks_refine_spec(
     task_file: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.
-    Ensures complete Six Core Fields, concurrency boundary defenses, and executable DoD assertions.
+    Ensures complete Six Core Fields, proportional boundary checks, and executable DoD assertions.
 
     [中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。
-    补齐六大核心字段、并发边界与硬性 DoD 断言。
+    补齐六大核心字段、成比例的边界校验与硬性 DoD 断言。
 
     Args:
         workspace_root: Root path of the target workspace / 项目根目录绝对路径。
@@ -2329,7 +2329,7 @@ async def dev_tasks_refine_spec(
     code_context_str = "\n\n".join(ctx_parts)
 
     user_prompt = (
-        f"You are the Senior Architecture Reviewer. Please conduct a red-team critique and refine this draft task into an ironclad Quench DevTask adhering strictly to the Six Core Fields.\n\n"
+        f"You are the Senior Architecture Reviewer. Please conduct a context-proportional critique and refine this draft task into a well-bounded Quench DevTask adhering strictly to the Six Core Fields.\n\n"
         f"Output Contract:\n"
         f"Output ONLY a valid JSON object containing the six canonical fields:\n"
         f"- 'affected_files': list of file strings with [MODIFY]/[NEW]/[DELETE] prefixes\n"

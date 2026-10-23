@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-23] 2026-10-23_v1_25_batch1_reviewer_prompt_proportionality.md
+
+- **Task 25.1**: 审查引擎、工具描述与 Skill 提示词去诱导化（Context-Proportional 重塑）
+
 ## [2026-10-22] 2026-10-22_ci_fix_cross_platform_path_and_filelock.md
 
 - **Task 1.1**: 修复 `_DRIVE_ABS` 命名常量字符类、加固 W10 单次 Poll 作用域与案例 12 归档（Rev A11 闭环）

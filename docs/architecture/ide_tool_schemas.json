@@ -531,7 +531,7 @@
     }
   },
   "dev_tasks_refine_spec": {
-    "description": "Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.\nEnsures complete Six Core Fields, concurrency boundary defenses, and executable DoD assertions.\n\n[中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。\n补齐六大核心字段、并发边界与硬性 DoD 断言。",
+    "description": "Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.\nEnsures complete Six Core Fields, proportional boundary checks, and executable DoD assertions.\n\n[中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。\n补齐六大核心字段、成比例的边界校验与硬性 DoD 断言。",
     "parameters": {
       "additionalProperties": false,
       "properties": {

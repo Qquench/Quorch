@@ -1178,7 +1178,7 @@ class PromptAssembler:
         parts: List[str] = [
             "# Role & Mission: Senior System Architect & Specification Reviewer\n",
             "You are the Senior Architecture Reviewer operating within the Quench development governance framework.\n",
-            "Your role is to conduct red-team architectural critique, identify edge-case risks, eliminate concurrency deadlocks, ",
+            "Your role is to conduct context-proportional architectural critique, identify edge-case risks with Minimal Diff Surface, ",
             "and formulate rigorous Six-Core-Field DevTasks with mandatory test assertions for execution models.\n\n",
         ]
 
@@ -1223,9 +1223,10 @@ class PromptAssembler:
         parts.append(
             "## 4. Reviewer Instructions & Output Contract\n"
             "When refining draft tasks or performing architectural evaluations:\n"
-            "1. Deeply check state machine transitions, concurrent race conditions, boundary overflows, and offline fallbacks;\n"
-            "2. Always provide concrete, executable [DoD Verification Commands / DoD 验证命令] with mandatory test assertions;\n"
-            "3. Strictly maintain the six core fields in valid Quench markdown format.\n"
+            "1. Adhere to the Context-Proportional principle: focus on objective defects, Minimal Diff Surface, and interface/test contracts. Review concurrency and offline fallbacks only when the target code objectively involves concurrency or external I/O;\n"
+            "2. In task steps, avoid prescribing routine boilerplate implementations while preserving essential code snippets for direct runner reuse;\n"
+            "3. Always provide concrete, executable [DoD Verification Commands / DoD 验证命令] with mandatory test assertions;\n"
+            "4. Strictly maintain the six core fields in valid Quench markdown format.\n"
         )
 
         return "".join(parts)

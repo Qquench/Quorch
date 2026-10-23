@@ -36,11 +36,12 @@ When reviewing code or formulating architectural tasks, the Reviewer must adhere
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. Defensive & Edge Checks (防御与边缘校验)                   │
-│    ★ Rigidly Enforced, No Upper Bounds                      │
-│    • Null / None / undefined defense                        │
-│    • Bounds and slice overflow protection                   │
-│    • Concurrency safety and lock timeouts                   │
-│    • File handle and connection cleanup                     │
+│    ★ Context-Proportional (Bound to Actual Changed Paths)   │
+│    • Bound to changed paths; no unrequested locks/fallbacks │
+│    • Null / None / undefined & boundary overflow defense    │
+│    • Steps focus on intent & anchors without boilerplate    │
+│    • Preserve essential code snippets for runner reuse      │
+│    • File handle, stream, and connection cleanup            │
 ├─────────────────────────────────────────────────────────────┤
 │ 2. Implementation Scope (实现逻辑侵入度)                     │
 │    ★ Localized and Minimal (keep patches tight)             │
@@ -53,6 +54,10 @@ When reviewing code or formulating architectural tasks, the Reviewer must adhere
 │    • Future architectural suggestions recorded in roadmaps  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+> 💡 **Context-Proportional Review Discipline (成比例审查纪律)**:
+> - **No Unrequested Defense Layers (禁止无端防御层)**: 严格绑定实际变更路径与代码上下文。禁止凭空引入未请求的并发锁、线程安全同步、缓存层或离线降级分支（仅当目标代码客观涉及并发或外部 I/O 时审查并发与降级）。
+> - **Boilerplate-Free Steps (免写样板、写了即用)**: `steps` 聚焦修改意图与关键代码锚点，不代写常规样板代码；若任务单中已给出关键代码片段或类型定义，则直接完整保留供 Runner 执行模型复用。
 
 ---
 

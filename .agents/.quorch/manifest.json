@@ -1276,6 +1276,17 @@
       "git_head_sha": "3686db5093ab76b2f9eb86b9d865875a14a91efb",
       "git_index_mtime": 1792658681.269075,
       "released": true
+    },
+    "2026-10-23_v1_25_batch1_reviewer_prompt_proportionality::25.1": {
+      "task_id": "2026-10-23_v1_25_batch1_reviewer_prompt_proportionality::25.1",
+      "md_sha256": "5b29be0f81333601ca8055f1dccaebdd90f4b08ca9b3f9af5b74712f6a207305",
+      "generation": 1,
+      "holder_token": "token_1792756828308_28532",
+      "last_heartbeat_monotonic_ns": 774576921000000,
+      "last_heartbeat_wall_utc": "2026-10-23T12:06:43.535754+00:00",
+      "git_head_sha": "ffdae653ec65638937b168e86a88d4cea1a9311f",
+      "git_index_mtime": 1792755930.1602926,
+      "released": true
     }
   }
 }
