@@ -1,13 +1,13 @@
-# Quench Dev-Orchestrator v1.25 Reviewer 轮询硬契约、状态栏扩展与跨宿主端侧可观测性路线图
-> *(MCP Reviewer Polling Contract Hardening, Status Bar Extension & Cross-Host Observability Roadmap)*
+# Quench Dev-Orchestrator — Reviewer 轮询硬契约、状态栏扩展与跨宿主端侧可观测性蓝图 (待启动)
+> *(MCP Reviewer Polling Contract Hardening, Status Bar Extension & Cross-Host Observability Blueprint — Pending Activation)*
 
-> **Document Type**: Milestone Roadmap (Sub-charter for v1.25)  
-> **Status**: 🟡 ACTIVE (In Planning / Architecture Blueprint Established)  
-> **Preceding Milestone**: [v1.24 原生心跳自刷新、长轮询降压与 Poll 极简瘦身路线图](./archive/v1.24_mcp_progress_heartbeat_and_poll_slimming_roadmap.md) (🟢 COMPLETED)  
-> **Succeeding Milestone**: docs/roadmap/v1.26_... (待立项)  
+> **Document Type**: Architecture Blueprint & Pending Milestone Roadmap (Unnumbered / Deferred from v1.25)  
+> **Status**: 📋 PENDING (Deferred in favor of Core Dual-Mode Orchestration & Autopilot Harness Roadmap)  
+> **Preceding Baseline**: [v1.24 原生心跳自刷新、长轮询降压与 Poll 极简瘦身路线图](./archive/v1.24_mcp_progress_heartbeat_and_poll_slimming_roadmap.md) (🟢 COMPLETED)  
+> **Target Milestone**: TBD (To be assigned a version number upon activation)  
 > **Scope**: 客户端轮询契约强化（`POLL_WAIT_MAX_S_HARD_CEILING = 25.0s` 硬上限及 Loop 规范）、进度流逝单调流与本地 100ms 转动解耦（`⠋ Reviewer · Streaming (00:14)`）、`quench-statusbar` VS Code / Antigravity IDE 扩展（`createStatusBarItem` + `createFileSystemWatcher` 零 CPU 事件驱动 + 智能显示/完全隐藏生命周期）、以及面向 Desktop IDE、Antigravity App 与无头 CLI 的 L1/L2/L3 跨宿主分级适配矩阵。  
 > **Explicit Non-Scope**: 16-tool 工具面不变量破坏（严禁新增独立轮询或状态栏控制工具）、跨进程状态机 CAS 机制弱化（INV-1）、非受管日志物理绕过（INV-9）。  
-> **Authority**: 遵循 v1.20 核心不可触碰清单、奥卡姆剃刀公理及 2026-10-22 资深 Reviewer 架构全盘评审结论；本文件为 v1.25 唯一路线图 SSOT。
+> **Authority**: 遵循 v1.20 核心不可触碰清单、奥卡姆剃刀公理及 2026-10-22 资深 Reviewer 架构全盘评审结论。
 
 ---
 
@@ -135,9 +135,9 @@
 
 ---
 
-## 5. 实施里程碑与规划任务清单（Epic 划分与任务清单）
+## 5. 待启动里程碑与规划任务清单（Deferred Tasks）
 
-### 任务 25.1 ⬜ 待确认 — `dev_reviewer_poll` 轮询硬上限常数封顶与客户端 Loop 契约规格固化
+### 任务 TBD.1 ⬜ 待启动 — `dev_reviewer_poll` 轮询硬上限常数封顶与客户端 Loop 契约规格固化
 - **【涉及文件】**：
   - `[MODIFY] plugins/quench-dev-tasks/server/tool_surface_constants.py`（增加 `POLL_WAIT_MAX_S_HARD_CEILING = 25.0`）
   - `[MODIFY] plugins/quench-dev-tasks/server/server.py`（`_clamp_wait` 绑定常量）
@@ -145,14 +145,14 @@
   - `[NEW] plugins/quench-dev-tasks/server/tests/test_reviewer_poll_ceiling_contract.py`
 - **【任务目标】**：将 25.0s 硬上限以协议常量物理固化，断言拒绝超过 25.0s 的参数请求；在 specification 中明确禁止单次 300s 超长轮询，规范客户端 20s Loop 循环范式。
 
-### 任务 25.2 ⬜ 待确认 — `quench-statusbar` VS Code / Antigravity IDE 状态栏扩展原型实现
+### 任务 TBD.2 ⬜ 待启动 — `quench-statusbar` VS Code / Antigravity IDE 状态栏扩展原型实现
 - **【涉及文件】**：
   - `[NEW] extensions/quench-statusbar/package.json`
   - `[NEW] extensions/quench-statusbar/src/extension.ts`
   - `[NEW] extensions/quench-statusbar/src/job_watcher.ts`
 - **【任务目标】**：基于 VS Code API 实现 `quench-statusbar` 极简扩展。基于 `createFileSystemWatcher` 监听 `.agents/jobs/*.json`；实现无任务时物理 `hide()`、任务期 `show()` 配合 100ms 本地 Ticker 旋转动画 `⠋ Reviewer · Streaming (00:14)`、终态反馈 3.0s 后自动隐藏的完整生命周期。
 
-### 任务 25.3 ⬜ 待确认 — 跨宿主（Desktop IDE vs App vs CLI）分级适配规范与可观测性架构固化
+### 任务 TBD.3 ⬜ 待启动 — 跨宿主（Desktop IDE vs App vs CLI）分级适配规范与可观测性架构固化
 - **【涉及文件】**：
   - `[MODIFY] docs/architecture/README.md`
 - **【任务目标】**：在架构主文档中固化 L1（扩展+气泡）、L2（App 原生 MCP 浮层）、L3（CLI/CI 纯文本）分级架构规范与判定准则，消除对已归档/废弃临时走查单的依赖，保持工程文档轻量紧凑。
@@ -160,5 +160,5 @@
 ---
 
 <<<TASK_DRAFT>>>
-（待立项实例化 DevTasks 施工单）
+（待后续版本正式激活后实例化 DevTasks 施工单）
 <<<END>>>
