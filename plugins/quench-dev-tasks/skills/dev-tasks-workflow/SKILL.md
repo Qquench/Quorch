@@ -56,6 +56,14 @@ The Autopilot harness orchestrates transitions through `harness_next_action`:
 - **Continuous Non-Stop Relay**: During progression across tasks or batches (`NEXT_BATCH_PROPOSE`), the agent proceeds seamlessly without stopping.
 - **Stopping States**: The agent only pauses and requests user input when reaching `PAUSE_FOR_ACCEPTANCE`, `BLOCKED`, or `ROADMAP_DONE`.
 
+### Runner Subagent Reuse vs. Fresh Spawn Policy (Runner 子代理复用与新建策略)
+In dual-mode inverted orchestration, `DISPATCH_RUNNER` provides deterministic subagent dispatch recommendations:
+- **Intra-Batch Atomic Execution (`reuse_active`)**: A single `task_file` (Batch) is the atomic unit of delegation; never split a batch across multiple Runner subagents mid-file. Rework iterations and ongoing batches always reuse the active runner subagent.
+- **Cross-Batch Domain Overlap (`spawn_fresh` vs `reuse_active`)**: At batch boundaries, `DISPATCH_RUNNER` evaluates file/module overlap (`compute_batch_overlap_ratio`) with a 12-task safety ceiling:
+  - **High overlap (>= 30%) -> `reuse_active`**: Message the active Runner via `send_message` to retain hot file context. Name Runner `Role` by domain/module (e.g. `Backend Auth Runner`) rather than batch numbers (e.g. `Batch 1`).
+  - **Low overlap (< 30%) or initial batch -> `spawn_fresh`**: Launch a fresh Runner subagent to prevent cross-domain context pollution.
+  - **Safety Fuse**: If cumulative executed tasks on the active runner reach or exceed 12 tasks, force `spawn_fresh` at the batch boundary to purge token context bloat.
+
 ---
 
 ## 2. The Six Core Fields Standard (任务六大字段编写规范)

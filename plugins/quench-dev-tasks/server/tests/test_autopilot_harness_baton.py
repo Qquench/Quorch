@@ -9,10 +9,14 @@ import pytest
 
 from autopilot_harness import (
     compute_next_action,
+    compute_batch_overlap_ratio,
+    resolve_runner_dispatch_channel,
     TaskStateSnapshot,
     LastEventSnapshot,
     HarnessNextAction,
     DEFAULT_MAX_REVIEW_ROUNDS,
+    DEFAULT_MAX_RUNNER_TASKS,
+    DEFAULT_BATCH_OVERLAP_THRESHOLD,
 )
 
 
@@ -263,3 +267,264 @@ def test_compute_next_action_zero_io_pure(monkeypatch):
     assert action.action == "PAUSE_FOR_ACCEPTANCE"
     assert consume is True
     assert action.candidates == ("1.1", "1.2")
+
+
+@pytest.mark.tier1_fast
+def test_compute_batch_overlap_ratio():
+    # 1. Exact file match -> 1.0
+    prev = ["[MODIFY] backend/server.py", "[NEW] backend/auth.py"]
+    curr = ["backend/server.py", "backend/auth.py"]
+    assert compute_batch_overlap_ratio(prev, curr) == 1.0
+
+    # 2. Same module dir match (completely different files) -> 0.5 (0.5 * 1.0)
+    prev = ["backend/db.py"]
+    curr = ["backend/routes.py"]
+    assert compute_batch_overlap_ratio(prev, curr) == 0.5
+
+    # 3. Disjoint module dirs (backend/ vs frontend/) -> 0.0
+    prev = ["backend/models/user.py"]
+    curr = ["frontend/src/views/User.vue"]
+    assert compute_batch_overlap_ratio(prev, curr) == 0.0
+
+    # 4. Empty inputs -> 0.0
+    assert compute_batch_overlap_ratio([], ["backend/a.py"]) == 0.0
+    assert compute_batch_overlap_ratio(["backend/a.py"], []) == 0.0
+    assert compute_batch_overlap_ratio([], []) == 0.0
+    assert compute_batch_overlap_ratio(["   ", "```"], ["backend/a.py"]) == 0.0
+    assert compute_batch_overlap_ratio(["backend/a.py"], ["   "]) == 0.0
+
+    # 5. Path cleaning: stripping quotes, list markers, links, file:///
+    prev_messy = [
+        "- [MODIFY] `backend/a.py`",
+        "file:///backend/b.py (optional comment)",
+        "* [NEW] [docs/README.md](docs/README.md)",
+    ]
+    curr_clean = ["./backend/a.py", "backend/b.py", "docs/README.md"]
+    assert compute_batch_overlap_ratio(prev_messy, curr_clean) == 1.0
+
+
+@pytest.mark.tier1_fast
+def test_resolve_runner_dispatch_channel():
+    # Rule 1: Intra-batch completed_in_batch > 0 -> reuse_active
+    assert resolve_runner_dispatch_channel(completed_in_batch=1) == "reuse_active"
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=3,
+        prev_batch_files=["a/x.py"],
+        curr_batch_files=["b/y.py"],
+    ) == "reuse_active"
+
+    # Rule 1: Rework -> reuse_active
+    assert resolve_runner_dispatch_channel(completed_in_batch=0, is_rework=True) == "reuse_active"
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=True,
+        cumulative_runner_tasks=20,
+    ) == "reuse_active"
+
+    # Rule 2: Safety fuse at batch boundary >= 12 -> spawn_fresh
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=False,
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=["backend/a.py"],
+        cumulative_runner_tasks=DEFAULT_MAX_RUNNER_TASKS,
+    ) == "spawn_fresh"
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=False,
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=["backend/a.py"],
+        cumulative_runner_tasks=15,
+    ) == "spawn_fresh"
+
+    # Rule 3: Cross-batch empty files -> spawn_fresh
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=False,
+        prev_batch_files=[],
+        curr_batch_files=["backend/a.py"],
+    ) == "spawn_fresh"
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=False,
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=[],
+    ) == "spawn_fresh"
+
+    # Rule 3: Cross-batch high overlap (>= 0.30) under safety fuse -> reuse_active
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=False,
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=["backend/b.py"],
+        cumulative_runner_tasks=5,
+    ) == "reuse_active"
+
+    # Rule 3: Cross-batch disjoint (< 0.30) -> spawn_fresh
+    assert resolve_runner_dispatch_channel(
+        completed_in_batch=0,
+        is_rework=False,
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=["frontend/b.py"],
+        cumulative_runner_tasks=0,
+    ) == "spawn_fresh"
+
+
+@pytest.mark.tier1_fast
+def test_compute_next_action_dispatch_runner_channel_and_model_hint():
+    # 1. Inverted mode + confirmed task + cross-batch domain overlap -> reuse_active with model_hint
+    action_reuse, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="2.1", status="confirmed")],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint="flash",
+        prev_batch_files=["backend/models.py"],
+        curr_batch_files=["backend/views.py"],
+        cumulative_runner_tasks=2,
+    )
+    assert action_reuse.action == "DISPATCH_RUNNER"
+    assert action_reuse.task_id == "2.1"
+    assert action_reuse.channel == "reuse_active"
+    assert action_reuse.model_hint == "flash"
+    assert "reuse active runner subagent" in action_reuse.instruction
+
+    # 2. Inverted mode + in_progress task + disjoint domain -> spawn_fresh
+    action_fresh, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="2.2", status="in_progress")],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint="pro",
+        prev_batch_files=["backend/models.py"],
+        curr_batch_files=["frontend/components/Table.vue"],
+        cumulative_runner_tasks=0,
+    )
+    assert action_fresh.action == "DISPATCH_RUNNER"
+    assert action_fresh.task_id == "2.2"
+    assert action_fresh.channel == "spawn_fresh"
+    assert action_fresh.model_hint == "pro"
+    assert "spawn a fresh isolated runner subagent" in action_fresh.instruction
+
+    # 3. Inverted mode + confirmed task + safety fuse reached (>= 12) -> spawn_fresh
+    action_fuse, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="3.1", status="confirmed")],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint="flash",
+        prev_batch_files=["backend/models.py"],
+        curr_batch_files=["backend/models.py"],
+        cumulative_runner_tasks=12,
+    )
+    assert action_fuse.action == "DISPATCH_RUNNER"
+    assert action_fuse.channel == "spawn_fresh"
+
+    # 4. Inverted mode + intra-batch continuation (completed task in batch) -> reuse_active overrides safety fuse
+    action_intra, _ = compute_next_action(
+        task_states=[
+            TaskStateSnapshot(task_id="3.1", status="completed"),
+            TaskStateSnapshot(task_id="3.2", status="confirmed"),
+        ],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint="flash",
+        prev_batch_files=["backend/models.py"],
+        curr_batch_files=["frontend/views.vue"],
+        cumulative_runner_tasks=15,
+    )
+    assert action_intra.action == "DISPATCH_RUNNER"
+    assert action_intra.channel == "reuse_active"
+    assert action_intra.model_hint == "flash"
+
+
+@pytest.mark.tier1_fast
+def test_inject_harness_next_action_cross_batch_overlap_from_markdown(tmp_path):
+    from server import _inject_harness_next_action
+    from runtime_mode import update_runtime_mode
+
+    # Setup directories
+    archive_dir = tmp_path / "docs" / "dev_tasks" / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dev_tasks_dir = tmp_path / "docs" / "dev_tasks"
+    dev_tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Archived markdown task file
+    archived_file = archive_dir / "2026-10-24_batch1.md"
+    archived_content = (
+        "# Batch 1 Tasks\n\n"
+        "### 任务 1.1 ✔️ 已完成 — Task 1\n\n"
+        "#### 【涉及文件】\n"
+        "```\n"
+        "- [MODIFY] backend/service.py\n"
+        "```\n"
+    )
+    archived_file.write_text(archived_content, encoding="utf-8")
+
+    # 2. Active markdown task file with overlapping domain (backend/)
+    active_file = dev_tasks_dir / "2026-10-24_batch2.md"
+    active_content = (
+        "# Batch 2 Tasks\n\n"
+        "### 任务 2.1 ✅ 已确认 — Task 2\n\n"
+        "#### 【涉及文件】\n"
+        "```\n"
+        "- [MODIFY] backend/router.py\n"
+        "```\n"
+    )
+    active_file.write_text(active_content, encoding="utf-8")
+
+    # 3. Configure inverted mode
+    update_runtime_mode(
+        workspace_root=str(tmp_path),
+        switch_mode="inverted",
+        external_api_available=False,
+    )
+
+    res_dict = {}
+    _inject_harness_next_action(
+        str(tmp_path),
+        "dev_tasks_confirm",
+        res_dict,
+        last_success=True,
+        task_file="docs/dev_tasks/2026-10-24_batch2.md",
+    )
+
+    assert "harness_next_action" in res_dict
+    harness_action = res_dict["harness_next_action"]
+    assert harness_action["action"] == "DISPATCH_RUNNER"
+    assert harness_action["channel"] == "reuse_active"
+
+    # 4. Update active file with disjoint domain (frontend/) -> should recommend spawn_fresh
+    active_disjoint_content = (
+        "# Batch 2 Tasks\n\n"
+        "### 任务 2.1 ✅ 已确认 — Task 2\n\n"
+        "#### 【涉及文件】\n"
+        "```\n"
+        "- [MODIFY] frontend/App.vue\n"
+        "```\n"
+    )
+    active_file.write_text(active_disjoint_content, encoding="utf-8")
+
+    res_dict_disjoint = {}
+    _inject_harness_next_action(
+        str(tmp_path),
+        "dev_tasks_confirm",
+        res_dict_disjoint,
+        last_success=True,
+        task_file="docs/dev_tasks/2026-10-24_batch2.md",
+    )
+
+    assert "harness_next_action" in res_dict_disjoint
+    harness_action_disjoint = res_dict_disjoint["harness_next_action"]
+    assert harness_action_disjoint["action"] == "DISPATCH_RUNNER"
+    assert harness_action_disjoint["channel"] == "spawn_fresh"
+

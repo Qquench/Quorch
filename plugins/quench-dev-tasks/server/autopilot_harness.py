@@ -7,10 +7,13 @@ Bound by Quench DevTasks lifecycle and INV-1..INV-9 invariants.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 
 DEFAULT_MAX_REVIEW_ROUNDS = 2
+DEFAULT_MAX_RUNNER_TASKS = 12
+DEFAULT_BATCH_OVERLAP_THRESHOLD = 0.30
 
 HarnessActionType = Literal[
     "PROPOSE",
@@ -45,6 +48,106 @@ _STATUS_MAP: Mapping[str, str] = {
 def _norm_status(s: str) -> str:
     cleaned = s.strip()
     return _STATUS_MAP.get(cleaned, cleaned)
+
+
+def _clean_path_for_overlap(p: str) -> str:
+    s = str(p).strip()
+    if not s or s.startswith("```"):
+        return ""
+    # strip leading bullet points, numbers, markdown symbols (avoid eating ./ paths)
+    s = re.sub(r"^[\s\-\*\+\>\#]+\s*|^\d+\.\s+", "", s).strip()
+    # strip operation markers
+    s = re.sub(r"^\[\s*(?:MODIFY|NEW|DELETE|RENAME)\s*\]\s*", "", s, flags=re.IGNORECASE).strip()
+    # strip quotes and backticks
+    s = s.strip("`'\" ").strip()
+    # strip markdown link [text](path)
+    m_link = re.search(r"\[.*?\]\((.*?)\)", s)
+    if m_link:
+        s = m_link.group(1).strip()
+    # strip comments / parentheses
+    s = s.split("（")[0].split("(")[0].strip()
+    s = s.strip("`'\" ").strip()
+    if s.startswith("file:///"):
+        s = s[8:].lstrip("/\\")
+    posix_path = s.replace("\\", "/")
+    while posix_path.startswith("./"):
+        posix_path = posix_path[2:]
+    posix_path = posix_path.lstrip("/")
+    return posix_path.strip()
+
+
+def _extract_top_module_dir(p: str) -> str:
+    if "/" not in p:
+        return "__root__"
+    parts = p.split("/")
+    if parts[0] in ("tests", "test") and len(parts) > 2:
+        return parts[1]
+    return parts[0]
+
+
+def compute_batch_overlap_ratio(
+    prev_files: Sequence[str],
+    curr_files: Sequence[str],
+) -> float:
+    """Compute structural and directory overlap ratio between two task batches.
+
+    Returns float in range [0.0, 1.0] representing containment in curr_files.
+    Zero I/O.
+    """
+    prev_set = {_clean_path_for_overlap(p) for p in prev_files}
+    prev_set.discard("")
+    curr_set = {_clean_path_for_overlap(p) for p in curr_files}
+    curr_set.discard("")
+
+    if not prev_set or not curr_set:
+        return 0.0
+
+    file_ratio = len(prev_set & curr_set) / len(curr_set)
+
+    prev_dirs = {_extract_top_module_dir(p) for p in prev_set}
+    curr_dirs = {_extract_top_module_dir(p) for p in curr_set}
+    dir_ratio = len(prev_dirs & curr_dirs) / len(curr_dirs) if curr_dirs else 0.0
+
+    return round(max(file_ratio, 0.5 * dir_ratio), 4)
+
+
+def resolve_runner_dispatch_channel(
+    completed_in_batch: int = 0,
+    is_rework: bool = False,
+    prev_batch_files: Sequence[str] = (),
+    curr_batch_files: Sequence[str] = (),
+    cumulative_runner_tasks: int = 0,
+    max_runner_tasks: int = DEFAULT_MAX_RUNNER_TASKS,
+    overlap_threshold: float = DEFAULT_BATCH_OVERLAP_THRESHOLD,
+) -> str:
+    """Resolve whether to reuse an active runner subagent or spawn a fresh one.
+
+    Rule 1 (Intra-Batch or Rework -> Always Reuse):
+        Never split a batch mid-stream or switch runners during rework.
+    Rule 2 (Safety Fuse at Batch Boundary):
+        If cumulative runner tasks reach max_runner_tasks, spawn fresh.
+    Rule 3 (Cross-Batch File/Module Overlap):
+        If overlap ratio >= threshold, reuse active runner to retain hot context;
+        otherwise, spawn fresh runner to prevent cross-domain pollution.
+    Zero I/O.
+    """
+    # Rule 1: Intra-Batch or Rework -> Always Reuse
+    if is_rework or completed_in_batch > 0:
+        return "reuse_active"
+
+    # Rule 2: Safety Fuse at Batch Boundary
+    if cumulative_runner_tasks >= max_runner_tasks:
+        return "spawn_fresh"
+
+    # Rule 3: Cross-Batch File/Module Overlap
+    if not prev_batch_files or not curr_batch_files:
+        return "spawn_fresh"
+
+    overlap = compute_batch_overlap_ratio(prev_batch_files, curr_batch_files)
+    if overlap >= overlap_threshold:
+        return "reuse_active"
+
+    return "spawn_fresh"
 
 
 @dataclass(frozen=True)
@@ -117,6 +220,10 @@ def compute_next_action(
     roadmap_pending_batches: Sequence[str] = (),
     roadmap_file: Optional[str] = None,
     task_file: Optional[str] = None,
+    runner_subagent_model_hint: Optional[str] = None,
+    prev_batch_files: Sequence[str] = (),
+    curr_batch_files: Sequence[str] = (),
+    cumulative_runner_tasks: int = 0,
 ) -> Tuple[HarnessNextAction, bool]:
     """Pure decision function for autopilot baton progression.
 
@@ -402,15 +509,28 @@ def compute_next_action(
     if in_progress_tasks:
         active = in_progress_tasks[0]
         if effective_mode == "inverted":
+            dispatch_channel = resolve_runner_dispatch_channel(
+                completed_in_batch=len(completed_tasks),
+                is_rework=(len(rework_tasks) > 0),
+                prev_batch_files=prev_batch_files,
+                curr_batch_files=curr_batch_files,
+                cumulative_runner_tasks=cumulative_runner_tasks,
+            )
+            strategy_guidance = (
+                "reuse active runner subagent via send_message to retain hot context / 通过 send_message 复用当前 runner 子 Agent 以保全热文件上下文"
+                if dispatch_channel == "reuse_active"
+                else "spawn a fresh isolated runner subagent for this batch / 为本批次新建独立的 runner 子 Agent"
+            )
             return (
                 HarnessNextAction(
                     action="DISPATCH_RUNNER",
                     task_file=task_file,
                     task_id=active.task_id,
-                    model_hint=None,
+                    channel=dispatch_channel,
+                    model_hint=runner_subagent_model_hint,
                     candidates=candidates,
                     reason=f"Task {active.task_id} is in progress under inverted mode",
-                    instruction=f"Dispatch task {active.task_id} execution to runner subagent / 派发任务 {active.task_id} 给 runner 子 Agent 施工。",
+                    instruction=f"Dispatch task {active.task_id} execution to runner subagent ({strategy_guidance}) / 派发任务 {active.task_id} 给 runner 子 Agent 施工（{strategy_guidance}）。",
                     next_batch_tasks=next_batch_tasks,
                     roadmap_file=roadmap_file,
                 ),
@@ -434,15 +554,28 @@ def compute_next_action(
     if confirmed_tasks:
         target = confirmed_tasks[0]
         if effective_mode == "inverted":
+            dispatch_channel = resolve_runner_dispatch_channel(
+                completed_in_batch=len(completed_tasks),
+                is_rework=(len(rework_tasks) > 0),
+                prev_batch_files=prev_batch_files,
+                curr_batch_files=curr_batch_files,
+                cumulative_runner_tasks=cumulative_runner_tasks,
+            )
+            strategy_guidance = (
+                "reuse active runner subagent via send_message to retain hot context / 通过 send_message 复用当前 runner 子 Agent 以保全热文件上下文"
+                if dispatch_channel == "reuse_active"
+                else "spawn a fresh isolated runner subagent for this batch / 为本批次新建独立的 runner 子 Agent"
+            )
             return (
                 HarnessNextAction(
                     action="DISPATCH_RUNNER",
                     task_file=task_file,
                     task_id=target.task_id,
-                    model_hint=None,
+                    channel=dispatch_channel,
+                    model_hint=runner_subagent_model_hint,
                     candidates=candidates,
                     reason=f"Task {target.task_id} confirmed; dispatch to runner subagent under inverted mode",
-                    instruction=f"Dispatch task {target.task_id} execution to runner subagent / 派发任务 {target.task_id} 给 runner 子 Agent 施工。",
+                    instruction=f"Dispatch task {target.task_id} execution to runner subagent ({strategy_guidance}) / 派发任务 {target.task_id} 给 runner 子 Agent 施工（{strategy_guidance}）。",
                     next_batch_tasks=next_batch_tasks,
                     roadmap_file=roadmap_file,
                 ),

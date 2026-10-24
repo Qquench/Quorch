@@ -164,9 +164,16 @@ from task_writer import (
 mcp = FastMCP("quench-dev-tasks")
 
 
-def _resolve_task_file_path(workspace_root: str, task_file: str) -> str:
+def _resolve_task_file_path(workspace_root: str, task_file: str, config: Optional[Any] = None) -> str:
     """Resolve task file name or relative path to absolute path. / 辅助函数：将任务文件名或相对路径解析为绝对路径。"""
-    config = load_project_config(workspace_root)
+    if config is None:
+        try:
+            config = load_project_config(workspace_root)
+        except Exception:
+            config = QuenchStackConfig(
+                workspace_root=workspace_root,
+                project_name=os.path.basename(workspace_root) or "default",
+            )
     dev_tasks_dir = config.resolve_path("dev_tasks_dir")
 
     if os.path.isabs(task_file):
@@ -903,6 +910,41 @@ def _extract_task_scoped_files(task: Any) -> list[str]:
     return result
 
 
+def _extract_batch_scoped_files(filepath: str, tasks: Sequence[Any]) -> list[str]:
+    """从任务单 Markdown 文件中提取并去重该批次全部任务涉及的文件列表。"""
+    if not filepath or not os.path.isfile(filepath):
+        return []
+    content = ""
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except Exception:
+        pass
+
+    batch_files: list[str] = []
+    for pt in tasks:
+        scoped = _extract_task_scoped_files(pt)
+        if not scoped and content:
+            tid = str(getattr(pt, "id", pt.get("id", "") if isinstance(pt, dict) else pt))
+            try:
+                raw_wl = extract_task_whitelist(content, tid)
+                if not raw_wl:
+                    m = re.search(
+                        rf"###\s+(?:任务|Task)\s+{re.escape(tid)}\s+.*?####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*(.*?)(?=####|###|\Z)",
+                        content,
+                        re.DOTALL | re.IGNORECASE,
+                    )
+                    if m:
+                        raw_wl = [line for line in m.group(1).splitlines() if line.strip()]
+                scoped = _extract_task_scoped_files({"affected_files": raw_wl})
+            except Exception:
+                scoped = []
+        for f in scoped:
+            if f not in batch_files:
+                batch_files.append(f)
+    return batch_files
+
+
 def _read_recent_audit_records(path: str, max_tail_bytes: int) -> tuple[list[dict], ReadStatus, int]:
     """返回 (records, status, parse_skipped_lines)。首字节残缺多字节丢弃后再解码。"""
     if not os.path.isfile(path):
@@ -1323,7 +1365,13 @@ def _inject_harness_next_action(
 ) -> None:
     try:
         if config is None:
-            config = load_project_config(workspace_root)
+            try:
+                config = load_project_config(workspace_root)
+            except Exception:
+                config = QuenchStackConfig(
+                    workspace_root=workspace_root,
+                    project_name=os.path.basename(workspace_root) or "default",
+                )
 
         ext_available = _is_external_api_available(workspace_root, config)
         snapshot = load_runtime_mode(workspace_root, ext_available)
@@ -1340,8 +1388,9 @@ def _inject_harness_next_action(
                 resolved_task_file = os.path.relpath(md_files[0], workspace_root).replace("\\", "/")
 
         task_states: List[TaskStateSnapshot] = []
+        curr_batch_files: List[str] = []
         if resolved_task_file:
-            tf_abs = _resolve_task_file_path(workspace_root, resolved_task_file)
+            tf_abs = _resolve_task_file_path(workspace_root, resolved_task_file, config=config)
             if os.path.isfile(tf_abs):
                 try:
                     tasks = parse_task_file(tf_abs)
@@ -1349,8 +1398,24 @@ def _inject_harness_next_action(
                         task_states.append(
                             TaskStateSnapshot(task_id=str(pt.id), status=pt.status, title=pt.title)
                         )
+                    curr_batch_files = _extract_batch_scoped_files(tf_abs, tasks)
                 except Exception:
                     pass
+
+        prev_batch_files: List[str] = []
+        try:
+            archive_dir = config.resolve_path("archive_dir") if config and hasattr(config, "resolve_path") else None
+            if archive_dir and os.path.isdir(archive_dir):
+                archived_mds = [
+                    f for f in glob.glob(os.path.join(archive_dir, "*.md"))
+                    if os.path.basename(f).lower() != "readme.md"
+                ]
+                if archived_mds:
+                    archived_mds.sort(key=os.path.getmtime, reverse=True)
+                    prev_tasks = parse_task_file(archived_mds[0])
+                    prev_batch_files = _extract_batch_scoped_files(archived_mds[0], prev_tasks)
+        except Exception:
+            pass
 
         roadmap_file, pending_batches = _scan_active_roadmap(workspace_root)
 
@@ -1375,6 +1440,9 @@ def _inject_harness_next_action(
             roadmap_pending_batches=pending_batches,
             roadmap_file=roadmap_file,
             task_file=resolved_task_file,
+            runner_subagent_model_hint=snapshot.runner_subagent_model_hint,
+            prev_batch_files=prev_batch_files,
+            curr_batch_files=curr_batch_files,
         )
 
         if consume_stop_at:
@@ -1402,6 +1470,9 @@ def _inject_harness_next_action(
                     roadmap_pending_batches=pending_batches,
                     roadmap_file=roadmap_file,
                     task_file=resolved_task_file,
+                    runner_subagent_model_hint=fresh_snap.runner_subagent_model_hint,
+                    prev_batch_files=prev_batch_files,
+                    curr_batch_files=curr_batch_files,
                 )
                 action = replace(
                     fresh_action,
