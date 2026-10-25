@@ -63,6 +63,13 @@ def test_init_project_success(tmp_path):
     assert "quench-file-guard" in h_data
     assert "quench-context-injector" in h_data
 
+    # Check mcp_config.json
+    mcp_config = agents_dir / "mcp_config.json"
+    assert mcp_config.is_file()
+    with open(mcp_config, "r", encoding="utf-8") as f:
+        m_data = json.load(f)
+    assert "quench-dev-tasks" in m_data.get("mcpServers", {})
+
     # Check dev_tasks directories and README
     dev_tasks = proj_dir / "docs" / "dev_tasks"
     assert dev_tasks.is_dir()
@@ -343,4 +350,109 @@ def test_hooks_json_command_format(tmp_path):
     tokens = cmd.split(" ")
     assert len(tokens) >= 2
     assert not cmd.startswith('"')
+
+
+def test_generate_agents_mcp_config_new(tmp_path):
+    """测试 generate_agents_mcp_config 在空项目中全新生成 .agents/mcp_config.json。"""
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    from config_sync import generate_agents_mcp_config
+
+    proj_dir = tmp_path / "new_mcp_proj"
+    proj_dir.mkdir()
+
+    cfg_path = generate_agents_mcp_config(str(proj_dir), python_exe=PYTHON_EXE)
+    assert os.path.isfile(cfg_path)
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert "mcpServers" in data
+    assert "quench-dev-tasks" in data["mcpServers"]
+    quench_entry = data["mcpServers"]["quench-dev-tasks"]
+    assert quench_entry["command"] == PYTHON_EXE
+    assert any("server.py" in arg for arg in quench_entry["args"])
+
+
+def test_generate_agents_mcp_config_merge_preserves_third_party(tmp_path):
+    """测试 generate_agents_mcp_config 安全合并，保留已有的第三方 MCP server。"""
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    from config_sync import generate_agents_mcp_config
+
+    proj_dir = tmp_path / "merge_mcp_proj"
+    agents_dir = proj_dir / ".agents"
+    agents_dir.mkdir(parents=True)
+    existing_mcp = agents_dir / "mcp_config.json"
+    existing_content = {
+        "mcpServers": {
+            "custom-sqlite": {
+                "command": "uvx",
+                "args": ["mcp-server-sqlite", "--db-path", "test.db"],
+            }
+        }
+    }
+    existing_mcp.write_text(json.dumps(existing_content, indent=2), encoding="utf-8")
+
+    generate_agents_mcp_config(str(proj_dir), python_exe=PYTHON_EXE)
+
+    with open(existing_mcp, "r", encoding="utf-8") as f:
+        merged = json.load(f)
+
+    # 第三方 server 完好保留
+    assert "custom-sqlite" in merged["mcpServers"]
+    assert merged["mcpServers"]["custom-sqlite"]["command"] == "uvx"
+    # quench-dev-tasks 成功注入
+    assert "quench-dev-tasks" in merged["mcpServers"]
+
+
+def test_generate_agents_mcp_config_corrupt_backup(tmp_path):
+    """测试当已有 .agents/mcp_config.json 损坏时，自动备份为 .bak 并重置重建。"""
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    from config_sync import generate_agents_mcp_config
+
+    proj_dir = tmp_path / "corrupt_mcp_proj"
+    agents_dir = proj_dir / ".agents"
+    agents_dir.mkdir(parents=True)
+    corrupt_file = agents_dir / "mcp_config.json"
+    corrupt_file.write_text("{\n  broken json content without closing bracket", encoding="utf-8")
+
+    cfg_path = generate_agents_mcp_config(str(proj_dir), python_exe=PYTHON_EXE)
+    assert os.path.isfile(cfg_path)
+
+    # 验证 .bak 备份存在且包含损坏原始内容
+    bak_file = agents_dir / "mcp_config.json.bak"
+    assert bak_file.is_file()
+    assert "broken json content" in bak_file.read_text(encoding="utf-8")
+
+    # 验证重建后的 mcp_config.json 是合法 JSON 且包含 quench-dev-tasks
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        repaired = json.load(f)
+    assert "quench-dev-tasks" in repaired["mcpServers"]
+
+
+def test_generate_agents_mcp_config_idempotency(tmp_path):
+    """测试在内容一致时，不带 force 调用会跳过写入；带 force 调用会强制写入。"""
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    from config_sync import generate_agents_mcp_config
+
+    proj_dir = tmp_path / "idempotent_mcp_proj"
+    proj_dir.mkdir()
+
+    cfg_path = generate_agents_mcp_config(str(proj_dir), python_exe=PYTHON_EXE)
+    initial_mtime = os.path.getmtime(cfg_path)
+
+    # 确保文件系统时间戳区分度
+    old_time = initial_mtime - 10
+    os.utime(cfg_path, (old_time, old_time))
+
+    # 第二次调用（无 force）：跳过写入，时间戳保持不变
+    generate_agents_mcp_config(str(proj_dir), python_exe=PYTHON_EXE, force=False)
+    assert os.path.getmtime(cfg_path) == old_time
+
+    # 第三次调用（有 force）：强制写入，时间戳被更新
+    generate_agents_mcp_config(str(proj_dir), python_exe=PYTHON_EXE, force=True)
+    assert os.path.getmtime(cfg_path) > old_time
+
 

@@ -101,6 +101,7 @@ from state_machine import (
     assert_task_checkout_allowed,
     extract_task_whitelist,
 )
+from task_status import is_task_file
 from pathlib import Path
 from manifest import (
     commit_lease,
@@ -1383,6 +1384,7 @@ def _inject_harness_next_action(
             md_files = [
                 f for f in glob.glob(os.path.join(dev_tasks_dir, "*.md"))
                 if "archive" not in f.replace("\\", "/").lower()
+                and is_task_file(os.path.relpath(f, workspace_root))
             ]
             if md_files:
                 md_files.sort(key=os.path.getmtime, reverse=True)

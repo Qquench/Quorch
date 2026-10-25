@@ -18,6 +18,10 @@ if sys.version_info >= (3, 7):
     except Exception:
         pass
 
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _CURRENT_DIR not in sys.path:
+    sys.path.insert(0, _CURRENT_DIR)
+
 
 def json_escape_path(path_str: str) -> str:
     """对文件路径进行 JSON 安全转义，杜绝 Windows 反斜杠破坏 JSON 格式"""
@@ -264,6 +268,9 @@ def diagnose_environment(project_root: str) -> dict:
             "has_plugins_json": False,
             "has_hooks_json": False,
             "hooks_json_valid": False,
+            "has_agents_mcp_config": False,
+            "agents_mcp_config_valid": False,
+            "mcp_config_valid": False,
             "python_valid": sys.version_info >= (3, 8),
             "dependencies_ready": False,
             "issues": issues,
@@ -368,6 +375,27 @@ def diagnose_environment(project_root: str) -> dict:
             issues.append(f".agents/hooks.json 格式损坏（非有效 JSON）: {e}")
             suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 重新生成 hooks.json")
 
+    # 5.5 检查目标项目 .agents/mcp_config.json
+    agents_mcp_path = os.path.join(root, ".agents", "mcp_config.json")
+    has_agents_mcp_config = os.path.isfile(agents_mcp_path)
+    agents_mcp_config_valid = False
+    if has_agents_mcp_config:
+        try:
+            with open(agents_mcp_path, "r", encoding="utf-8") as f:
+                agents_mcp_data = json.load(f)
+            if isinstance(agents_mcp_data, dict) and "mcpServers" in agents_mcp_data and "quench-dev-tasks" in agents_mcp_data["mcpServers"]:
+                agents_mcp_config_valid = True
+            else:
+                issues.append("目标项目 .agents/mcp_config.json 格式异常 (缺少 quench-dev-tasks 配置)")
+                suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 补齐 mcp_config.json")
+        except Exception as e:
+            issues.append(f"目标项目 .agents/mcp_config.json 格式损坏（非有效 JSON）: {e}")
+            suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root} --force' 重新生成 mcp_config.json")
+    else:
+        if os.path.isdir(os.path.join(root, ".agents")):
+            issues.append("目标项目缺少 FastMCP 服务配置: .agents/mcp_config.json")
+            suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root}' 自动生成 .agents/mcp_config.json")
+
     # 6. 检查 Python 版本
     python_valid = sys.version_info >= (3, 8)
     if not python_valid:
@@ -410,6 +438,8 @@ def diagnose_environment(project_root: str) -> dict:
         "has_plugins_json": has_plugins_json,
         "has_hooks_json": has_hooks_json,
         "hooks_json_valid": hooks_json_valid,
+        "has_agents_mcp_config": has_agents_mcp_config,
+        "agents_mcp_config_valid": agents_mcp_config_valid,
         "mcp_config_valid": mcp_config_valid,
         "python_valid": python_valid,
         "dependencies_ready": dependencies_ready,
@@ -430,7 +460,11 @@ def print_diagnostic_report(diag: dict, project_root: str) -> None:
         "⚠️ 存在但配置失效" if diag.get("has_hooks_json") else "❌ 缺失 (生命周期拦截未生效)"
     )
     print(f"• 生命周期 Hooks:   {hooks_status}")
-    print(f"• FastMCP 服务配置: {'✅ 已就绪 (mcp_config.json 自动同步)' if diag.get('mcp_config_valid') else '❌ 异常'}")
+    agents_mcp_status = "✅ 已就绪 (.agents/mcp_config.json)" if diag.get("agents_mcp_config_valid") else (
+        "⚠️ 存在但配置失效" if diag.get("has_agents_mcp_config") else "❌ 缺失 (.agents/mcp_config.json 未生成)"
+    )
+    print(f"• 工作区 MCP 配置:  {agents_mcp_status}")
+    print(f"• 插件级 MCP 配置:  {'✅ 已就绪 (mcp_config.json 自动同步)' if diag.get('mcp_config_valid') else '❌ 异常'}")
     print(f"• Python 运行环境:  {'✅ 合格 (>= 3.8)' if diag['python_valid'] else '❌ 版本过低'}")
     print(f"• 关键依赖库就绪:   {'✅ 全部就绪 (fastmcp, yaml, filelock)' if diag['dependencies_ready'] else '❌ 缺失部分依赖'}")
     print("-" * 60)
@@ -631,9 +665,13 @@ def init_project(
             f.write(customized_content)
         print(f"✅ 已创建 .agents/quench_stack.yaml (项目名称: {effective_name})")
 
-    # 5. 创建 / 渲染 .agents/hooks.json (仅 antigravity 或 all)
+    # 5. 创建 / 渲染 .agents/hooks.json 与 .agents/mcp_config.json (仅 antigravity 或 all)
     if ide in ("antigravity", "all"):
         _render_hooks_json(root, force=force)
+        python_exe = detect_python_executable(root)
+        from config_sync import generate_agents_mcp_config
+
+        generate_agents_mcp_config(root, python_exe, force=force, quiet=False)
 
     # 6. 创建任务目录结构
     dev_tasks_dir = os.path.join(root, "docs", "dev_tasks")

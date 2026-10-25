@@ -525,3 +525,83 @@ def test_probe_fd_closed_exactly_once(tmp_path):
         assert verdict == "blocked"
         assert len(close_calls) == 1
 
+
+def test_render_configs_generates_repo_agents_mcp_config(mock_plugin_env):
+    """验证 render_configs 在检测到 repo_root/.agents 存在时，同步生成 .agents/mcp_config.json。"""
+    repo_root = mock_plugin_env.parent.parent
+    repo_agents = repo_root / ".agents"
+    repo_agents.mkdir(parents=True, exist_ok=True)
+
+    out_mcp, out_hooks = install.render_configs(str(mock_plugin_env), python_exe=sys.executable)
+    assert os.path.isfile(out_mcp)
+    assert os.path.isfile(out_hooks)
+
+    repo_mcp = repo_agents / "mcp_config.json"
+    assert repo_mcp.is_file()
+    with open(repo_mcp, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert "quench-dev-tasks" in data.get("mcpServers", {})
+
+
+def test_preflight_and_rollback_covers_repo_mcp_config(mock_plugin_env, tmp_path):
+    """验证 run_preflight 记录已有 .agents/mcp_config.json 快照并在 rollback 中准确恢复。"""
+    repo_root = mock_plugin_env.parent.parent
+    repo_agents = repo_root / ".agents"
+    repo_agents.mkdir(parents=True, exist_ok=True)
+    repo_mcp = repo_agents / "mcp_config.json"
+
+    old_content = '{\n  "mcpServers": {\n    "old-server": {"command": "echo"}\n  }\n}'
+    repo_mcp.write_text(old_content, encoding="utf-8")
+
+    backup_path = str(tmp_path / "backup.json")
+    passed, msgs = install.run_preflight(str(mock_plugin_env), backup_path, repo_root=str(repo_root))
+    assert passed is True
+
+    with open(backup_path, "r", encoding="utf-8") as f:
+        snap = json.load(f)
+    assert ".agents/mcp_config.json" in snap["files"]
+    assert "old-server" in snap["files"][".agents/mcp_config.json"]
+
+    # 模拟安装覆盖
+    repo_mcp.write_text('{"mcpServers": {"quench-dev-tasks": {}}}', encoding="utf-8")
+
+    # 执行回滚
+    success = install.rollback_configuration(str(mock_plugin_env), backup_path)
+    assert success is True
+
+    # 验证恢复旧内容
+    with open(repo_mcp, "r", encoding="utf-8") as f:
+        restored = json.load(f)
+    assert "old-server" in restored["mcpServers"]
+    assert "quench-dev-tasks" not in restored["mcpServers"]
+
+
+def test_rollback_removes_untracked_repo_mcp_config(mock_plugin_env, tmp_path):
+    """验证当安装前 .agents/mcp_config.json 不存在时，rollback 准确清理生成的新文件。"""
+    repo_root = mock_plugin_env.parent.parent
+    repo_agents = repo_root / ".agents"
+    repo_agents.mkdir(parents=True, exist_ok=True)
+    repo_mcp = repo_agents / "mcp_config.json"
+    if repo_mcp.exists():
+        repo_mcp.unlink()
+
+    backup_path = str(tmp_path / "backup.json")
+    passed, msgs = install.run_preflight(str(mock_plugin_env), backup_path, repo_root=str(repo_root))
+    assert passed is True
+
+    with open(backup_path, "r", encoding="utf-8") as f:
+        snap = json.load(f)
+    assert snap["files"][".agents/mcp_config.json"] is None
+
+    # 模拟安装生成了该文件
+    repo_mcp.write_text('{"mcpServers": {}}', encoding="utf-8")
+    assert repo_mcp.exists()
+
+    # 执行回滚
+    success = install.rollback_configuration(str(mock_plugin_env), backup_path)
+    assert success is True
+
+    # 验证未存在的文件被清理
+    assert not repo_mcp.exists()
+
+

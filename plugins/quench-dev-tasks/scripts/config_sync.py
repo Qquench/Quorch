@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 from typing import List, Optional, Tuple
@@ -128,6 +129,110 @@ def render_plugin_configs(
     return mcp_rendered, hooks_rendered, workspace_hooks_rendered
 
 
+def render_agents_mcp_config(
+    project_root: str,
+    python_exe: str,
+    existing_data: Optional[dict] = None,
+    plugin_dir: Optional[str] = None,
+) -> dict:
+    """根据模板纯函数渲染 .agents/mcp_config.json 结构并安全合并已有第三方配置。
+
+    保持无副作用纯函数契约：不触碰磁盘，返回合并后的完整字典。
+    """
+    p_dir = os.path.normpath(plugin_dir or get_default_plugin_dir())
+    py_exe = os.path.normpath(python_exe)
+    server_script = os.path.normpath(os.path.join(p_dir, "server", "server.py"))
+    mcp_template = os.path.join(p_dir, "mcp_config.json.template")
+
+    if os.path.isfile(mcp_template):
+        esc_python = json_escape_path(py_exe)
+        esc_server = json_escape_path(server_script)
+        with open(mcp_template, "r", encoding="utf-8") as f:
+            template_content = f.read()
+        rendered_str = template_content.replace("{{PYTHON_EXECUTABLE}}", esc_python).replace(
+            "{{SERVER_SCRIPT_PATH}}", esc_server
+        )
+        try:
+            rendered_json = json.loads(rendered_str)
+            quench_def = rendered_json.get("mcpServers", {}).get(
+                "quench-dev-tasks", {"command": py_exe, "args": [server_script]}
+            )
+        except Exception:
+            quench_def = {"command": py_exe, "args": [server_script]}
+    else:
+        quench_def = {"command": py_exe, "args": [server_script]}
+
+    out_data = dict(existing_data) if isinstance(existing_data, dict) else {}
+    mcp_servers = dict(out_data.get("mcpServers", {})) if isinstance(out_data.get("mcpServers"), dict) else {}
+    mcp_servers["quench-dev-tasks"] = quench_def
+    res = dict(out_data)
+    res["mcpServers"] = mcp_servers
+    return res
+
+
+def generate_agents_mcp_config(
+    project_root: str,
+    python_exe: str,
+    force: bool = False,
+    plugin_dir: Optional[str] = None,
+    quiet: bool = True,
+) -> str:
+    """在目标项目的 .agents/ 目录下生成或安全合并 mcp_config.json 配置。
+
+    特性：
+    1. 自动注册 quench-dev-tasks FastMCP 服务，保留用户现有的其他第三方 MCP 工具；
+    2. 已有 JSON 损坏时自动生成 .agents/mcp_config.json.bak 备份；
+    3. 幂等性：内容一致且未指定 force 时跳过写入；
+    4. 原子落盘：采用 atomic_write_file 杜绝写入中途中断损坏。
+
+    返回目标配置文件路径。
+    """
+    root = os.path.abspath(project_root)
+    agents_dir = os.path.join(root, ".agents")
+    os.makedirs(agents_dir, exist_ok=True)
+    target_path = os.path.normpath(os.path.join(agents_dir, "mcp_config.json"))
+
+    existing_data: dict = {}
+    if os.path.isfile(target_path):
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                existing_data = json.load(f)
+        except Exception as e:
+            bak_path = target_path + ".bak"
+            try:
+                shutil.copy2(target_path, bak_path)
+            except Exception:
+                pass
+            if not quiet:
+                print(f"⚠️ 解析已有 .agents/mcp_config.json 失败 ({e})，已备份至 {os.path.basename(bak_path)} 并重置该文件。")
+            existing_data = {}
+
+    if not isinstance(existing_data, dict):
+        existing_data = {}
+
+    merged_data = render_agents_mcp_config(
+        project_root=root,
+        python_exe=python_exe,
+        existing_data=existing_data,
+        plugin_dir=plugin_dir,
+    )
+
+    # 幂等性检查：若已有相同配置且未强刷，跳过写入
+    if os.path.isfile(target_path) and not force:
+        curr_def = existing_data.get("mcpServers", {}).get("quench-dev-tasks")
+        new_def = merged_data.get("mcpServers", {}).get("quench-dev-tasks")
+        if curr_def == new_def:
+            if not quiet:
+                print("ℹ️ .agents/mcp_config.json 中的 quench-dev-tasks 配置已存在且一致，跳过更新。")
+            return target_path
+
+    content = json.dumps(merged_data, indent=2, ensure_ascii=False) + "\n"
+    atomic_write_file(target_path, content)
+    if not quiet:
+        print(f"✅ 已生成/更新 .agents/mcp_config.json (注册 quench-dev-tasks，解释器: {python_exe})")
+    return target_path
+
+
 def auto_heal_configs(
     plugin_dir: Optional[str] = None,
     workspace_root: Optional[str] = None,
@@ -158,20 +263,26 @@ def auto_heal_configs(
     if not os.path.isfile(hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(hooks_target):
         affected.append(hooks_target)
 
-    # 检查工作区级 hooks.json（若提供 workspace_root）
+    # 检查工作区级 hooks.json 与 mcp_config.json（若提供 workspace_root）
     ws_hooks_target: Optional[str] = None
+    ws_mcp_target: Optional[str] = None
     if workspace_root:
         ws_hooks_target = os.path.normpath(os.path.join(workspace_root, ".agents", "hooks.json"))
         if not os.path.isfile(ws_hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(ws_hooks_target):
             affected.append(ws_hooks_target)
 
+        ws_mcp_target = os.path.normpath(os.path.join(workspace_root, ".agents", "mcp_config.json"))
+        if not os.path.isfile(ws_mcp_target) or os.path.getmtime(mcp_template) > os.path.getmtime(ws_mcp_target):
+            affected.append(ws_mcp_target)
+
     if not affected:
         return False, []
 
     try:
+        py_exe = os.path.normpath(python_exe or detect_python_executable(p_dir))
         mcp_rendered, hooks_rendered, ws_hooks_rendered = render_plugin_configs(
             plugin_dir=p_dir,
-            python_exe=python_exe,
+            python_exe=py_exe,
             workspace_root=workspace_root,
         )
         if mcp_target in affected:
@@ -181,6 +292,15 @@ def auto_heal_configs(
 
         if ws_hooks_target and ws_hooks_target in affected and ws_hooks_rendered:
             atomic_write_file(ws_hooks_target, ws_hooks_rendered)
+
+        if ws_mcp_target and ws_mcp_target in affected:
+            generate_agents_mcp_config(
+                project_root=workspace_root,
+                python_exe=py_exe,
+                force=True,
+                plugin_dir=p_dir,
+                quiet=True,
+            )
 
         if not quiet:
             print(f"[Quench] 运行时配置自愈完成: 已同步 {len(affected)} 个配置文件。")

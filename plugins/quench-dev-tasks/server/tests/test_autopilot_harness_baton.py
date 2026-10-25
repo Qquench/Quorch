@@ -5,6 +5,8 @@ CAS expect_set_at re-emission, and strict zero-I/O purity.
 """
 
 import builtins
+import os
+import time
 import pytest
 
 from autopilot_harness import (
@@ -570,5 +572,46 @@ def test_inject_harness_next_action_standard_mode_bypasses_archive_scan(tmp_path
     )
     assert res_dict["harness_next_action"]["action"] == "CHECKOUT"
     assert archive_scanned is False
+
+
+def test_inject_harness_next_action_ignores_readme_md(tmp_path):
+    """验证 _inject_harness_next_action 在隐式扫描 dev_tasks_dir 时严密排除 README.md。"""
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (agents_dir / "quench_stack.yaml").write_text(
+        "project_name: test-readme-ignore\ndev_tasks_dir: docs/dev_tasks\naudit_gate:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    dev_tasks_dir = tmp_path / "docs" / "dev_tasks"
+    dev_tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    active_file = dev_tasks_dir / "2026-10-25_batch.md"
+    active_file.write_text(
+        "# Batch Tasks\n\n### 任务 1.1 ✅ 已确认 — Task 1\n\n#### 【涉及文件】\n```\n- [MODIFY] backend/service.py\n```\n",
+        encoding="utf-8",
+    )
+
+    # 写入一个更新时间更新的 README.md，模拟在任务单创建后被用户或初始化脚本触碰
+    readme_file = dev_tasks_dir / "README.md"
+    readme_file.write_text("# Documentation and Task Template README\n", encoding="utf-8")
+    future_time = time.time() + 100
+    os.utime(str(readme_file), (future_time, future_time))
+
+    res_dict = {}
+    from server import _inject_harness_next_action
+
+    _inject_harness_next_action(
+        workspace_root=str(tmp_path),
+        tool_name="dev_tasks_status",
+        result_data=res_dict,
+        last_success=True,
+        task_file=None,  # 强制触发 dev_tasks_dir 隐式扫描
+    )
+
+    assert "harness_next_action" in res_dict
+    h_action = res_dict["harness_next_action"]
+    assert h_action["task_file"] == "docs/dev_tasks/2026-10-25_batch.md"
+    assert "readme.md" not in str(h_action["task_file"]).lower()
+
 
 

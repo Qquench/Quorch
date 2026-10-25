@@ -102,3 +102,51 @@ def test_auto_heal_workspace_hooks(tmp_path):
     with open(ws_hooks, "r", encoding="utf-8") as f:
         data = json.load(f)
     assert "file_scope_guard.py" in data.get("guard", "")
+
+
+def test_auto_heal_workspace_mcp_config(tmp_path):
+    """当工作区的 .agents/mcp_config.json 缺失或滞后于插件模板时，自动同步刷新工作区配置并保留第三方 server。"""
+    p_dir = tmp_path / "plugin"
+    p_dir.mkdir()
+    (p_dir / "server").mkdir()
+    (p_dir / "server" / "server.py").write_text("# server", encoding="utf-8")
+    (p_dir / "server" / "hooks").mkdir()
+    (p_dir / "server" / "hooks" / "file_scope_guard.py").write_text("# guard", encoding="utf-8")
+    (p_dir / "server" / "hooks" / "context_injector.py").write_text("# injector", encoding="utf-8")
+
+    mcp_tpl = p_dir / "mcp_config.json.template"
+    mcp_tpl.write_text('{"mcpServers": {"quench-dev-tasks": {"command": "{{PYTHON_EXECUTABLE}}", "args": ["{{SERVER_SCRIPT_PATH}}"]}}}', encoding="utf-8")
+
+    hooks_tpl = p_dir / "hooks.json.template"
+    hooks_tpl.write_text('{"guard": "{{FILE_GUARD_SCRIPT_PATH}}"}', encoding="utf-8")
+
+    auto_heal_configs(plugin_dir=str(p_dir), python_exe="python")
+
+    ws_dir = tmp_path / "workspace"
+    ws_agents = ws_dir / ".agents"
+    ws_agents.mkdir(parents=True)
+    ws_hooks = ws_agents / "hooks.json"
+    ws_hooks.write_text('{"guard": "file_scope_guard.py"}', encoding="utf-8")
+    # 让 hooks.json 最新，避免混入 hooks 自愈
+    now = time.time()
+    os.utime(str(ws_hooks), (now + 10, now + 10))
+
+    ws_mcp = ws_agents / "mcp_config.json"
+    # 模拟已有第三方 server 的旧配置
+    ws_mcp.write_text(json.dumps({
+        "mcpServers": {
+            "third-party": {"command": "node", "args": ["app.js"]}
+        }
+    }), encoding="utf-8")
+    past = time.time() - 100
+    os.utime(str(ws_mcp), (past, past))
+
+    healed, affected = auto_heal_configs(plugin_dir=str(p_dir), workspace_root=str(ws_dir), python_exe="python")
+    assert healed is True
+    assert any(str(ws_mcp) in f for f in affected)
+
+    with open(ws_mcp, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert "quench-dev-tasks" in data["mcpServers"]
+    assert "third-party" in data["mcpServers"]
+

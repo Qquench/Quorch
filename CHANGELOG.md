@@ -3,6 +3,11 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-25] 2026-10-25_auto_render_agents_mcp_config.md
+
+- **Task 1.1**: 抽取 .agents/mcp_config.json 渲染与安全合并唯一真相源，并在 init_project 中接入与收敛 server 任务扫描
+- **Task 1.2**: 在 config_sync 中实现工作区 mcp_config 自愈，在 install.py 中固化本地配置与快照回滚，并补齐 diagnose 断言
+
 ## [2026-10-24] 2026-10-24_v1_25_batch3_docs_skills_and_integration.md
 
 - **Task 25.5**: AGENTS.md、工作流 Skill 与纪律规范的三层隔离、双层探查及 Autopilot 闭环契约升级

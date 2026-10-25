@@ -297,6 +297,26 @@ def render_configs(plugin_dir: str, python_exe: str) -> Tuple[str, str]:
     out_hooks_path = os.path.join(p_dir, "hooks.json")
     atomic_write_file(out_hooks_path, json.dumps(hooks_data, indent=2, ensure_ascii=False) + "\n")
 
+    # 3. 若当前仓库存在 .agents 目录，同步生成/更新仓库级 .agents/mcp_config.json
+    repo_root = os.path.normpath(os.path.join(p_dir, "..", ".."))
+    repo_agents_dir = os.path.join(repo_root, ".agents")
+    if os.path.isdir(repo_agents_dir):
+        scripts_dir = os.path.join(p_dir, "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        try:
+            from config_sync import generate_agents_mcp_config
+
+            generate_agents_mcp_config(
+                project_root=repo_root,
+                python_exe=python_exe,
+                force=True,
+                plugin_dir=p_dir,
+                quiet=True,
+            )
+        except Exception as e:
+            sys.stderr.write(f"[install] Warning: failed to generate .agents/mcp_config.json: {e}\n")
+
     return out_mcp_path, out_hooks_path
 
 
@@ -387,6 +407,16 @@ def run_preflight(
                 files_map["plugins/quench-dev-tasks/hooks.json"] = f.read()
         else:
             files_map["plugins/quench-dev-tasks/hooks.json"] = None
+
+        # 纳入工作区级 .agents/mcp_config.json
+        repo_agents_dir = os.path.join(r_root, ".agents")
+        repo_agents_mcp = os.path.join(repo_agents_dir, "mcp_config.json")
+        if os.path.isdir(repo_agents_dir):
+            if os.path.isfile(repo_agents_mcp):
+                with open(repo_agents_mcp, "r", encoding="utf-8") as f:
+                    files_map[".agents/mcp_config.json"] = f.read()
+            else:
+                files_map[".agents/mcp_config.json"] = None
 
         snapshot = {
             "snapshot_version": "1.0",
