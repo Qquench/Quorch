@@ -1360,6 +1360,12 @@ class ReviewerClient:
             )
         self.sink = sink
 
+    @classmethod
+    def from_config(cls, config: Any, **kwargs: Any) -> ReviewerClient:
+        """从项目总配置 (QuenchStackConfig) 或引擎子配置 (ReviewerEngineConfig) 实例化 ReviewerClient。"""
+        re_cfg = getattr(config, "reviewer_engine", config)
+        return cls(re_cfg, **kwargs)
+
     def resolve_api_key(self) -> Optional[str]:
         """按优先级解析 API Key：指定变量名 -> 默认候选 -> Windows 注册表穿透。"""
         if self.api_key_env is None and _is_local_endpoint(self.base_url):

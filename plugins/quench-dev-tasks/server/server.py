@@ -17,7 +17,7 @@ import sys
 import filelock
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Literal, TypedDict, Union
+from typing import Any, Dict, List, Mapping, Optional, Literal, Sequence, TypedDict, Union
 from fastmcp import Context, FastMCP
 
 from log_naming import SESSION_ID_PATTERN
@@ -140,7 +140,8 @@ def _is_external_api_available(workspace_root: str, config: Optional[Any] = None
     try:
         if config is None:
             config = load_project_config(workspace_root)
-        client = ReviewerClient.from_config(config)
+        re_cfg = getattr(config, "reviewer_engine", config)
+        client = ReviewerClient(re_cfg)
         return bool(client.resolve_api_key()) or client.is_available()
     except Exception:
         return False
@@ -1403,19 +1404,20 @@ def _inject_harness_next_action(
                     pass
 
         prev_batch_files: List[str] = []
-        try:
-            archive_dir = config.resolve_path("archive_dir") if config and hasattr(config, "resolve_path") else None
-            if archive_dir and os.path.isdir(archive_dir):
-                archived_mds = [
-                    f for f in glob.glob(os.path.join(archive_dir, "*.md"))
-                    if os.path.basename(f).lower() != "readme.md"
-                ]
-                if archived_mds:
-                    archived_mds.sort(key=os.path.getmtime, reverse=True)
-                    prev_tasks = parse_task_file(archived_mds[0])
-                    prev_batch_files = _extract_batch_scoped_files(archived_mds[0], prev_tasks)
-        except Exception:
-            pass
+        if snapshot.effective_mode == "inverted":
+            try:
+                archive_dir = config.resolve_path("archive_dir") if config and hasattr(config, "resolve_path") else None
+                if archive_dir and os.path.isdir(archive_dir):
+                    archived_mds = [
+                        f for f in glob.glob(os.path.join(archive_dir, "*.md"))
+                        if os.path.basename(f).lower() != "readme.md"
+                    ]
+                    if archived_mds:
+                        archived_mds.sort(key=os.path.getmtime, reverse=True)
+                        prev_tasks = parse_task_file(archived_mds[0])
+                        prev_batch_files = _extract_batch_scoped_files(archived_mds[0], prev_tasks)
+            except Exception:
+                pass
 
         roadmap_file, pending_batches = _scan_active_roadmap(workspace_root)
 
@@ -1451,7 +1453,7 @@ def _inject_harness_next_action(
                 external_api_available=ext_available,
                 consume_stop_at=True,
                 expect_set_at=snapshot.autopilot.set_at,
-                consumed_for=action.consume_for,
+                consume_for=action.consume_for,
             )
             if mut.get("consume_mismatch") is True:
                 fresh_snap = load_runtime_mode(workspace_root, ext_available)

@@ -528,3 +528,47 @@ def test_inject_harness_next_action_cross_batch_overlap_from_markdown(tmp_path):
     assert harness_action_disjoint["action"] == "DISPATCH_RUNNER"
     assert harness_action_disjoint["channel"] == "spawn_fresh"
 
+
+@pytest.mark.tier1_fast
+def test_inject_harness_next_action_standard_mode_bypasses_archive_scan(tmp_path, monkeypatch):
+    from server import _inject_harness_next_action
+    from runtime_mode import update_runtime_mode
+    import server
+
+    dev_tasks_dir = tmp_path / "docs" / "dev_tasks"
+    dev_tasks_dir.mkdir(parents=True, exist_ok=True)
+    active_file = dev_tasks_dir / "2026-10-24_batch1.md"
+    active_file.write_text(
+        "# Batch 1 Tasks\n\n### 任务 1.1 ✅ 已确认 — Task 1\n\n#### 【涉及文件】\n```\n- [MODIFY] backend/service.py\n```\n",
+        encoding="utf-8",
+    )
+
+    update_runtime_mode(
+        workspace_root=str(tmp_path),
+        switch_mode="standard",
+        external_api_available=True,
+    )
+
+    archive_scanned = False
+    orig_extract = server._extract_batch_scoped_files
+
+    def tracked_extract(filepath, tasks):
+        nonlocal archive_scanned
+        if "archive" in str(filepath).replace("\\", "/"):
+            archive_scanned = True
+        return orig_extract(filepath, tasks)
+
+    monkeypatch.setattr(server, "_extract_batch_scoped_files", tracked_extract)
+
+    res_dict = {}
+    _inject_harness_next_action(
+        str(tmp_path),
+        "dev_tasks_confirm",
+        res_dict,
+        last_success=True,
+        task_file="docs/dev_tasks/2026-10-24_batch1.md",
+    )
+    assert res_dict["harness_next_action"]["action"] == "CHECKOUT"
+    assert archive_scanned is False
+
+

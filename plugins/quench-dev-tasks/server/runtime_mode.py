@@ -238,6 +238,7 @@ def update_runtime_mode(
     task_file: Optional[str] = None,
     lock_timeout_s: float = 0.5,
     external_api_available: bool = True,
+    consumed_for: Optional[str] = None,
 ) -> Tuple[EffectiveModeSnapshot, bool, MutationResultDict]:
     mode_path = get_runtime_mode_path(workspace_root)
     lock_path = get_runtime_mode_lock_path(workspace_root)
@@ -272,7 +273,7 @@ def update_runtime_mode(
                     },
                 )
             # CAS passed: bind consumed_for and refresh set_at
-            target_consumed_for = consume_for or current_task_id
+            target_consumed_for = consume_for or consumed_for or current_task_id
             new_set_at = datetime.now(timezone.utc).isoformat()
             autopilot_dict["consumed"] = True
             autopilot_dict["consumed_for"] = target_consumed_for
