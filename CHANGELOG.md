@@ -3,6 +3,23 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-28] 2026-10-28_v1.26_step04_context_injector_autopilot_alignment.md
+
+- **Task 26.4**: Autopilot 流水线提示词解耦与 Context Injector 规约升级
+
+## [2026-10-28] 2026-10-28_v1.26_step03_ast_slice_cache_determinism.md
+
+- **Task 26.3**: 多轮 AST 切片确定性排序与上下文驻留复用算法
+
+## [2026-10-28] 2026-10-28_v1.26_step02_static_prefix_block_alignment.md
+
+- **Task 26.2**: 静态系统前缀 64-token Block 梯度对齐填充算法（终审强化版）
+
+## [2026-10-27] 2026-10-27_v1.26_step01_prompt_cache_telemetry_and_gradient_optimization.md
+
+- **Task 1.1**: 修复 acomplete 流式调用 Usage 解析与全量遥测审计落盘
+- **Task 1.2**: 重构 PromptAssembler 四段式稳定性梯度布局与切片装配解耦
+
 ## [2026-10-25] 2026-10-25_auto_render_agents_mcp_config.md
 
 - **Task 1.1**: 抽取 .agents/mcp_config.json 渲染与安全合并唯一真相源，并在 init_project 中接入与收敛 server 任务扫描

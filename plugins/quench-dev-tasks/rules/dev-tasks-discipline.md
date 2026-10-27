@@ -44,20 +44,22 @@ As an AI coding assistant operating within Quench governance, you MUST adhere to
 ## 4. Reviewer Handoff & Resume Discipline (架构审查交接与多会话复工纪律)
 
 ### ① When to Halt (停机与上报触发条件)
-Halt further development when:
-1. Tasks are `⬜ 待确认` or `🔄 需返工`, requiring architectural review;
-2. Active batch of confirmed tasks completes;
-3. Complex conflicts or interface breaks occur (`dev_tasks_escalate`).
+Halt further development and output a handoff or delivery card ONLY when:
+1. Terminal or stopping state is reached in Autopilot (`PAUSE_FOR_ACCEPTANCE`, `BLOCKED`, `ROADMAP_DONE`, or configured `stop_at` breakpoint stage reached);
+2. Complex conflicts or interface breaks occur (`dev_tasks_escalate`).
+
+**Continuous Relay Non-Braking Invariant (AGENTS.md §6)**:
+In continuous relay states (`PROPOSE`, `REVIEW`, `CONFIRM`, `CHECKOUT`, `DISPATCH_RUNNER`, `SYNC_DOCS`, `ARCHIVE`, `NEXT_BATCH_PROPOSE`), agents MUST NOT prematurely end turns to dump handoff or C3 delivery cards. Development continues automatically via `harness_next_action`.
 
 ### ② Handoff Card Format (标准上报格式)
-Halt and output a standard handoff card:
+Upon reaching a stopping state or breakpoint, halt and output a standard handoff card using `> [!IMPORTANT]`:
 > [!IMPORTANT]
-> ### ⏸️ Quench Task Handoff: Awaiting Architecture Review
+> ### ⏸️ Quench Task Handoff: Awaiting Architecture Review / Acceptance
 > - **Target DevTask**: `docs/dev_tasks/<file>.md` (Task ID: <id>)
-> - **Reason**: <Reason for architectural review>
+> - **Reason**: <Reason for pause or review>
 > 
 > **👉 Low-Token Handoff Steps:**
-> 1. Open a fresh conversation session; switch to Strategic Reviewer Model.
+> 1. Open a fresh conversation session; switch to Strategic Reviewer Model (or check status via `dev_tasks_status`).
 > 2. Submit prompt: `Please review and refine docs/dev_tasks/<file>.md`.
 > 3. After tasks are marked `✅ 已确认`, switch back and continue.
 

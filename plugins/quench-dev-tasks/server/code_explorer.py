@@ -257,7 +257,7 @@ def explore_code_slices(
 
     result = ExploreResult(hops_used=0)
     visited_canonical: Set[str] = set()
-    current_frontier: List[str] = list(seed_files)
+    current_frontier: List[str] = sorted(list(dict.fromkeys(seed_files)), key=lambda p: str(p).replace("\\", "/"))
     root_real = os.path.realpath(os.path.abspath(workspace_root))
 
     hop_level = 0
@@ -346,6 +346,7 @@ def explore_code_slices(
             if rel_display.endswith(".py"):
                 symbols, local_imports, parsed_ok = extract_ast_interfaces(source_text, rel_display)
                 slice_str, is_trunc = build_safe_slice(source_text, symbols, MAX_SLICE_LINES)
+                slice_str = slice_str.replace("\r\n", "\n")
                 result.files.append(
                     SlicedFile(
                         rel_path=rel_display,
@@ -360,7 +361,7 @@ def explore_code_slices(
                 # 若还有剩余 hop 预算，尝试将相对导入加入下一轮探索边界
                 if hop_level < clamped_hops:
                     file_dir = os.path.dirname(target_abs)
-                    for imp in local_imports:
+                    for imp in sorted(local_imports):
                         # 尝试将模块名映射为本地 .py 文件
                         mod_as_path = imp.replace(".", os.sep) + ".py"
                         cand_local = os.path.join(file_dir, mod_as_path)
@@ -372,7 +373,7 @@ def explore_code_slices(
             else:
                 # 针对 .yaml, .json, .md 等文件进行行级安全截断
                 lines = source_text.splitlines()
-                slice_str = "\n".join(lines[:MAX_SLICE_LINES])
+                slice_str = "\n".join(lines[:MAX_SLICE_LINES]).replace("\r\n", "\n")
                 is_trunc = len(lines) > MAX_SLICE_LINES
                 ext = os.path.splitext(rel_display)[-1].lstrip(".") or "text"
                 result.files.append(
@@ -386,9 +387,12 @@ def explore_code_slices(
                     )
                 )
 
-        current_frontier = next_frontier
+        current_frontier = sorted(list(dict.fromkeys(next_frontier)), key=lambda p: str(p).replace("\\", "/"))
         hop_level += 1
         result.hops_used = hop_level
 
+    # 规范化确定性排序：按 POSIX 相对路径字典序排序，保证跨环境与输入顺序的绝对一致
+    result.files = sorted(result.files, key=lambda sf: sf.rel_path.replace("\\", "/"))
+    result.skipped = sorted(result.skipped, key=lambda sk: (sk.rel_path.replace("\\", "/"), sk.reason))
     result.elapsed_ms = int((time.monotonic() - start_time) * 1000)
     return result

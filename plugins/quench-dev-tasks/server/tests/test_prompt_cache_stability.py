@@ -211,3 +211,17 @@ def test_quench_stack_architecture_doc_path_and_resolution():
     prefix = PromptAssembler.build_static_system_prefix(ws_root, config)
     assert "Quench Dev-Orchestrator — System Architecture" in prefix
     assert "docs/architecture/README.md" in prefix
+
+
+def test_prompt_assembler_crlf_invariance():
+    """断言切片文本中的 Windows CRLF 与 Linux LF 在组装时统一归一化，prefix_hash 绝对一致。"""
+    s_crlf = CodeSlice("src/foo.py", 1, 3, "def foo():\r\n    x = 1\r\n    return x\r\n")
+    s_lf = CodeSlice("src/foo.py", 1, 3, "def foo():\n    x = 1\n    return x\n")
+
+    p_crlf = PromptAssembler.assemble_consultation_prompt(mode="evaluate", slices=[s_crlf], query="test")
+    p_lf = PromptAssembler.assemble_consultation_prompt(mode="evaluate", slices=[s_lf], query="test")
+
+    assert p_crlf.code_context_block == p_lf.code_context_block
+    assert p_crlf.prefix_hash == p_lf.prefix_hash
+    assert "\r" not in p_crlf.code_context_block
+

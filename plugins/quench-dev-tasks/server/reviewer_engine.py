@@ -31,6 +31,7 @@ from typing import (
     Any,
     AsyncIterator,
     Callable,
+    ClassVar,
     Dict,
     Final,
     Iterator,
@@ -1165,12 +1166,38 @@ OUTPUT_PROTOCOLS: str = (
 )
 
 
+STATIC_PREFIX_BLOCK_BYTES: Final[int] = 64
+
+
+def align_static_prefix_to_block(
+    prefix: str, block_bytes: int = STATIC_PREFIX_BLOCK_BYTES
+) -> str:
+    """纯函数：将静态前缀按 block_bytes 边界对齐填充（仅追加 LF）。
+
+    契约：
+     - 空串返回空串（不填充）；
+     - 已对齐返回原串（幂等）；
+     - 否则追加 '\n' * (block_bytes - len(prefix) % block_bytes)；
+     - 严格禁止 '\r'、空格作为填充字符。
+    """
+    if not prefix:
+        return ""
+    if block_bytes <= 0:
+        raise ValueError("block_bytes must be positive")
+    rem = len(prefix) % block_bytes
+    if rem == 0:
+        return prefix
+    return prefix + ("\n" * (block_bytes - rem))
+
+
 class PromptAssembler:
     """静态系统提示词组装器。
     
     ★ 核心防线：为保障 Prompt Cache 极致命中率，
     本组装器组装的 System Prompt 必须保持绝对纯洁，严禁拼接任何动态时间戳、动态会话 ID 或随机数。
     """
+
+    align_static_prefix_to_block = staticmethod(align_static_prefix_to_block)
 
     @staticmethod
     def build_static_system_prefix(workspace_root: str, config: QuenchStackConfig) -> str:
@@ -1241,8 +1268,65 @@ class PromptAssembler:
         """从结构上强制保证静态前缀作为第 1 个 system message，确保最长缓存前缀不被破坏。"""
         return [{"role": "system", "content": static_prefix}, *dynamic_turns]
 
+    _slice_cache_lock: ClassVar[threading.Lock] = threading.Lock()
+    _slice_context_cache: ClassVar[Dict[str, str]] = {}
+    _MAX_SLICE_CACHE_SIZE: ClassVar[int] = 128
+
     @staticmethod
+    def sort_slices(slices: Sequence[CodeSlice]) -> List[CodeSlice]:
+        """纯函数确定性切片排序：返回按 (rel_path_posix, start_line, end_line) 升序排列的新列表，绝不原地修改入参。"""
+        return sorted(
+            slices,
+            key=lambda s: (s.rel_path.replace("\\", "/"), s.start_line, s.end_line),
+        )
+
+    @staticmethod
+    def format_slice_block(s: CodeSlice) -> str:
+        """规范化格式化单个代码切片块为 Markdown 代码块（单一事实源 SSOT）。"""
+        norm_text = s.text.replace("\r\n", "\n").strip().replace("\\", "/")
+        return f"```\n{norm_text}\n```"
+
+    @classmethod
+    def compute_slices_fingerprint(cls, slices: Sequence[CodeSlice]) -> str:
+        """计算切片集合的确定性指纹，作为跨多轮咨询复用装配切片块的稳定键。"""
+        if not slices:
+            return ""
+        sorted_s = cls.sort_slices(slices)
+        parts: List[str] = []
+        for s in sorted_s:
+            norm_rel = s.rel_path.replace("\\", "/")
+            norm_text = s.text.replace("\r\n", "\n").strip().replace("\\", "/")
+            thash = hashlib.sha256(norm_text.encode("utf-8")).hexdigest()[:16]
+            parts.append(f"{norm_rel}:{s.start_line}:{s.end_line}:{thash}")
+        raw_repr = "\n".join(parts)
+        return hashlib.sha256(raw_repr.encode("utf-8")).hexdigest()[:16]
+
+    @classmethod
+    def get_or_render_code_context_block(cls, slices: Sequence[CodeSlice]) -> str:
+        """获取或渲染已缓存的 Layer 2 代码切片块。
+        在多轮咨询中复用相同的已渲染切片块，彻底消除反复格式化引起的内存分配与字符漂移。
+        """
+        if not slices:
+            return ""
+        fp = cls.compute_slices_fingerprint(slices)
+        with cls._slice_cache_lock:
+            cached = cls._slice_context_cache.get(fp)
+            if cached is not None:
+                return cached
+
+        # 未命中缓存：渲染并存入
+        sorted_slices = cls.sort_slices(slices)
+        slice_blocks = [cls.format_slice_block(s) for s in sorted_slices]
+        rendered = "### Injected Code Context Slices\n" + "\n\n".join(slice_blocks)
+        with cls._slice_cache_lock:
+            if len(cls._slice_context_cache) >= cls._MAX_SLICE_CACHE_SIZE:
+                cls._slice_context_cache.clear()
+            cls._slice_context_cache[fp] = rendered
+        return rendered
+
+    @classmethod
     def assemble_consultation_prompt(
+        cls,
         *,
         mode: str,
         slices: Sequence[CodeSlice],
@@ -1252,28 +1336,20 @@ class PromptAssembler:
         """组装四段式稳定性梯度咨询提示词。
         
         拓扑顺序（§1.4.1 段序判定律）：
-        ①: 静态系统基准与通用输出协议 (模式无关系统级公共前缀)
+        ①: 静态系统基准与通用输出协议 (模式无关系统级公共前缀，经 64 字节 block 对齐填充)
         ②: 规范化 POSIX 代码切片 (纯相对路径无 mtime，字典序稳定排序，跨模式最大共享块)
         ③: 【尾置模式锚点】≤5行 / ≤200tok 纯英文证伪/权衡指引
         ④: 【绝对尾置】用户问题与动态参数
         """
         # 段①: 静态系统基准与通用输出协议（跨模式恒定）
         if static_system_prefix is None:
-            sys_prefix = OUTPUT_PROTOCOLS.strip()
+            raw_static_prefix = OUTPUT_PROTOCOLS.strip()
         else:
-            sys_prefix = static_system_prefix.strip()
+            raw_static_prefix = static_system_prefix.strip()
 
         # 段②: 代码切片按 POSIX 相对路径字典序与行号稳定排序，去绝对路径与 mtime
         if slices:
-            sorted_slices = sorted(
-                slices,
-                key=lambda s: (s.rel_path.replace("\\", "/"), s.start_line, s.end_line),
-            )
-            slice_blocks = []
-            for s in sorted_slices:
-                norm_text = s.text.strip().replace("\\", "/")
-                slice_blocks.append(f"```\n{norm_text}\n```")
-            code_context_block = "### Injected Code Context Slices\n" + "\n\n".join(slice_blocks)
+            code_context_block = cls.get_or_render_code_context_block(slices)
         else:
             code_context_block = ""
 
@@ -1284,11 +1360,14 @@ class PromptAssembler:
         # 段④: 绝对尾置动态 Query
         dynamic_query = f"### Consultation Query\n{query.strip()}"
 
-        # 前缀哈希：仅计算 ①+②，保证跨模式前缀字节恒等，消除小段毒化大段
-        prefix_hash = hashlib.sha256((sys_prefix + "\x00" + code_context_block).encode("utf-8")).hexdigest()[:16]
+        # 前缀哈希：仅计算 raw_static_prefix + code_context_block，保证跨模式前缀字节恒等，消除小段毒化大段
+        prefix_hash = hashlib.sha256((raw_static_prefix + "\x00" + code_context_block).encode("utf-8")).hexdigest()[:16]
+
+        # Design B 旁路填充：将静态前缀按 64 字节 block 对齐，仅作用于 AssembledPrompt 输出
+        padded_static_prefix = align_static_prefix_to_block(raw_static_prefix)
 
         return AssembledPrompt(
-            static_system_prefix=sys_prefix,
+            static_system_prefix=padded_static_prefix,
             code_context_block=code_context_block,
             mode_anchor=mode_anchor,
             dynamic_query=dynamic_query,
@@ -1470,6 +1549,8 @@ class ReviewerClient:
             "messages": messages,
             "stream": stream,
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
         if self.thinking:
             payload["thinking"] = {"type": "enabled"}
             if self.reasoning_effort:
@@ -1513,6 +1594,7 @@ class ReviewerClient:
                             finish_reason = "stop"
                             truncated = False
                             last_rep_check_tokens = 0
+                            stream_usage: Optional[Dict[str, Any]] = None
 
                             for raw_line in resp:
                                 line = raw_line.decode("utf-8", errors="replace").strip()
@@ -1526,6 +1608,9 @@ class ReviewerClient:
                                         chunk_json = json.loads(data_str)
                                     except Exception:
                                         continue
+
+                                    if "usage" in chunk_json and chunk_json["usage"]:
+                                        stream_usage = chunk_json["usage"]
 
                                     choices = chunk_json.get("choices") or []
                                     if not choices:
@@ -1633,15 +1718,23 @@ class ReviewerClient:
                                     },
                                 )
 
+                            usage_dict: Dict[str, Any] = {
+                                "completion_tokens": tokens_out,
+                                "reasoning_tokens": reasoning_tokens,
+                                "total_tokens": tokens_out,
+                            }
+                            if isinstance(stream_usage, Mapping):
+                                usage_dict.update(stream_usage)
+                                if "prompt_cache_hit_tokens" not in usage_dict:
+                                    cached_tok = extract_cached_tokens({"usage": stream_usage})
+                                    if cached_tok > 0:
+                                        usage_dict["prompt_cache_hit_tokens"] = cached_tok
+
                             return {
                                 "content": content_str,
                                 "reasoning_content": reasoning_str,
                                 "finish_reason": finish_reason,
-                                "usage": {
-                                    "completion_tokens": tokens_out,
-                                    "reasoning_tokens": reasoning_tokens,
-                                    "total_tokens": tokens_out,
-                                },
+                                "usage": usage_dict,
                                 "truncated": truncated,
                                 "raw": {"stream": True, "truncated": truncated},
                             }

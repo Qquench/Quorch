@@ -490,7 +490,7 @@ def resolve_context_files(
             end_line = min(total_file_lines, effective_window)
 
         selected_lines = all_lines[start_line - 1 : end_line]
-        slice_content = "".join(selected_lines)
+        slice_content = "".join(selected_lines).replace("\r\n", "\n")
 
         norm_rel = os.path.relpath(real_target, real_ws).replace("\\", "/")
         anchor = f"# file: {norm_rel}:{start_line}-{end_line}\n"
@@ -526,7 +526,9 @@ def resolve_context_files(
             )
         )
 
-    return slices, skipped_files, truncated
+    # 规范化确定性排序：使用 PromptAssembler.sort_slices 保证单轮与多轮切片排序单一事实源 (SSOT)
+    sorted_slices = PromptAssembler.sort_slices(slices)
+    return sorted_slices, skipped_files, truncated
 
 
 def assert_read_only_sandbox(
@@ -1134,12 +1136,9 @@ async def _execute_consultation(
 
                             # 构建原生多轮对话历史：
                             conversation_history.append({"role": "assistant", "content": findings_text})
-                            sorted_extra = sorted(
-                                extra_slices,
-                                key=lambda s: (s.rel_path.replace("\\", "/"), s.start_line, s.end_line),
-                            )
+                            sorted_extra = PromptAssembler.sort_slices(extra_slices)
                             slice_blocks = [
-                                "```\n" + s.text.strip().replace("\\", "/") + "\n```"
+                                PromptAssembler.format_slice_block(s)
                                 for s in sorted_extra
                             ]
                             turn_user_content = (
