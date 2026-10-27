@@ -9,6 +9,7 @@
 
 - If active tasks exist → read the task file, proceed to `dev_tasks_checkout`.
 - If no active tasks exist → **do NOT touch source code**. Propose a task via `dev_tasks_propose` or ask the user.
+- **In-Band Standard Relay**: In standard mode, after proposing a task, follow `harness_next_action` (`dev_reviewer_submit` -> `dev_reviewer_poll` -> `dev_tasks_confirm` -> `dev_tasks_checkout`) automatically in-band. Never halt turns or prompt the user to manually switch sessions when automated reviewer channels are functional.
 - **Zero CLI Bypass**: NEVER run terminal/CLI commands (e.g. `python -c ...`) to simulate or bypass FastMCP tools.
 
 ---
@@ -53,6 +54,8 @@ Rules > Skills > `AGENTS.md`. Rules win on conflict.
 - ❌ Self-claim "task complete" without executing DoD verification commands  
 - ❌ Impersonate the Reviewer model in-context  
 - ❌ Bypass `dev_tasks_checkout` and edit code directly  
+- ❌ Prematurely halt turns to output handoff cards or instruct users to manually open a new session when Reviewer automation (`dev_reviewer_submit` or subagent) is available  
+- ❌ Output handoff cards during continuous relay states (`PROPOSE`, `REVIEW`, `CONFIRM`, `CHECKOUT`, `DISPATCH_RUNNER`, etc.)  
 - ❌ Hard-code any model vendor names or API endpoint strings in core modules  
 - ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient  
 - ❌ Bypass FastMCP tools via shell/CLI commands (e.g. running python scripts to mutate tasks) — always use MCP tool calls

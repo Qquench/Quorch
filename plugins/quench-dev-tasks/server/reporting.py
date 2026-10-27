@@ -90,8 +90,16 @@ def render_handoff_card(
     reason: str,
     task_meta: Optional[Dict[str, Any]] = None,
     include_context: bool = False,
+    *,
+    strategy: str = "manual",
+    reviewer_available: bool = False,
 ) -> str:
     """单一生成源纯函数：生成符合 GitHub Flavored Markdown 规范的交接卡片文本。
+
+    支持策略感知（Strategy-Aware）：
+    - strategy in ('auto', 'engine') 且 reviewer_available: 下发自动化 dev_reviewer_submit 指引；
+    - strategy == 'subagent': 下发子 Agent 派发指引；
+    - strategy == 'manual' 或 reviewer 离线: 降级为手动交接指引。
 
     当 include_context=True 时，仅将规范字段（缺陷根因、涉及文件、类型契约、DoD命令）
     以 <details> 折叠块安全注入，杜绝环境变量与未过滤配置泄漏。
@@ -105,8 +113,32 @@ def render_handoff_card(
     if task_meta and isinstance(task_meta, dict):
         if task_meta.get("title"):
             title_suffix = f" — {task_meta['title']}"
-        if task_meta.get("preferred"):
-            preferred_mode = f"\n> - **Preferred Mode / 推荐模式**: `{task_meta['preferred']}`"
+        pref = task_meta.get("preferred")
+        if pref:
+            preferred_mode = f"\n> - **Preferred Mode / 推荐模式**: `{pref}`"
+
+    if strategy in ("auto", "engine") and reviewer_available:
+        steps_block = [
+            "> **👉 Automated Review Guidance / 自动化审查推进指引:**",
+            "> 1. 当前处于自动化审查通道（Reviewer 外部 API 引擎就绪）；",
+            "> 2. 请调用 FastMCP 工具 `dev_reviewer_submit(mode='critique'|'audit')` 提交审查，并通过 `dev_reviewer_poll` 获取评估结论；",
+            "> 3. 审查推演通过后直接调用 `dev_tasks_confirm` 确认，严禁中断会话等待人工干预。",
+        ]
+    elif strategy == "subagent":
+        steps_block = [
+            "> **👉 Subagent Review Guidance / 子 Agent 审查派发指引:**",
+            "> 1. 请派发带有 `[QUENCH-DISPATCH: REVIEWER]` 信封的 Reviewer 子 Agent 进行只读架构推演；",
+            "> 2. 子 Agent 完成审查评估后，回调主会话并由主会话执行 `dev_tasks_confirm` 确认。",
+        ]
+    else:
+        steps_block = [
+            "> **👉 Low-Token Handoff Steps / 极简低消耗交接指引:**",
+            "> 1. 点击 `+` 开启**新的纯净会话**（零历史 Token 冗余，避免注意力稀释与就地混淆）；",
+            "> 2. 切换至预先分配的**高阶架构审查模型 (Reviewer)**；",
+            f"> 3. 发送提示词：`请审查并精化任务单 {clean_task_file} (Task {clean_task_id})`；",
+            "> 4. 架构审查模型完成审查/返工确认后，通过工具或标记任务单为 `[Confirmed] / ✅ 已确认`；",
+            "> 5. **切回当前开发会话**，输入 `继续` 或 `Ready to proceed` 恢复开发。",
+        ]
 
     card_lines = [
         "> [!IMPORTANT]",
@@ -115,13 +147,7 @@ def render_handoff_card(
         f"> - **Task File / 任务文件**: `{clean_task_file}`",
         f"> - **Handoff Reason / 交接原因**: {clean_reason}{preferred_mode}",
         "> ",
-        "> **👉 Low-Token Handoff Steps / 极简低消耗交接指引:**",
-        "> 1. 点击 `+` 开启**新的纯净会话**（零历史 Token 冗余，避免注意力稀释与就地混淆）；",
-        "> 2. 切换至预先分配的**高阶架构审查模型 (Reviewer)**；",
-        f"> 3. 发送提示词：`请审查并精化任务单 {clean_task_file} (Task {clean_task_id})`；",
-        "> 4. 架构审查模型完成审查/返工确认后，通过工具或标记任务单为 `[Confirmed] / ✅ 已确认`；",
-        "> 5. **切回当前开发会话**，输入 `继续` 或 `Ready to proceed` 恢复开发。",
-    ]
+    ] + steps_block
 
     base_card = "\n".join(card_lines)
 

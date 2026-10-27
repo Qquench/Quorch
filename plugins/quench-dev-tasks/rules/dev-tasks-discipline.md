@@ -43,25 +43,29 @@ As an AI coding assistant operating within Quench governance, you MUST adhere to
 
 ## 4. Reviewer Handoff & Resume Discipline (架构审查交接与多会话复工纪律)
 
+- **Automated In-Band Relay as Default (带内自动化审查为主通路)**: In standard development with Reviewer API (`dev_reviewer_submit`) or Reviewer subagent available, the entire lifecycle (`PROPOSE` -> `REVIEW` -> `CONFIRM` -> `CHECKOUT`) proceeds automatically in-band. Agents MUST NOT emit handoff cards or interrupt the relay flow.
+
 ### ① When to Halt (停机与上报触发条件)
 Halt further development and output a handoff or delivery card ONLY when:
 1. Terminal or stopping state is reached in Autopilot (`PAUSE_FOR_ACCEPTANCE`, `BLOCKED`, `ROADMAP_DONE`, or configured `stop_at` breakpoint stage reached);
-2. Complex conflicts or interface breaks occur (`dev_tasks_escalate`).
+2. Complex conflicts or interface breaks occur (`dev_tasks_escalate`) AND no automated reviewer channel is functional;
+3. Manual/degraded mode where no Reviewer API / subagent is available (`strategy == "manual"` or offline).
 
 **Continuous Relay Non-Braking Invariant (AGENTS.md §6)**:
 In continuous relay states (`PROPOSE`, `REVIEW`, `CONFIRM`, `CHECKOUT`, `DISPATCH_RUNNER`, `SYNC_DOCS`, `ARCHIVE`, `NEXT_BATCH_PROPOSE`), agents MUST NOT prematurely end turns to dump handoff or C3 delivery cards. Development continues automatically via `harness_next_action`.
 
 ### ② Handoff Card Format (标准上报格式)
-Upon reaching a stopping state or breakpoint, halt and output a standard handoff card using `> [!IMPORTANT]`:
+Upon reaching a stopping state or degraded fallback, halt and output a standard handoff card using `> [!IMPORTANT]`:
 > [!IMPORTANT]
 > ### ⏸️ Quench Task Handoff: Awaiting Architecture Review / Acceptance
 > - **Target DevTask**: `docs/dev_tasks/<file>.md` (Task ID: <id>)
 > - **Reason**: <Reason for pause or review>
 > 
-> **👉 Low-Token Handoff Steps:**
+> **👉 Low-Token Handoff Steps (Offline/Manual Fallback Only):**
 > 1. Open a fresh conversation session; switch to Strategic Reviewer Model (or check status via `dev_tasks_status`).
 > 2. Submit prompt: `Please review and refine docs/dev_tasks/<file>.md`.
 > 3. After tasks are marked `✅ 已确认`, switch back and continue.
+*(Note: When Reviewer API or reviewer subagent is configured, the system executes this automatically via `dev_reviewer_submit` / subagent dispatch without manual session switching).*
 
 ### ③ Resume Verification (复工确认机制)
 1. Check task status via `dev_tasks_status`;

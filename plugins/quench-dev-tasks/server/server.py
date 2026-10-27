@@ -1789,7 +1789,7 @@ def _resolve_handoff_envelope(
         "strategy": "manual",
         "available": True,
         "payload": {
-            "guidance": "Switch to a senior architecture reviewer model in a new clean session, paste the handoff card, and confirm revision before resuming.",
+            "guidance": "Offline / Manual fallback: review task in a clean session or manually confirm via dev_tasks_confirm / 离线或手工降级通道：在外部模型会话中审查或人工核验后调用 dev_tasks_confirm 确认。",
         },
     }
 
@@ -1822,12 +1822,15 @@ def _resolve_handoff_envelope(
                 preferred = s["strategy"]  # type: ignore
                 break
 
+    card_strategy = "auto" if preferred == "engine" else preferred
     legacy_card_markdown = render_handoff_card(
         task_id=task_id,
         task_file=rel_task_path,
         reason=reason,
         task_meta={"preferred": preferred},
         include_context=False,
+        strategy=card_strategy,
+        reviewer_available=client_available,
     )
 
     manual_strat["payload"]["card_markdown"] = legacy_card_markdown
@@ -2115,6 +2118,28 @@ def dev_tasks_checkout(
             reason=handoff_reason,
         )
 
+        if rework_tasks:
+            checkout_instruction = (
+                f"[Current Batch Tasks Require Rework ({len(rework_tasks)} items)]\n"
+                f"1. Follow harness_next_action to revise task specifications according to Reviewer critique;\n"
+                f"2. Call dev_reviewer_submit or dev_tasks_confirm upon revision.\n\n"
+                f"【当前批次存在需返工任务（共 {len(rework_tasks)} 项）】\n"
+                f"1. 请遵照 harness_next_action 提示指引修订任务规约；\n"
+                f"2. 修订完成后通过 dev_reviewer_submit 重新提交审查或调用 dev_tasks_confirm。"
+            )
+        else:
+            checkout_instruction = (
+                f"[Current Batch Tasks Awaiting Review ({len(pending_tasks)} items)]\n"
+                f"1. Follow harness_next_action to advance architecture review;\n"
+                f"2. In standard mode: call dev_reviewer_submit to evaluate tasks via Reviewer API;\n"
+                f"3. In inverted mode: self-evaluate or dispatch runner subagents;\n"
+                f"4. Once approved, call dev_tasks_confirm to transition tasks to confirmed without pausing.\n\n"
+                f"【当前批次存在待审查任务（共 {len(pending_tasks)} 项）】\n"
+                f"1. 请严格遵照 harness_next_action 推进架构审查，严禁中途非预期停机；\n"
+                f"2. 标准模式下直接调用 dev_reviewer_submit 提交外部 Reviewer 评估；\n"
+                f"3. 审查通过后调用 dev_tasks_confirm 确认任务并推进施工。"
+            )
+
         res_handoff = {
             "task_id": None,
             "batch_finished": True,
@@ -2127,14 +2152,7 @@ def dev_tasks_checkout(
             "handoff_recommended": True,
             "reviewer_handoff": envelope,
             "handoff_card": envelope["legacy_card_markdown"],
-            "instruction": (
-                "[Current Batch Finished / Tasks Pending Review or Rework]\n"
-                "1. If rework/pending tasks exist: Output [Quench Task Handoff Card] to guide user to switch to senior Reviewer model in a new session;\n"
-                "2. If working in batches: Report completion of current batch to user and await confirmation for next batch.\n\n"
-                "【当前已确认批次已全部完工 / 存在需返工或待终审任务】\n"
-                "1. 若存在需返工或待终审任务：请输出【Quench 任务交接卡】，引导用户在新会话切换至自选的高阶架构审查模型进行审查修订；\n"
-                "2. 若属于多任务分批施工：请向用户汇报当前批次施工完毕，等待用户确认下一批任务后再行领单。"
-            ),
+            "instruction": checkout_instruction,
             "message": f"Current batch has no '✅ Confirmed' tasks. (Pending: {len(pending_tasks)}, Rework: {len(rework_tasks)}) / 当前批次已无 '✅ 已确认' 任务。(待终审: {len(pending_tasks)} 项, 需返工: {len(rework_tasks)} 项)",
         }
         _inject_harness_next_action(
@@ -3009,6 +3027,10 @@ def dev_tasks_escalate(
     engine_provider = None
     try:
         config = load_project_config(workspace_root)
+    except Exception:
+        config = QuenchStackConfig()
+
+    try:
         client = create_reviewer_client(config.reviewer_engine)
         if client is not None and client.is_available():
             engine_provider = client.provider_label
@@ -3044,12 +3066,12 @@ def dev_tasks_escalate(
         "reviewer_handoff": envelope,
         "handoff_card": envelope["legacy_card_markdown"],
         "instruction": (
-            "[Architectural Review Handoff Triggered] Immediately halt code modifications! "
-            "Output [Quench Task Handoff Card] to user and await revision by senior Reviewer model in a new session.\n"
-            "【触发架构审查交接】请立即停止后续代码修改！向用户输出【Quench 任务交接卡】，等待用户在新会话中由高阶架构审查模型完成审查修订并确认后，再恢复执行。"
+            "[Architectural Escalation Recorded] Task escalated for in-depth review. "
+            "Follow harness_next_action to evaluate via dev_reviewer_submit(mode='audit') or dispatch to Reviewer subagent / "
+            "【任务疑难升级已记录】请遵照 harness_next_action 调用 dev_reviewer_submit(mode='audit') 进行高阶推演，或派发 Reviewer 子 Agent。"
         ),
         "prompt_hint": (
-            f"Please switch to a senior Architecture Reviewer model to deeply inspect Task {task_id}.\n"
+            f"Reviewer consultation recommended for Task {task_id}.\n"
             f"Escalation Reason / 升级原因: {reason}\n"
             f"Key Reference Files / 重点参考文件: {[c['file'] for c in context_snippets]}"
         ),
@@ -3120,6 +3142,15 @@ def dev_tasks_export_handoff_card(
         rel_task_path = os.path.basename(str(target_fpath))
     detail = _extract_task_detail(target_fpath, clean_task_id)
 
+    ext_available = _is_external_api_available(workspace_root, config)
+    snapshot = load_runtime_mode(workspace_root, ext_available)
+    if snapshot.effective_reviewer_channel == "host_subagent":
+        preferred_strategy = "subagent"
+    elif ext_available:
+        preferred_strategy = "auto"
+    else:
+        preferred_strategy = "manual"
+
     reason = f"Architecture review & plan revision (status: {target_task.status})"
     handoff_card_text = render_handoff_card(
         task_id=clean_task_id,
@@ -3127,6 +3158,8 @@ def dev_tasks_export_handoff_card(
         reason=reason,
         task_meta=detail,
         include_context=include_context,
+        strategy=preferred_strategy,
+        reviewer_available=ext_available,
     )
 
     return {

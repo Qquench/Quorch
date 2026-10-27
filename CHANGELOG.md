@@ -3,6 +3,14 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-28] 2026-10-28_v1.27_step02_align_invariants_and_golden_fixtures.md
+
+- **Task 27.2**: 校准 AGENTS.md 核心哨兵同步、恢复交接卡金样本 SHA-256 兼容性并保全纪律标题契约
+
+## [2026-10-28] 2026-10-28_v1.27_step01_eradicate_legacy_handoff_card_interrupts.md
+
+- **Task 27.1**: 彻底根除遗留交接卡打断自动流程缺陷与 Autopilot 流水线提示词契约对齐
+
 ## [2026-10-28] 2026-10-28_v1.26_step04_context_injector_autopilot_alignment.md
 
 - **Task 26.4**: Autopilot 流水线提示词解耦与 Context Injector 规约升级

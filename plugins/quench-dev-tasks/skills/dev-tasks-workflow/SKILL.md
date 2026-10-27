@@ -42,7 +42,7 @@ At the beginning of each session or after completing a phase of development, the
    - If an `[In Progress] / 🔨 执行中` task exists: Immediately focus on it. Follow its `[Step-by-Step Instructions]` without deviation.
    - If no task is in progress:
      - If `[Confirmed] / ✅ 已确认` tasks exist: Call `dev_tasks_checkout(workspace_root)` to checkout the next item.
-     - If only `[Pending] / ⬜ 待确认` or `[Rework] / 🔄 需返工` tasks exist: Follow `harness_next_action` (e.g. `REVIEW` via `dev_reviewer_submit` or handoff).
+     - If only `[Pending] / ⬜ 待确认` or `[Rework] / 🔄 需返工` tasks exist: Follow `harness_next_action` (e.g. `REVIEW` via `dev_reviewer_submit` in-band; do not stop or throw handoff cards unless offline/degraded).
      - If all tasks are `[Completed] / ✔️ 已完成` (or `[Skipped] / ⏭️ 跳过`): Proceed to **Completion & Archiving (§5)**.
 
 ### Inverted Dual-Layer Code Exploration (倒置双层代码探查流程)
@@ -115,8 +115,8 @@ The Quench DevTasks MCP Server exposes 16 specialized tools (full specification 
 | `dev_tasks_complete` | Mark task as `[Completed]` with DoD proof | After DoD test verification |
 | `dev_tasks_propose` | Propose new task as `[Pending]` | Planning new tasks or architectural reviews |
 | `dev_tasks_confirm` | Transition task state (`confirm`/`rework`/`skip`) | Confirming batches or requesting rework |
-| `dev_tasks_escalate` | Trigger Reviewer handoff card | Complex impasses or structural refactoring |
-| `dev_tasks_export_handoff_card` | Export Reviewer handoff card without state mutation | Manual cross-session consultation |
+| `dev_tasks_escalate` | Trigger Reviewer escalation / audit | Complex impasses or structural refactoring (invokes dev_reviewer_submit or subagent) |
+| `dev_tasks_export_handoff_card` | Export Reviewer handoff card without state mutation | Inspection or manual cross-session consultation fallback |
 | `dev_tasks_heartbeat` | Refresh active lease heartbeat | Long-running non-MCP execution turns |
 | `dev_tasks_reclaim` | CAS-safe zombie task recovery | Recovering orphaned tasks across processes |
 | `dev_tasks_refine_spec` | Refine draft spec with AST analysis & reasoning | Upgrading drafts into executable contracts |

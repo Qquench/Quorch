@@ -1419,6 +1419,28 @@
       "git_head_sha": "f27d004359ce0ce97f88c705250f8a4c3036160a",
       "git_index_mtime": 1793107693.3441849,
       "released": true
+    },
+    "2026-10-28_v1.27_step01_eradicate_legacy_handoff_card_interrupts::27.1": {
+      "task_id": "2026-10-28_v1.27_step01_eradicate_legacy_handoff_card_interrupts::27.1",
+      "md_sha256": "20d1298bb608aade01cef836100e402fd48cb598e8e5a72e6febeba7d9992237",
+      "generation": 1,
+      "holder_token": "token_1793111041477_17196",
+      "last_heartbeat_monotonic_ns": 977862031000000,
+      "last_heartbeat_wall_utc": "2026-10-27T14:42:56.700117+00:00",
+      "git_head_sha": "cdda65b3b40fecbd2235ec5b9502ba733d079375",
+      "git_index_mtime": 1793109717.9608867,
+      "released": true
+    },
+    "2026-10-28_v1.27_step02_align_invariants_and_golden_fixtures::27.2": {
+      "task_id": "2026-10-28_v1.27_step02_align_invariants_and_golden_fixtures::27.2",
+      "md_sha256": "3a13860ede23d9857d3b9e448acb0b1852c449dfc0ec0514a4f1e6f000b444aa",
+      "generation": 1,
+      "holder_token": "token_1793112701430_17196",
+      "last_heartbeat_monotonic_ns": 978653687000000,
+      "last_heartbeat_wall_utc": "2026-10-27T14:56:08.368471+00:00",
+      "git_head_sha": "cdda65b3b40fecbd2235ec5b9502ba733d079375",
+      "git_index_mtime": 1793112968.1683302,
+      "released": true
     }
   }
 }
