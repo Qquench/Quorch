@@ -1392,9 +1392,10 @@ class ReviewerClient:
         timeout_seconds: int = 60,
         max_retries: int = 2,
         thinking: bool = True,
-        reasoning_effort: Literal["low", "medium", "high"] = "high",
+        reasoning_effort: Optional[str] = None,
         sink: Optional[ProgressSink] = None,
     ):
+        explicit_effort = None if reasoning_effort is None else str(reasoning_effort).strip()
         if config is not None:
             self.config = config
             url_val = (base_url or getattr(config, "base_url", "")).strip()
@@ -1411,7 +1412,10 @@ class ReviewerClient:
             self.timeout_seconds = timeout_seconds if timeout_seconds != 60 else getattr(config, "timeout_seconds", 60)
             self.max_retries = max_retries if max_retries != 2 else getattr(config, "max_retries", 2)
             self.thinking = thinking if thinking is not True else getattr(config, "thinking", True)
-            self.reasoning_effort = reasoning_effort if reasoning_effort != "high" else getattr(config, "reasoning_effort", "high")
+            self.reasoning_effort = (
+                explicit_effort if explicit_effort is not None
+                else getattr(config, "reasoning_effort", "high")
+            )
         else:
             url_val = (base_url or "").strip()
             self.model = model or ""
@@ -1426,7 +1430,7 @@ class ReviewerClient:
             self.timeout_seconds = timeout_seconds
             self.max_retries = max_retries
             self.thinking = thinking
-            self.reasoning_effort = reasoning_effort
+            self.reasoning_effort = explicit_effort if explicit_effort is not None else "high"
             self.config = ReviewerEngineConfig(
                 provider=self.provider_label,
                 model=self.model,

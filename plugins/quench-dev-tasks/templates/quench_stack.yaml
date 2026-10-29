@@ -126,7 +126,7 @@ reviewer_engine:
   # 是否开启思维链思考流输出 (reasoning_content)
   thinking: true
 
-  # Reasoning effort budget: "low" | "medium" | "high"
+  # Reasoning effort budget: "low" | "medium" | "high" | "max" (or any provider custom string; null to omit)
   reasoning_effort: "high"
 
   # ==============================================================================

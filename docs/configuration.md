@@ -131,7 +131,7 @@ reviewer_engine:
   # Enable streaming reasoning_content (Chain-of-Thought thinking stream)
   thinking: true
 
-  # Reasoning effort budget: "low" | "medium" | "high"
+  # Reasoning effort budget: "low" | "medium" | "high" | "max" (or any provider-specific string level, e.g. "extreme"; null to omit)
   reasoning_effort: "high"
 
   # Network timeout in seconds per request
@@ -227,5 +227,21 @@ Quench v1.25+ supports dynamic orchestration mode switching without restarting t
 | `reviewer_channel` | `string` | `"direct_api"` \| `"subagent_delegate"` | `"direct_api"` | External reviewer transport channel. |
 
 Switching can be executed dynamically via `dev_tasks_status(switch_mode="inverted", switch_reviewer_channel="subagent_delegate")`.
+
+---
+
+## 10. Multi-Layer Configuration Hierarchy & User Global Defaults
+
+Quench resolves configuration through a 4-tier inheritance tree (ordered from lowest to highest priority):
+
+1. **L0: Code Baseline**: Default fallbacks defined within `ReviewerEngineConfig` (`reasoning_effort: "high"`).
+2. **L1: Project Baseline (`.agents/quench_stack.yaml`)**: Git-tracked team SSOT manifest.
+3. **L2: User Global Defaults (`~/.quorch/config.yaml`)**: Machine-wide personal defaults across all projects (e.g. `reasoning_effort: "max"`).
+   - Only `reviewer_engine.*` and `schema_version` are allowed in L2. Security/governance fields (`audit_gate`, `governance_scope`) are rejected to preserve project governance integrity.
+   - Override path or disable via environment variables:
+     - `QUORCH_GLOBAL_CONFIG`: Custom path to global config (supports `~`).
+     - `QUORCH_DISABLE_GLOBAL_CONFIG=1`: Disables global config layer (useful in CI).
+4. **L3: Project Local Override (`.agents/quench_stack.local.yaml`)**: Highest priority project-specific overrides (.gitignored), allowing project-specific API keys (`api_key_env`) and custom endpoints to override global defaults.
+
 
 

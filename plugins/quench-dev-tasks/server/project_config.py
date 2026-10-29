@@ -181,6 +181,144 @@ def _deep_merge_dict(base: dict, overlay: dict) -> dict:
     return result
 
 
+_GLOBAL_LAYER_ALLOWED_KEYS: Final[frozenset[str]] = frozenset({"schema_version", "reviewer_engine"})
+_KEY_UNSET: Final[object] = object()
+_WARNED_GLOBAL_CONFIG_PATHS: set[str] = set()
+
+
+def _global_config_candidates() -> list[str]:
+    """返回全局配置文件的候选路径列表（按优先级降序排序）。若 home 不可解析则返回空列表。"""
+    try:
+        home = os.path.expanduser("~")
+    except Exception:
+        return []
+    if not home or home.startswith("~"):
+        return []
+    return [
+        os.path.join(home, ".quorch", "config.yaml"),
+        os.path.join(home, ".agents", "quench_stack.global.yaml"),
+    ]
+
+
+def resolve_global_config_path() -> str | None:
+    """解析全局配置文件路径（L2 层）。
+    1) 检查 QUORCH_DISABLE_GLOBAL_CONFIG ∈ {1, true, yes, on}，若命中则显式禁用返回 None。
+    2) 检查环境变量 QUORCH_GLOBAL_CONFIG：
+       - 若设置为空串或纯空白 -> 返回 None（显式禁用）。
+       - 否则展开波浪号并返回绝对路径（无论文件当前是否存在，使测试与自定义重定向生效）。
+    3) 检查候选列表（~/.quorch/config.yaml, ~/.agents/quench_stack.global.yaml）：
+       - 首个实际存在的文件作为命中目标；
+       - 若两个候选文件同时存在，通过 warnings.warn 提示去重并采纳首个。
+    4) 无命中则返回 None。
+    """
+    disable_env = os.environ.get("QUORCH_DISABLE_GLOBAL_CONFIG", "").strip().lower()
+    if disable_env in ("1", "true", "yes", "on"):
+        return None
+
+    explicit_env = os.environ.get("QUORCH_GLOBAL_CONFIG")
+    if explicit_env is not None:
+        explicit_trimmed = explicit_env.strip()
+        if not explicit_trimmed:
+            return None
+        return os.path.abspath(os.path.expanduser(explicit_trimmed))
+
+    candidates = _global_config_candidates()
+    existing: list[str] = [c for c in candidates if os.path.isfile(c)]
+    if not existing:
+        return None
+
+    if len(existing) > 1 and existing[0] not in _WARNED_GLOBAL_CONFIG_PATHS:
+        _WARNED_GLOBAL_CONFIG_PATHS.add(existing[0])
+        warnings.warn(
+            f"检测到多个用户全局配置文件同时存在 ({existing[0]} 与 {existing[1]})，"
+            f"已优先采纳 {existing[0]}。建议仅保留单一全局配置文件。",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return existing[0]
+
+
+def _assert_no_plaintext_api_key(payload: dict, source: str) -> None:
+    """检查 payload 顶层及 reviewer_engine 子树中是否误填明文 api_key，若命中抛出 ConfigError。"""
+    if not isinstance(payload, dict):
+        return
+    if payload.get("api_key"):
+        raise ConfigError(
+            f"Plaintext api_key is forbidden in configuration file ({source}). "
+            f"Please use api_key_env to reference an environment variable / "
+            f"配置文件 ({source}) 中严禁直接填写明文 api_key，请使用 api_key_env 配置环境变量名。"
+        )
+    re_block = payload.get("reviewer_engine")
+    if isinstance(re_block, dict) and re_block.get("api_key"):
+        raise ConfigError(
+            f"Plaintext api_key is forbidden in reviewer_engine ({source}). "
+            f"Please use api_key_env to reference an environment variable / "
+            f"配置文件 ({source}) 的 reviewer_engine 中严禁直接填写明文 api_key，请使用 api_key_env 配置环境变量名。"
+        )
+
+
+def _load_global_layer(path: str) -> dict:
+    """读取并解析用户全局配置文件。返回 dict，若为空文件则返回空 dict。语法错误时 fail-fast 抛出 ValueError。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read().lstrip("\ufeff")
+    except Exception as e:
+        raise ValueError(f"Failed to read global config {path}: {e} / 读取全局配置 {path} 失败: {e}") from e
+
+    if not raw.strip():
+        return {}
+
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse global config {path} (YAML syntax error): {e} / 解析全局配置 {path} 失败（YAML 语法错误）: {e}") from e
+
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid global configuration format in {path} (expected a YAML mapping): {data} / "
+            f"全局配置文件格式无效 ({path})：预期为 YAML 字典键值对"
+        )
+    return data
+
+
+def _apply_global_layer(base: dict, overlay: dict, source: str) -> dict:
+    """校验并应用用户全局配置层（L2）。
+    1. 校验明文 api_key（fail-fast）
+    2. 校验顶层白名单（仅允许 schema_version 与 reviewer_engine），严禁渗透治理或安全字段
+    3. 校验 reviewer_engine 必须为 dict（若提供）
+    4. 提取 reviewer_engine 子树并执行 _deep_merge_dict
+    """
+    if not overlay:
+        return base
+
+    _assert_no_plaintext_api_key(overlay, source)
+
+    disallowed_keys = set(overlay.keys()) - _GLOBAL_LAYER_ALLOWED_KEYS
+    if disallowed_keys:
+        raise ConfigError(
+            f"Global configuration ({source}) contains disallowed top-level keys: {sorted(disallowed_keys)}. "
+            f"Global config may only declare {sorted(_GLOBAL_LAYER_ALLOWED_KEYS)} / "
+            f"用户全局配置 ({source}) 包含未授权的顶层键: {sorted(disallowed_keys)}。全局配置仅允许定义 {sorted(_GLOBAL_LAYER_ALLOWED_KEYS)}。"
+        )
+
+    re_overlay = overlay.get("reviewer_engine")
+    if re_overlay is not None and not isinstance(re_overlay, dict):
+        raise ValueError(
+            f"Invalid 'reviewer_engine' format in global config {source} (expected mapping, got {type(re_overlay).__name__}) / "
+            f"全局配置 ({source}) 中的 'reviewer_engine' 格式无效（预期为字典键值对）"
+        )
+
+    if not re_overlay:
+        return base
+
+    # 仅将 reviewer_engine 子树合并入 base
+    return _deep_merge_dict(base, {"reviewer_engine": re_overlay})
+
+
+
 _DEFAULT_SCHEMA_VERSION_PATCH = 'schema_version: "1.0"\n'
 _DEFAULT_CONFIG_VERSION_PATCH = "config_version: 1\n"
 _DEFAULT_FAST_TRACK_PATCH = """fast_track_rules:
@@ -365,6 +503,7 @@ class ReviewerEngineConfig:
     max_lines_per_slice: int = MAX_LINES_PER_SLICE
 
     def __post_init__(self) -> None:
+        self.reasoning_effort = str(self.reasoning_effort or "").strip()
         self.max_total_injection_chars = _coerce_positive_int(
             self.max_total_injection_chars,
             default=DEFAULT_MAX_TOTAL_INJECTION_CHARS,
@@ -858,6 +997,14 @@ def _build_quench_stack_config(
                             stacklevel=2,  # vendor-literal: allow
                         )  # vendor-literal: allow
 
+        _raw_effort = re_data.get("reasoning_effort", _KEY_UNSET)
+        if _raw_effort is _KEY_UNSET:
+            reasoning_effort_val = "high"
+        elif _raw_effort is None:
+            reasoning_effort_val = ""
+        else:
+            reasoning_effort_val = str(_raw_effort).strip()
+
         reviewer_engine = ReviewerEngineConfig(
             mode=effective_mode,
             strategy_order=strategy_order,
@@ -866,7 +1013,7 @@ def _build_quench_stack_config(
             api_key_env=api_key_env_val,
             base_url=base_url_val,
             thinking=bool(re_data.get("thinking", True)),
-            reasoning_effort=str(re_data.get("reasoning_effort", "high")).strip(),
+            reasoning_effort=reasoning_effort_val,
             timeout_seconds=_coerce_positive_int(re_data.get("timeout_seconds"), default=60, lo=5, hi=600),
             max_retries=_coerce_positive_int(re_data.get("max_retries"), default=2, lo=0, hi=10),
             max_tool_hops=_coerce_positive_int(re_data.get("max_tool_hops"), default=3, lo=0, hi=10),
@@ -1165,6 +1312,12 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     # 执行向后兼容自动升级迁移
     data, _ = migrate_config_if_needed(yaml_path, data)
 
+    # 加载用户全局配置层（L2，若存在）
+    global_cfg_path = resolve_global_config_path()
+    if global_cfg_path and os.path.isfile(global_cfg_path):
+        global_data = _load_global_layer(global_cfg_path)
+        data = _apply_global_layer(data, global_data, global_cfg_path)
+
     # 检查本地私有覆盖配置 .agents/quench_stack.local.yaml (已在 .gitignore 中忽略)
     def _merge_local_override(base: dict, overlay: dict) -> dict:
         """对安全与治理字段执行单调收紧硬门禁与基线锁定；其余字段走深合并。"""
@@ -1240,6 +1393,7 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
             if raw_local.strip():
                 local_data = yaml.safe_load(raw_local)
                 if isinstance(local_data, dict):
+                    _assert_no_plaintext_api_key(local_data, local_yaml_path)
                     data = _merge_local_override(data, local_data)
                     local_override_loaded = True
         except (yaml.YAMLError, ConfigError):

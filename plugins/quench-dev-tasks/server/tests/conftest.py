@@ -38,3 +38,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         basename = os.path.basename(item_path_str)
         if basename in TIER1_TARGET_REL_FILES:
             item.add_marker(tier1_marker)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_global_config(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """自动隔离用户全局配置 (~/.quorch/config.yaml)，确保本地开发与 CI 单测执行环境确定性。"""
+    dummy_path = tmp_path_factory.mktemp("no_global_config") / "__non_existent_global_config__.yaml"
+    monkeypatch.setenv("QUORCH_GLOBAL_CONFIG", str(dummy_path))
+    monkeypatch.delenv("QUORCH_DISABLE_GLOBAL_CONFIG", raising=False)
+

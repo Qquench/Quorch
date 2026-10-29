@@ -12,6 +12,8 @@
 #    a default external model. Check .agents/quench_stack.local.yaml for active local overrides.
 # 5. For full reference schemas and multi-engine configuration examples, see:
 #    👉 .agents/quench_stack.sample.yaml
+# 6. Machine-wide personal defaults (e.g. reasoning_effort "max") belong in:
+#    👉 ~/.quorch/config.yaml  (strictly local to machine, never git-tracked)
 # ==============================================================================
 
 project_name: "quench-dev-orchestrator"
