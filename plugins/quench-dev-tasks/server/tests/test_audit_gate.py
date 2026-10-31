@@ -511,10 +511,11 @@ def test_corrupt_line_yields_parse_skipped_diagnostics(tmp_path):
 
 def test_ladder_predicate_exclusivity_matrix():
     reasons = typing.get_args(AuditGateReason)
-    assert len(reasons) == 17
-    assert len(set(reasons)) == 17
+    assert len(reasons) == 18
+    assert len(set(reasons)) == 18
     # R11 读序互斥梯次防短路（优先匹配，无匹配且截断落入 tail_window_exhausted，无匹配且未截断落入 no_matching_record）
     assert "matched" in reasons
+    assert "explicit_inverted_orchestrator" in reasons
     assert "tail_window_exhausted" in reasons
     assert "no_matching_record" in reasons
     assert "record_unparsable" in reasons
@@ -657,3 +658,45 @@ def test_alias_tightens_record_degraded_to_block(tmp_path):
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "record_degraded"
     assert res["allowed"] is False
+
+
+def test_explicit_inverted_orchestrator_log_missing_allows(tmp_path):
+    """显式 inverted 模式下，audit log 缺失直接以 explicit_inverted_orchestrator 放行。"""
+    ws, log_path, cfg = _make_ws(tmp_path)
+    if os.path.exists(log_path):
+        os.remove(log_path)
+    from runtime_mode import update_runtime_mode
+    update_runtime_mode(ws, switch_mode="inverted", external_api_available=False)
+    task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
+    task.affected_files = ["[MODIFY] src/app.py"]
+    res = _check_audit_gate(ws, "task.md", task, cfg)
+    assert res["allowed"] is True
+    assert res["reason"] == "explicit_inverted_orchestrator"
+
+
+def test_explicit_inverted_orchestrator_no_matching_record_allows(tmp_path):
+    """显式 inverted 模式下，log 存在但无可读匹配记录直接以 explicit_inverted_orchestrator 放行。"""
+    ws, log_path, cfg = _make_ws(tmp_path)
+    now_wall = datetime.now(timezone.utc).isoformat()
+    _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": ["other.md#9.9"]})
+    from runtime_mode import update_runtime_mode
+    update_runtime_mode(ws, switch_mode="inverted", external_api_available=False)
+    task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
+    task.affected_files = ["[MODIFY] src/app.py"]
+    res = _check_audit_gate(ws, "task.md", task, cfg)
+    assert res["allowed"] is True
+    assert res["reason"] == "explicit_inverted_orchestrator"
+
+
+def test_auto_fallback_inverted_not_explicit_orchestrator(tmp_path):
+    """auto_fallback 降级导致的 inverted 模式绝不享受 explicit_inverted_orchestrator 放行。"""
+    ws, log_path, cfg = _make_ws(tmp_path)
+    from runtime_mode import update_runtime_mode
+    # standard 模式但外部 API 不可用触发 auto_fallback
+    update_runtime_mode(ws, switch_mode="standard", external_api_available=False)
+    task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
+    task.affected_files = ["[MODIFY] src/app.py"]
+    res = _check_audit_gate(ws, "task.md", task, cfg)
+    assert res["allowed"] is False
+    assert res["reason"] in ("log_missing", "no_matching_record")
+

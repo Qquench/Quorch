@@ -39,6 +39,27 @@ _HALT_STATES: Final[frozenset[str]] = frozenset({
     "ROADMAP_DONE",
 })
 
+_STOP_HOOK_RELAY_STATES: Final[frozenset[str]] = frozenset({
+    "REVIEW",
+    "CONFIRM",
+    "CHECKOUT",
+    "DISPATCH_RUNNER",
+    "ARCHIVE",
+    "NEXT_BATCH_PROPOSE",
+})
+
+
+def _is_external_api_available(workspace_root: str) -> bool:
+    try:
+        from project_config import load_project_config
+        from reviewer_client import ReviewerClient
+        config = load_project_config(workspace_root)
+        re_cfg = getattr(config, "reviewer_engine", config)
+        client = ReviewerClient(re_cfg)
+        return bool(client.resolve_api_key()) or client.is_available()
+    except Exception:
+        return False
+
 
 def _resolve_harness_baton(
     workspace_root: str,
@@ -56,7 +77,10 @@ def _resolve_harness_baton(
         )
         from state_machine import parse_task_file
 
-        snapshot = load_runtime_mode(workspace_root)
+        snapshot = load_runtime_mode(
+            workspace_root,
+            external_api_available=_is_external_api_available(workspace_root),
+        )
         task_states: List[TaskStateSnapshot] = []
         target_file = None
 
@@ -153,6 +177,134 @@ def _build_reminder(
     return None
 
 
+def _handle_stop_event(payload: dict) -> dict:
+    """处理 Stop Hook 事件：六重护栏校验下的单次熔断续跑决策。
+    Fail-Safe: 任何异常或校验未通过时恒定输出 {"decision": "allow"}。
+    """
+    try:
+        # Guardrail 1: 必须含 terminationReason
+        if "terminationReason" not in payload:
+            return {"decision": "allow"}
+
+        # Guardrail 2: 必须满足 terminationReason == "NO_TOOL_CALL" 且 fullyIdle is True
+        term_reason = payload.get("terminationReason")
+        fully_idle = payload.get("fullyIdle")
+        if term_reason != "NO_TOOL_CALL" or fully_idle is not True:
+            return {"decision": "allow"}
+
+        # Guardrail 3: 子代理会话零干扰（lastUserInput 含 [QUENCH-DISPATCH:）
+        last_user_input = str(payload.get("lastUserInput") or "")
+        if "[QUENCH-DISPATCH:" in last_user_input:
+            return {"decision": "allow"}
+
+        # 解析 workspace_root
+        workspace_paths = payload.get("workspacePaths", [])
+        if not workspace_paths or not isinstance(workspace_paths, list):
+            return {"decision": "allow"}
+        workspace_root = workspace_paths[0]
+        if not workspace_root or not os.path.isdir(workspace_root):
+            return {"decision": "allow"}
+
+        # 触发一次静默配置自愈
+        try:
+            from config_sync import auto_heal_configs
+            auto_heal_configs(workspace_root=workspace_root, quiet=True)
+        except Exception:
+            pass
+
+        # Guardrail 4: 工作区必须存在活跃 .agents/quench_stack.yaml 且 docs/dev_tasks/ 下至少存在 1 个任务单文件
+        config_path = os.path.join(workspace_root, ".agents", "quench_stack.yaml")
+        if not os.path.isfile(config_path):
+            return {"decision": "allow"}
+
+        from project_config import load_project_config
+        config = load_project_config(workspace_root)
+        dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+        if not os.path.isdir(dev_tasks_dir):
+            return {"decision": "allow"}
+
+        md_files = [
+            f for f in glob.glob(os.path.join(dev_tasks_dir, "*.md"))
+            if os.path.basename(f).lower() != "readme.md"
+        ]
+        if not md_files:
+            return {"decision": "allow"}
+
+        # 寻找最新任务单
+        md_files.sort(key=os.path.getmtime, reverse=True)
+        target_file = os.path.basename(md_files[0])
+
+        # Guardrail 5: autopilot.stop_at == "none" 且 harness_state in _STOP_HOOK_RELAY_STATES
+        from runtime_mode import load_runtime_mode
+        snapshot = load_runtime_mode(
+            workspace_root,
+            external_api_available=_is_external_api_available(workspace_root),
+        )
+        if snapshot.autopilot.stop_at != "none":
+            return {"decision": "allow"}
+
+        harness_state, harness_instruction = _resolve_harness_baton(
+            workspace_root, dev_tasks_dir, target_file
+        )
+        if not harness_state or harness_state not in _STOP_HOOK_RELAY_STATES:
+            return {"decision": "allow"}
+
+        # Guardrail 6: 基于 .agents/.quench_stop_guard.json（FileLock 保护，最多保留 64 条最近键）记录指纹
+        conversation_id = payload.get("conversationId") or payload.get("conversation_id") or "default_session"
+        fingerprint = f"{conversation_id}::{target_file}::{harness_state}"
+
+        agents_dir = os.path.join(workspace_root, ".agents")
+        os.makedirs(agents_dir, exist_ok=True)
+        guard_file = os.path.join(agents_dir, ".quench_stop_guard.json")
+        lock_file = os.path.join(agents_dir, ".quench_stop_guard.json.lock")
+
+        from filelock import FileLock, Timeout
+        try:
+            with FileLock(lock_file, timeout=5.0):
+                records: dict = {}
+                if os.path.isfile(guard_file):
+                    try:
+                        with open(guard_file, "r", encoding="utf-8") as f:
+                            raw = json.load(f)
+                        if isinstance(raw, dict) and isinstance(raw.get("history"), dict):
+                            records = raw["history"]
+                        elif isinstance(raw, dict):
+                            records = raw
+                    except Exception:
+                        records = {}
+
+                # 检查指纹：若已存在则熔断放行（最多只续跑 1 次）
+                if fingerprint in records:
+                    return {"decision": "allow"}
+
+                # 首次触发：记录指纹并保留最多 64 条
+                records[fingerprint] = 1
+                while len(records) > 64:
+                    oldest = next(iter(records))
+                    del records[oldest]
+
+                from config_sync import atomic_write_file
+                atomic_write_file(
+                    guard_file,
+                    json.dumps({"history": records}, indent=2, ensure_ascii=False) + "\n"
+                )
+
+                reason_msg = f"Autopilot relay '{harness_state}' active: {harness_instruction or 'Please continue next relay step in-band without stopping.'}"
+                return {
+                    "decision": "continue",
+                    "reason": reason_msg,
+                }
+        except (Timeout, Exception) as lock_exc:
+            if os.environ.get("QUENCH_HOOK_DEBUG"):
+                sys.stderr.write(f"[context_injector] stop guard lock error: {lock_exc}\n")
+            return {"decision": "allow"}
+
+    except Exception as exc:
+        if os.environ.get("QUENCH_HOOK_DEBUG"):
+            sys.stderr.write(f"[context_injector] _handle_stop_event error: {exc}\n")
+        return {"decision": "allow"}
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -163,6 +315,11 @@ def main():
         payload = json.loads(raw_input)
     except Exception:
         print(json.dumps({}))
+        return
+
+    if isinstance(payload, dict) and "terminationReason" in payload:
+        res = _handle_stop_event(payload)
+        print(json.dumps(res))
         return
 
     try:

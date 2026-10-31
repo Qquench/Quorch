@@ -132,3 +132,117 @@ def test_cancelled_pending_reap_does_not_release_pin(tmp_path: Path):
         supervisor._release_log_pin(rec)
 
     assert supervisor.registry.is_pinned(log_path) is True
+
+
+def test_submit_opportunistic_gc_expired_terminal_jobs_and_cleans_empty_dir(tmp_path: Path):
+    """验证超 max_age_s 的历史终态作业在下次 submit() 时被自动机会式 GC 且空会话目录被清理，同时不再阻塞超额 .log 文件裁剪。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    old_sess = "sess_expired"
+    old_sess_dir = supervisor._get_session_dir(old_sess)
+    (old_sess_dir / "results").mkdir(exist_ok=True)
+
+    old_log_path = str(tmp_path / "logs" / f"reviewer_{old_sess}_old_job.log")
+    Path(old_log_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(old_log_path).write_text("old log", encoding="utf-8")
+
+    rec_old = JobRecord(
+        job_id="job_expired",
+        session_id=old_sess,
+        workspace_root=str(tmp_path),
+        mode="critique",
+        owner_pid=os.getpid(),
+        owner_boot_nonce=supervisor.boot_nonce,
+        generation=1,
+        state=JobState.COMPLETED,
+        created_monotonic=time.monotonic() - 4000.0,
+        updated_monotonic=time.monotonic() - 3900.0,
+        created_wall_utc="2026-10-01T00:00:00Z",
+        updated_wall_utc="2026-10-01T00:00:00Z",
+        log_path=old_log_path,
+        progress=JobProgress(1.0, 100, ReviewerPhase.FINALIZING, 10.0),
+        result_ref=str(old_sess_dir / "results" / "job_expired.result.json"),
+    )
+    supervisor._save_job_record(rec_old)
+    Path(rec_old.result_ref).write_text("{}", encoding="utf-8")
+    (old_sess_dir / "job_expired.record.lock").write_text("", encoding="utf-8")
+
+    r_file = supervisor._get_record_path(old_sess, rec_old.job_id)
+    assert r_file.is_file()
+    old_time = time.time() - 3600.0
+    os.utime(r_file, (old_time, old_time))
+
+    supervisor.submit({"session_id": "sess_active", "query": "hello"})
+
+    assert not r_file.exists()
+    assert not old_sess_dir.exists()
+
+
+def test_gc_terminal_jobs_prunes_excess_retains_recent_and_preserves_active(tmp_path: Path):
+    """未超 max_age_s 的近期终态作业在 max_records 以内保留完好；跨会话超出 max_records 时仅保留最新 max_records 条终态记录且活跃非终态作业绝不被误删。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    now = time.time()
+
+    active_dir = supervisor._get_session_dir("sess_active")
+    rec_active = JobRecord(
+        job_id="job_active_1",
+        session_id="sess_active",
+        workspace_root=str(tmp_path),
+        mode="critique",
+        owner_pid=os.getpid(),
+        owner_boot_nonce=supervisor.boot_nonce,
+        generation=1,
+        state=JobState.RUNNING,
+        created_monotonic=time.monotonic(),
+        updated_monotonic=time.monotonic(),
+        created_wall_utc="2026-10-01T00:00:00Z",
+        updated_wall_utc="2026-10-01T00:00:00Z",
+        log_path=str(tmp_path / "active.log"),
+        progress=JobProgress(0.5, 50, ReviewerPhase.STREAMING, 5.0),
+        result_ref=None,
+    )
+    supervisor._save_job_record(rec_active)
+
+    terminal_ids = []
+    for i in range(5):
+        s_id = f"sess_{i % 2}"
+        j_id = f"job_term_{i}"
+        s_dir = supervisor._get_session_dir(s_id)
+        rec = JobRecord(
+            job_id=j_id,
+            session_id=s_id,
+            workspace_root=str(tmp_path),
+            mode="critique",
+            owner_pid=os.getpid(),
+            owner_boot_nonce=supervisor.boot_nonce,
+            generation=1,
+            state=JobState.COMPLETED,
+            created_monotonic=time.monotonic(),
+            updated_monotonic=time.monotonic(),
+            created_wall_utc="2026-10-01T00:00:00Z",
+            updated_wall_utc="2026-10-01T00:00:00Z",
+            log_path=str(tmp_path / f"{j_id}.log"),
+            progress=JobProgress(1.0, 100, ReviewerPhase.FINALIZING, 1.0),
+            result_ref=None,
+        )
+        supervisor._save_job_record(rec)
+        rf = supervisor._get_record_path(s_id, j_id)
+        os.utime(rf, (now - (100 - i * 10), now - (100 - i * 10)))
+        terminal_ids.append((s_id, j_id))
+
+    reaped = supervisor.gc_terminal_jobs(max_records=10, max_age_s=1800.0)
+    assert reaped == 0
+    for s_id, j_id in terminal_ids:
+        assert supervisor._get_record_path(s_id, j_id).is_file()
+
+    reaped_excess = supervisor.gc_terminal_jobs(max_records=2, max_age_s=1800.0)
+    assert reaped_excess == 3
+
+    assert not supervisor._get_record_path("sess_0", "job_term_0").exists()
+    assert not supervisor._get_record_path("sess_1", "job_term_1").exists()
+    assert not supervisor._get_record_path("sess_0", "job_term_2").exists()
+    assert supervisor._get_record_path("sess_1", "job_term_3").is_file()
+    assert supervisor._get_record_path("sess_0", "job_term_4").is_file()
+
+    assert supervisor._get_record_path("sess_active", "job_active_1").is_file()
+
+

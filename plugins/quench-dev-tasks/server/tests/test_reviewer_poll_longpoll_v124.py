@@ -29,6 +29,7 @@ if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
 from fastmcp import Context
+from tool_surface_constants import POLL_WAIT_MAX_S_HARD_CEILING
 from progress_bridge import ProgressBridge
 from reviewer_engine import _REVIEWER_LIMITER
 from reviewer_jobs import (
@@ -68,7 +69,8 @@ def test_clamp_wait_rejects_boolean_with_type_error():
 
 
 def test_clamp_wait_defaults_none_and_clamps_ranges():
-    """Validates None -> 0.0, negatives -> 0.0, non-finite -> 0.0, cap at 25.0."""
+    """Validates None -> 0.0, negatives -> 0.0, non-finite -> 0.0, cap at POLL_WAIT_MAX_S_HARD_CEILING."""
+    assert POLL_WAIT_MAX_S_HARD_CEILING == 25.0
     assert _clamp_wait(None) == 0.0
     assert _clamp_wait(0) == 0.0
     assert _clamp_wait(-10) == 0.0
@@ -79,6 +81,8 @@ def test_clamp_wait_defaults_none_and_clamps_ranges():
     assert _clamp_wait(10) == 10.0
     assert _clamp_wait(20.5) == 20.5
     assert _clamp_wait(25.0) == 25.0
+    assert _clamp_wait(POLL_WAIT_MAX_S_HARD_CEILING) == POLL_WAIT_MAX_S_HARD_CEILING
+    assert _clamp_wait(POLL_WAIT_MAX_S_HARD_CEILING + 5.0) == POLL_WAIT_MAX_S_HARD_CEILING
     assert _clamp_wait(30) == 25.0
     assert _clamp_wait(999.0) == 25.0
 

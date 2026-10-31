@@ -13,6 +13,9 @@ from autopilot_harness import (
     compute_next_action,
     compute_batch_overlap_ratio,
     resolve_runner_dispatch_channel,
+    _extract_top_module_dir,
+    _DEEP_SUBMODULE_CONTAINERS,
+    _SHALLOW_SUBMODULE_CONTAINERS,
     TaskStateSnapshot,
     LastEventSnapshot,
     HarnessNextAction,
@@ -612,6 +615,147 @@ def test_inject_harness_next_action_ignores_readme_md(tmp_path):
     h_action = res_dict["harness_next_action"]
     assert h_action["task_file"] == "docs/dev_tasks/2026-10-25_batch.md"
     assert "readme.md" not in str(h_action["task_file"]).lower()
+
+
+@pytest.mark.tier1_fast
+def test_extract_top_module_dir_depths_and_root_isolation():
+    """Verify _extract_top_module_dir handles root files, deep containers, and shallow containers."""
+    # 1. Empty strings and root slashes
+    assert _extract_top_module_dir("") == ""
+    assert _extract_top_module_dir("/") == ""
+    assert _extract_top_module_dir("///") == ""
+
+    # 2. Root files (isolated per filename)
+    assert _extract_top_module_dir("CHANGELOG.md") == "__root__:CHANGELOG.md"
+    assert _extract_top_module_dir(".gitignore") == "__root__:.gitignore"
+    assert _extract_top_module_dir("CHANGELOG.md") == _extract_top_module_dir("CHANGELOG.md")
+    assert _extract_top_module_dir("CHANGELOG.md") != _extract_top_module_dir(".gitignore")
+    assert _extract_top_module_dir("/CHANGELOG.md") == "__root__:CHANGELOG.md"
+
+    # 3. Deep submodule containers (up to 4 directory levels preserved)
+    assert _extract_top_module_dir("plugins/README.md") == "plugins"
+    assert _extract_top_module_dir("plugins/pkg/hooks.json") == "plugins/pkg"
+    assert _extract_top_module_dir("plugins/pkg/server/a.py") == "plugins/pkg/server"
+    assert _extract_top_module_dir("plugins/pkg/server/hooks/b.py") == "plugins/pkg/server/hooks"
+    assert _extract_top_module_dir("plugins/pkg/server/hooks/sub/c.py") == "plugins/pkg/server/hooks"
+    assert _extract_top_module_dir("packages/ui/src/components/Btn.tsx") == "packages/ui/src/components"
+    assert _extract_top_module_dir("/plugins/pkg/server/a.py") == "plugins/pkg/server"
+
+    # 4. Shallow submodule containers (up to 2 directory levels preserved)
+    assert _extract_top_module_dir("src/main.py") == "src"
+    assert _extract_top_module_dir("src/auth/login.py") == "src/auth"
+    assert _extract_top_module_dir("src/auth/oauth/callback.py") == "src/auth"
+    assert _extract_top_module_dir("docs/README.md") == "docs"
+    assert _extract_top_module_dir("docs/architecture/README.md") == "docs/architecture"
+    assert _extract_top_module_dir("docs/architecture/adr/001.md") == "docs/architecture"
+    assert _extract_top_module_dir("tests/unit/test_x.py") == "tests/unit"
+    assert _extract_top_module_dir("test/unit/test_y.py") == "test/unit"
+
+    # 5. Regular module directories (top-level directory only)
+    assert _extract_top_module_dir("backend/service.py") == "backend"
+    assert _extract_top_module_dir("backend/api/v1/endpoints.py") == "backend"
+    assert _extract_top_module_dir("frontend/components/Navbar.vue") == "frontend"
+
+
+@pytest.mark.tier1_fast
+def test_batch_overlap_ratio_root_and_src_submodules():
+    """Verify batch overlap ratio and runner dispatch for root files and src submodules."""
+    # Disjoint root files -> overlap 0.0 -> spawn_fresh
+    assert compute_batch_overlap_ratio(["CHANGELOG.md"], [".gitignore"]) == 0.0
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=["CHANGELOG.md"],
+            curr_batch_files=[".gitignore"],
+        )
+        == "spawn_fresh"
+    )
+
+    # Identical root file -> overlap 1.0 -> reuse_active
+    assert compute_batch_overlap_ratio(["CHANGELOG.md"], ["CHANGELOG.md"]) == 1.0
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=["CHANGELOG.md"],
+            curr_batch_files=["CHANGELOG.md"],
+        )
+        == "reuse_active"
+    )
+
+    # Disjoint src submodules -> overlap 0.0 -> spawn_fresh
+    assert compute_batch_overlap_ratio(["src/auth/login.py"], ["src/billing/invoice.py"]) == 0.0
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=["src/auth/login.py"],
+            curr_batch_files=["src/billing/invoice.py"],
+        )
+        == "spawn_fresh"
+    )
+
+    # Overlapping src submodule (auth) -> overlap 0.5 (0.5 * 1.0) -> reuse_active
+    assert compute_batch_overlap_ratio(["src/auth/login.py"], ["src/auth/token.py"]) == 0.5
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=["src/auth/login.py"],
+            curr_batch_files=["src/auth/token.py"],
+        )
+        == "reuse_active"
+    )
+
+
+@pytest.mark.tier1_fast
+def test_batch_overlap_ratio_drilldown_regression_dataset():
+    """Verify deterministic backtest datasets with deep container drilldown."""
+    batch_1_files = [
+        "plugins/quench-dev-tasks/server/project_config.py",
+        "plugins/quench-dev-tasks/server/server.py",
+        "plugins/quench-dev-tasks/rules/dev-tasks-discipline.md",
+        "plugins/quench-dev-tasks/server/tests/test_audit_gate.py",
+        "dev_tasks_mcp_specification.md",
+    ]
+    batch_2_files = [
+        ".gitignore",
+        "plugins/quench-dev-tasks/scripts/config_sync.py",
+        "plugins/quench-dev-tasks/hooks.json.template",
+        "plugins/quench-dev-tasks/server/hooks/file_scope_guard.py",
+        "plugins/quench-dev-tasks/server/tests/test_hooks.py",
+        "plugins/quench-dev-tasks/rules/AGENTS.md",
+        "docs/architecture/README.md",
+        "docs/future_roadmap_ideas.md",
+    ]
+    batch_server_followup = [
+        "plugins/quench-dev-tasks/server/autopilot_harness.py",
+        "plugins/quench-dev-tasks/server/tests/test_autopilot_harness_baton.py",
+    ]
+
+    # BATCH_1 vs BATCH_2: overlap is 0.125 (< 0.30) -> spawn_fresh
+    assert compute_batch_overlap_ratio(batch_1_files, batch_2_files) == 0.125
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=batch_1_files,
+            curr_batch_files=batch_2_files,
+        )
+        == "spawn_fresh"
+    )
+
+    # BATCH_1 vs BATCH_SERVER_FOLLOWUP: overlap is 0.5 (>= 0.30) -> reuse_active
+    assert compute_batch_overlap_ratio(batch_1_files, batch_server_followup) == 0.5
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=batch_1_files,
+            curr_batch_files=batch_server_followup,
+        )
+        == "reuse_active"
+    )
+
+    # BATCH_2 vs BATCH_SERVER_FOLLOWUP: overlap is 0.25 (< 0.30) -> spawn_fresh
+    assert compute_batch_overlap_ratio(batch_2_files, batch_server_followup) == 0.25
+    assert (
+        resolve_runner_dispatch_channel(
+            prev_batch_files=batch_2_files,
+            curr_batch_files=batch_server_followup,
+        )
+        == "spawn_fresh"
+    )
+
 
 
 

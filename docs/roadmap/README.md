@@ -11,11 +11,20 @@
 
 ## Active & Upcoming Version Roadmaps
 
-| Milestone | Roadmap Document | Key Milestones & Themes | Focus Area | Current Status |
-| :--- | :--- | :--- | :--- | :---: |
-| **Proposal (TBD)** | 📋 **[plan_reviewer_polling_contract_and_cross_host_statusbar.md](./plan_reviewer_polling_contract_and_cross_host_statusbar.md)** | **Reviewer Polling Contract Hardening, Status Bar Extension & Cross-Host Observability** | 25.0s hard ceiling clamp & loop client contract (Epic 1), `quench-statusbar` zero-CPU extension & auto-hide lifecycle (Epic 2), L1/L2/L3 cross-host tiered observability architecture (Epic 3) | 📋 **Pending Blueprint** |
-| **Proposal (TBD)** | 📋 **[plan_frontiers_dag_and_dynamic_governance.md](./archive/plan_frontiers_dag_and_dynamic_governance.md)** | **Plan Frontiers Absorption: Task DAG, Token-Aware Budget & Dynamic Rollback** | Tokenizer-aware budget & truncation telemetry (P1), monotonic Epoch fencing & revert primitive (P2), depends_on task DAG (P3), step-level rejection (P4), Repo-Map & Subagent review isolation (P5) | 📋 **Architecture Blueprint (Archived)** |
-| **Proposal (TBD)** | 📋 **[plan_cost_efficiency_and_governance_hardening.md](./archive/plan_cost_efficiency_and_governance_hardening.md)** | **Resource Efficiency & Governance Hardening: DoD Contract, Role Authorization & Repo-Map Slicing** | Measurement baseline (Epic 0), structured DoD exit-code authority (Epic A), server-side role dispatch authorization (Epic B), adapter-aligned token budget (Epic C), deterministic Repo-Map slicing (Epic D), verdict atomic channel (Epic E), risk-graded fast track (Epic F) | 📋 **Architecture Blueprint (Archived)** |
+| Milestone | Roadmap Document | Core Focus | Status |
+| :--- | :--- | :--- | :---: |
+| *(None currently active — next milestone ready to plan from [future_roadmap_ideas.md](../future_roadmap_ideas.md))* | — | — | — |
+
+---
+
+## Archived Exploratory Blueprints (Pre-Gemini-4 / Pre-Antigravity-2.0 Audit)
+
+| Blueprint Document | Original Focus | 2026-10-31 Audit Disposition |
+| :--- | :--- | :--- |
+| 📦 **[plan_reviewer_polling_contract_and_cross_host_statusbar.md](./archive/plan_reviewer_polling_contract_and_cross_host_statusbar.md)** | 25.0s hard ceiling clamp (`TBD.1`), `quench-statusbar` VS Code extension (`TBD.2`), L1/L2/L3 statusbar matrix (`TBD.3`) | `TBD.1` constant hygiene retained in [future_roadmap_ideas.md](../future_roadmap_ideas.md); `TBD.2`/`TBD.3` **superseded** by Antigravity 2.0 native Auxiliary Pane + `v1.24` MCP `notifications/progress` |
+| 📦 **[plan_frontiers_dag_and_dynamic_governance.md](./archive/plan_frontiers_dag_and_dynamic_governance.md)** | Token-aware budget (P1), monotonic Epoch fencing & revert (P2), `depends_on` task DAG (P3), step-level rejection (P4), Repo-Map & Subagent isolation (P5) | Epoch fencing landed (`v1.06`/`v1.08`), two-tier subagent exploration landed (`v1.25`); single-worktree DAG locking **superseded** by Antigravity 2.0 `Workspace: "share" \| "branch"` |
+| 📦 **[plan_cost_efficiency_and_governance_hardening.md](./archive/plan_cost_efficiency_and_governance_hardening.md)** | Structured DoD exit-code authority (Epic A), role dispatch guard (Epic B), token budget (Epic C), Repo-Map slicing (Epic D), verdict channel (Epic E), fast track (Epic F) | Verdict channel, cache alignment & dynamic role contract landed across `v1.08–v1.26`; `minimal` governance & net-assertion DoD audit retained in [future_roadmap_ideas.md](../future_roadmap_ideas.md) |
+| 📦 **[plan_reviewer_lightweight_timeout_and_cost_mvp.md](./archive/plan_reviewer_lightweight_timeout_and_cost_mvp.md)** | Reviewer timeout envelope, heartbeat throttling & lightweight token cost baseline | **Graduated** across `v1.08`, `v1.20`, `v1.24`, and `v1.26` |
 
 ---
 
@@ -23,6 +32,7 @@
 
 | Milestone | Archived Document | Key Deliverables | Archived Date |
 | :--- | :--- | :--- | :---: |
+| **v1.28** | ✔️ **[v1.28_dual_mode_audit_gate_and_agy2_single_mount_roadmap.md](./archive/v1.28_dual_mode_audit_gate_and_agy2_single_mount_roadmap.md)** | **Dual-Mode Explicit Delegation Audit Gate Closure, Reviewer Terminal Job GC, Antigravity 2.0 Single-Source Plugin Mounting & Harness Overlap Drill-Down**: Explicit `inverted` `AuditGate` trust (`explicit_inverted_orchestrator`) & `POLL_WAIT_MAX_S_HARD_CEILING` + opportunistic `gc_terminal_jobs()` (Batch 1: Tasks 28.1–28.2) + `plugins.json`-aware single-mount `config_sync` deduplication, `edit_file`/`write_file` `file_scope_guard`, 1-shot `Stop` hook & 3-way `rules/AGENTS.md` sentinel sync (Batch 2: Tasks 28.3–28.4) + container-aware `_extract_top_module_dir` cross-batch overlap drill-down & root-file bucket isolation (Batch 3: Task 28.5) | 2026-10-31 |
 | **v1.27** | ✔️ **[v1.27_autopilot_seamless_pipeline_and_handoff_modernization_roadmap.md](./archive/v1.27_autopilot_seamless_pipeline_and_handoff_modernization_roadmap.md)** | **Eradicating Legacy Handoff Card Interrupts & Autopilot Seamless Pipeline Hardening**: Modernized `dev_tasks_checkout` & `dev_tasks_escalate` instructions + Strategy-aware `render_handoff_card` with in-band `dev_reviewer_submit` / subagent branches + Updated `AGENTS.md` and resident discipline rules (Batch 1) | 2026-10-28 |
 | **v1.26** | ✔️ **[v1.26_prompt_cache_optimization_and_autopilot_pipeline_roadmap.md](./archive/v1.26_prompt_cache_optimization_and_autopilot_pipeline_roadmap.md)** | **Prompt Cache Gradient Optimization, Multi-Round AST Context Reuse & Autopilot Pipeline Hardening**: Stream usage capture & CRLF->LF normalization (Batch 1) + 64-token static prefix block alignment & wire padding (Batch 2) + AST exploration slice determinism & PromptAssembler cache pool (Batch 3) + Autopilot prompt decoupling & Context Injector modernization (Batch 4) | 2026-10-28 |
 | **v1.25** | ✔️ **[v1.25_dual_mode_orchestration_and_autopilot_harness_roadmap.md](./archive/v1.25_dual_mode_orchestration_and_autopilot_harness_roadmap.md)** | **Dual-Mode Orchestration Topology, Lean Spec Contract & Batch Autopilot Workflow Harness**: Hierarchical `standard`/`inverted` & `reviewer_channel` toggles with visible `auto_fallback` (Epic 1) + 3-layer isolation & two-tier recon replacing legacy `QUENCH_ROLE` (Epic 2) + anti-overengineering lean spec contract (Epic 3) + unified review attestation channel & `accepted_sources` gate (Epic 4) + pure-function `compute_next_action` autopilot harness & one-shot `stop_at` breakpoints (Epic 5) | 2026-10-27 |

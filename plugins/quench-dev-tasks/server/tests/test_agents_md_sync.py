@@ -20,6 +20,7 @@ WORKSPACE_ROOT = PLUGIN_DIR.parent.parent
 
 ROOT_AGENTS_PATH = WORKSPACE_ROOT / "AGENTS.md"
 TEMPLATE_AGENTS_PATH = PLUGIN_DIR / "templates" / "AGENTS.md"
+PLUGIN_RULES_AGENTS_PATH = PLUGIN_DIR / "rules" / "AGENTS.md"
 
 SENTINEL_BEGIN = "<!-- QUENCH-CORE-INVARIANTS:BEGIN -->"
 SENTINEL_END = "<!-- QUENCH-CORE-INVARIANTS:END -->"
@@ -58,44 +59,62 @@ def _extract_core_blocks(text: str, filename: str) -> list[list[str]]:
 
 
 def test_agents_md_core_block_byte_sync() -> None:
-    """提取两文件核心哨兵段落，排除项目名变量后断言内容逐字等价。"""
+    """提取三端核心哨兵段落，排除项目名变量后断言内容逐字等价。"""
     assert ROOT_AGENTS_PATH.is_file(), f"Root AGENTS.md missing at {ROOT_AGENTS_PATH}"
     assert TEMPLATE_AGENTS_PATH.is_file(), f"Template AGENTS.md missing at {TEMPLATE_AGENTS_PATH}"
+    assert PLUGIN_RULES_AGENTS_PATH.is_file(), f"Plugin rules AGENTS.md missing at {PLUGIN_RULES_AGENTS_PATH}"
 
     root_text = ROOT_AGENTS_PATH.read_text(encoding="utf-8")
     template_text = TEMPLATE_AGENTS_PATH.read_text(encoding="utf-8")
+    rules_text = PLUGIN_RULES_AGENTS_PATH.read_text(encoding="utf-8")
 
     # Replace template placeholder {{PROJECT_NAME}} with current repository name 'quorch'
     template_normalized = template_text.replace("{{PROJECT_NAME}}", "quorch")
 
     root_blocks = _extract_core_blocks(root_text, "AGENTS.md")
     template_blocks = _extract_core_blocks(template_normalized, "templates/AGENTS.md")
+    rules_blocks = _extract_core_blocks(rules_text, "rules/AGENTS.md")
 
     assert len(root_blocks) == len(template_blocks), (
         f"Block count mismatch between AGENTS.md ({len(root_blocks)}) and templates/AGENTS.md ({len(template_blocks)})"
     )
+    assert len(root_blocks) == len(rules_blocks), (
+        f"Block count mismatch between AGENTS.md ({len(root_blocks)}) and rules/AGENTS.md ({len(rules_blocks)})"
+    )
 
-    for idx, (rb, tb) in enumerate(zip(root_blocks, template_blocks), start=1):
+    for idx, (rb, tb, ub) in enumerate(zip(root_blocks, template_blocks, rules_blocks), start=1):
         assert len(rb) == len(tb), (
             f"Line count mismatch in core block {idx}: "
             f"root has {len(rb)} lines, template has {len(tb)} lines.\n"
             f"Root block:\n{rb}\n\nTemplate block:\n{tb}"
         )
-        for line_no, (r_line, t_line) in enumerate(zip(rb, tb), start=1):
+        assert len(rb) == len(ub), (
+            f"Line count mismatch in core block {idx}: "
+            f"root has {len(rb)} lines, rules has {len(ub)} lines.\n"
+            f"Root block:\n{rb}\n\nRules block:\n{ub}"
+        )
+        for line_no, (r_line, t_line, u_line) in enumerate(zip(rb, tb, ub), start=1):
             assert r_line == t_line, (
                 f"Content mismatch in core block {idx} at line {line_no}:\n"
                 f"  root:     {r_line!r}\n"
                 f"  template: {t_line!r}"
             )
+            assert r_line == u_line, (
+                f"Content mismatch in core block {idx} at line {line_no}:\n"
+                f"  root:  {r_line!r}\n"
+                f"  rules: {u_line!r}"
+            )
 
 
 def test_agents_md_line_budget_strict() -> None:
-    """断言根文件与模板文件均 <= 120 行。"""
+    """断言根文件、模板文件与插件规则文件均 <= 120 行，且插件规则文件不含 YAML frontmatter。"""
     assert ROOT_AGENTS_PATH.is_file(), f"Root AGENTS.md missing at {ROOT_AGENTS_PATH}"
     assert TEMPLATE_AGENTS_PATH.is_file(), f"Template AGENTS.md missing at {TEMPLATE_AGENTS_PATH}"
+    assert PLUGIN_RULES_AGENTS_PATH.is_file(), f"Plugin rules AGENTS.md missing at {PLUGIN_RULES_AGENTS_PATH}"
 
     root_lines = ROOT_AGENTS_PATH.read_text(encoding="utf-8").splitlines()
     template_lines = TEMPLATE_AGENTS_PATH.read_text(encoding="utf-8").splitlines()
+    rules_lines = PLUGIN_RULES_AGENTS_PATH.read_text(encoding="utf-8").splitlines()
 
     assert len(root_lines) <= 120, (
         f"Root AGENTS.md exceeds 120-line budget: currently {len(root_lines)} lines"
@@ -103,3 +122,7 @@ def test_agents_md_line_budget_strict() -> None:
     assert len(template_lines) <= 120, (
         f"Template AGENTS.md exceeds 120-line budget: currently {len(template_lines)} lines"
     )
+    assert len(rules_lines) <= 120, (
+        f"Plugin rules AGENTS.md exceeds 120-line budget: currently {len(rules_lines)} lines"
+    )
+    assert not rules_lines[0].startswith("---"), "Plugin rules AGENTS.md must not start with YAML frontmatter (---)"

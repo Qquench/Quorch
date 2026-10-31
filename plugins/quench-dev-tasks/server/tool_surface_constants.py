@@ -34,6 +34,7 @@ CTX_PARAM_ALIASES: Final[frozenset[str]] = frozenset({"ctx"})
 SCHEMA_META_KEY: Final[str] = "_meta"
 SNAPSHOT_SCHEMA_VERSION: Final[int] = 1
 META_ALLOWED_KEYS: Final[frozenset[str]] = frozenset({"schema_version"})
+POLL_WAIT_MAX_S_HARD_CEILING: Final[float] = 25.0
 
 
 def _missing_singleton() -> "_MissingSentinel":

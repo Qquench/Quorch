@@ -1198,6 +1198,10 @@ class ReviewerJobSupervisor:
 
         # 机会式清理（传入 compute_protected_logs 与 build_peer_liveness_probe）
         try:
+            try:
+                self.gc_terminal_jobs()
+            except Exception:
+                pass
             protected = compute_protected_logs(
                 str(self._jobs_base), retention=REVIEWER_TERMINAL_LOG_RETENTION
             )
@@ -1734,6 +1738,11 @@ class ReviewerJobSupervisor:
             except Exception:
                 pass
 
+        try:
+            self.gc_terminal_jobs()
+        except Exception:
+            pass
+
         return self.poll(job_id, session_id=session_id)
 
     def reconcile_on_load(self) -> list[str]:
@@ -1796,46 +1805,84 @@ class ReviewerJobSupervisor:
                             if updated_rec:
                                 self._append_verdict_audit(updated_rec)
                                 existing_verdict_ids.add(rec.job_id)
+        try:
+            self.gc_terminal_jobs()
+        except Exception:
+            pass
         return orphaned
 
 
     def gc_terminal_jobs(self, *, max_records: int = 100, max_age_s: float = 1800.0) -> int:
-        """终态 GC 与容错：仅回收超 TTL 终态任务，GC 期间对已解引用文件优雅容忍 ENOENT (I10)。"""
+        """终态 GC 与容错：跨会话按 mtime 降序裁剪超期与超配额终态作业，回收空会话目录。"""
         reaped = 0
         if not self._jobs_base.is_dir():
             return 0
 
         now = time.time()
-        for s_dir in self._jobs_base.iterdir():
-            if not s_dir.is_dir():
-                continue
-            record_files = list(s_dir.glob("*.record.json"))
-            for r_file in record_files:
-                try:
-                    with open(r_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    rec = _record_from_dict(data)
-                except Exception:
-                    continue
+        session_dirs: list[Path] = []
+        terminal_items: list[tuple[float, Path, JobRecord]] = []
 
-                if rec.state in TERMINAL_STATES:
+        try:
+            for s_dir in self._jobs_base.iterdir():
+                if not s_dir.is_dir():
+                    continue
+                session_dirs.append(s_dir)
+                for r_file in s_dir.glob("*.record.json"):
                     try:
-                        mtime = r_file.stat().st_mtime
-                        age = now - mtime
-                    except FileNotFoundError:
+                        with open(r_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        rec = _record_from_dict(data)
+                    except Exception:
                         continue
 
-                    if age >= max_age_s or len(record_files) > max_records:
-                        job_id = rec.job_id
-                        lock_file = self._get_lock_path(rec.session_id, job_id)
-                        res_file = self._get_result_path(rec.session_id, job_id)
+                    if rec.state in TERMINAL_STATES:
+                        try:
+                            mtime = r_file.stat().st_mtime
+                        except (FileNotFoundError, OSError):
+                            continue
+                        terminal_items.append((mtime, r_file, rec))
+        except (FileNotFoundError, OSError):
+            return 0
 
-                        for target_f in [r_file, lock_file, res_file]:
-                            try:
-                                target_f.unlink(missing_ok=True)
-                            except (FileNotFoundError, OSError):
-                                pass
-                        reaped += 1
+        # 按 mtime 降序排序（最新在前）
+        terminal_items.sort(key=lambda item: item[0], reverse=True)
+
+        for idx, (mtime, r_file, rec) in enumerate(terminal_items):
+            if (now - mtime >= max_age_s) or (idx >= max_records):
+                job_id = rec.job_id
+                lock_file = self._get_lock_path(rec.session_id, job_id)
+                res_file = self._get_result_path(rec.session_id, job_id)
+
+                for target_f in [r_file, lock_file, res_file]:
+                    try:
+                        target_f.unlink(missing_ok=True)
+                    except (FileNotFoundError, OSError):
+                        pass
+                reaped += 1
+
+        for s_dir in session_dirs:
+            try:
+                results_dir = s_dir / "results"
+                if results_dir.is_dir():
+                    try:
+                        results_dir.rmdir()
+                    except (OSError, FileNotFoundError):
+                        pass
+
+                remaining_records = list(s_dir.glob("*.record.json"))
+                if not remaining_records:
+                    for lk in s_dir.glob("*.record.lock"):
+                        try:
+                            lk.unlink(missing_ok=True)
+                        except (OSError, FileNotFoundError):
+                            pass
+                    try:
+                        s_dir.rmdir()
+                    except (OSError, FileNotFoundError):
+                        pass
+            except (OSError, FileNotFoundError):
+                pass
+
         return reaped
 
     def shutdown(self) -> None:

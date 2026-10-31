@@ -47,6 +47,46 @@ def get_default_plugin_dir() -> str:
     return os.path.normpath(os.path.dirname(scripts_dir))
 
 
+def is_workspace_plugin_mounted(workspace_root: str, plugin_dir: Optional[str] = None) -> bool:
+    """检查目标工作区的 .agents/plugins.json 是否已挂载 quench-dev-tasks 插件。"""
+    if not workspace_root:
+        return False
+    p_dir = os.path.realpath(plugin_dir or get_default_plugin_dir())
+    plugins_file = os.path.join(workspace_root, ".agents", "plugins.json")
+    if not os.path.isfile(plugins_file):
+        return False
+    try:
+        with open(plugins_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+        entries = data.get("entries", [])
+        if not isinstance(entries, list):
+            return False
+
+        target_name = os.path.basename(p_dir)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("enabled") is False:
+                continue
+            raw_path = entry.get("path")
+            if not raw_path or not isinstance(raw_path, str):
+                continue
+
+            bases = [workspace_root, os.path.join(workspace_root, ".agents")]
+            for base in bases:
+                resolved = os.path.realpath(os.path.normpath(os.path.join(base, raw_path)))
+                if resolved == p_dir:
+                    return True
+                child_resolved = os.path.realpath(os.path.normpath(os.path.join(resolved, target_name)))
+                if child_resolved == p_dir:
+                    return True
+        return False
+    except Exception:
+        return False
+
+
 def detect_python_executable(plugin_dir: Optional[str] = None) -> str:
     """探测 Python 解释器路径：优先插件所属上级仓库的 venv，兜底返回当前解释器"""
     p_dir = plugin_dir or get_default_plugin_dir()
@@ -238,6 +278,7 @@ def auto_heal_configs(
     workspace_root: Optional[str] = None,
     python_exe: Optional[str] = None,
     quiet: bool = True,
+    force: bool = False,
 ) -> Tuple[bool, List[str]]:
     """毫秒级检查模板与衍生配置的更新状态，若有落后或缺失则自动原子刷新。
     
@@ -256,24 +297,75 @@ def auto_heal_configs(
     affected: List[str] = []
 
     # 检查插件级 mcp_config.json
-    if not os.path.isfile(mcp_target) or os.path.getmtime(mcp_template) > os.path.getmtime(mcp_target):
+    if force or not os.path.isfile(mcp_target) or os.path.getmtime(mcp_template) > os.path.getmtime(mcp_target):
         affected.append(mcp_target)
 
     # 检查插件级 hooks.json
-    if not os.path.isfile(hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(hooks_target):
+    if force or not os.path.isfile(hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(hooks_target):
         affected.append(hooks_target)
 
     # 检查工作区级 hooks.json 与 mcp_config.json（若提供 workspace_root）
     ws_hooks_target: Optional[str] = None
     ws_mcp_target: Optional[str] = None
+    is_mounted = bool(workspace_root and is_workspace_plugin_mounted(workspace_root, p_dir))
+
     if workspace_root:
         ws_hooks_target = os.path.normpath(os.path.join(workspace_root, ".agents", "hooks.json"))
-        if not os.path.isfile(ws_hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(ws_hooks_target):
-            affected.append(ws_hooks_target)
-
         ws_mcp_target = os.path.normpath(os.path.join(workspace_root, ".agents", "mcp_config.json"))
-        if not os.path.isfile(ws_mcp_target) or os.path.getmtime(mcp_template) > os.path.getmtime(ws_mcp_target):
-            affected.append(ws_mcp_target)
+
+        if is_mounted:
+            # 单源插件已挂载：不再向 .agents/ 写入 hooks.json 与 mcp_config.json
+            # 若已有文件，剥离 quench 专属配置
+            if os.path.isfile(ws_hooks_target):
+                try:
+                    with open(ws_hooks_target, "r", encoding="utf-8") as f:
+                        h_data = json.load(f)
+                    if isinstance(h_data, dict):
+                        mutated = False
+                        for k in ["quench-file-guard", "quench-context-injector"]:
+                            if k in h_data:
+                                h_data.pop(k)
+                                mutated = True
+                        if mutated:
+                            if not h_data:
+                                os.unlink(ws_hooks_target)
+                            else:
+                                atomic_write_file(ws_hooks_target, json.dumps(h_data, indent=2, ensure_ascii=False) + "\n")
+                            affected.append(ws_hooks_target)
+                except Exception:
+                    pass
+
+            if os.path.isfile(ws_mcp_target):
+                try:
+                    with open(ws_mcp_target, "r", encoding="utf-8") as f:
+                        m_data = json.load(f)
+                    if isinstance(m_data, dict):
+                        servers = m_data.get("mcpServers")
+                        mutated = False
+                        if isinstance(servers, dict) and "quench-dev-tasks" in servers:
+                            servers.pop("quench-dev-tasks")
+                            mutated = True
+                        if mutated:
+                            has_other = False
+                            for k, v in m_data.items():
+                                if k == "mcpServers":
+                                    if isinstance(v, dict) and len(v) > 0:
+                                        has_other = True
+                                elif v:
+                                    has_other = True
+                            if not has_other:
+                                os.unlink(ws_mcp_target)
+                            else:
+                                atomic_write_file(ws_mcp_target, json.dumps(m_data, indent=2, ensure_ascii=False) + "\n")
+                            affected.append(ws_mcp_target)
+                except Exception:
+                    pass
+        else:
+            if force or not os.path.isfile(ws_hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(ws_hooks_target):
+                affected.append(ws_hooks_target)
+
+            if force or not os.path.isfile(ws_mcp_target) or os.path.getmtime(mcp_template) > os.path.getmtime(ws_mcp_target):
+                affected.append(ws_mcp_target)
 
     if not affected:
         return False, []
@@ -283,24 +375,25 @@ def auto_heal_configs(
         mcp_rendered, hooks_rendered, ws_hooks_rendered = render_plugin_configs(
             plugin_dir=p_dir,
             python_exe=py_exe,
-            workspace_root=workspace_root,
+            workspace_root=workspace_root if not is_mounted else None,
         )
         if mcp_target in affected:
             atomic_write_file(mcp_target, mcp_rendered)
         if hooks_target in affected:
             atomic_write_file(hooks_target, hooks_rendered)
 
-        if ws_hooks_target and ws_hooks_target in affected and ws_hooks_rendered:
-            atomic_write_file(ws_hooks_target, ws_hooks_rendered)
+        if not is_mounted:
+            if ws_hooks_target and ws_hooks_target in affected and ws_hooks_rendered:
+                atomic_write_file(ws_hooks_target, ws_hooks_rendered)
 
-        if ws_mcp_target and ws_mcp_target in affected:
-            generate_agents_mcp_config(
-                project_root=workspace_root,
-                python_exe=py_exe,
-                force=True,
-                plugin_dir=p_dir,
-                quiet=True,
-            )
+            if ws_mcp_target and ws_mcp_target in affected:
+                generate_agents_mcp_config(
+                    project_root=workspace_root,
+                    python_exe=py_exe,
+                    force=True,
+                    plugin_dir=p_dir,
+                    quiet=True,
+                )
 
         if not quiet:
             print(f"[Quench] 运行时配置自愈完成: 已同步 {len(affected)} 个配置文件。")
@@ -319,7 +412,11 @@ if __name__ == "__main__":
     parser.add_argument("--force", action="store_true", help="强制覆盖渲染")
     args = parser.parse_args()
 
-    healed, affected = auto_heal_configs(workspace_root=args.workspace_root, quiet=False)
+    healed, affected = auto_heal_configs(
+        workspace_root=args.workspace_root,
+        quiet=False,
+        force=args.force,
+    )
     if not healed:
         print("[Quench] 配置文件已是最新，无需刷新。")
     else:

@@ -3,6 +3,20 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-10-31] 2026-10-31_v1_28_batch3_harness_overlap_drilldown.md
+
+- **Task 28.5**: 升级 autopilot_harness._extract_top_module_dir 支持外层容器目录子模块下钻与根文件桶隔离
+
+## [2026-10-31] 2026-10-31_v1_28_batch2_agy2_single_mount_and_hooks.md
+
+- **Task 28.3**: config_sync 单源插件去重、file_scope_guard 适配 edit_file/write_file 与单次熔断 Stop Hook
+- **Task 28.4**: 插件原生 rules/AGENTS.md 三端哨兵同步、当前工作区冗余配置自愈与架构文档收口
+
+## [2026-10-31] 2026-10-31_v1_28_batch1_audit_gate_and_job_gc.md
+
+- **Task 28.1**: 显式委派模式（Explicit inverted）AuditGate 免外部凭据闭环与防回退绕过加固
+- **Task 28.2**: 固化 POLL_WAIT_MAX_S_HARD_CEILING 常量 SSOT 与 ReviewerJobSupervisor 终态作业机会式 GC
+
 ## [2026-10-28] 2026-10-28_v1.27_step02_align_invariants_and_golden_fixtures.md
 
 - **Task 27.2**: 校准 AGENTS.md 核心哨兵同步、恢复交接卡金样本 SHA-256 兼容性并保全纪律标题契约

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Mapping, Optional, Literal, Sequence, TypedD
 from fastmcp import Context, FastMCP
 
 from log_naming import SESSION_ID_PATTERN
+from tool_surface_constants import POLL_WAIT_MAX_S_HARD_CEILING
 
 
 def _atomic_write_json(filepath: str, data: dict) -> None:
@@ -1107,6 +1108,17 @@ def _check_audit_gate(
                     pass
 
         # 解析审计日志路径（防路径穿越，PathTraversalError 必须透传抛出）
+        is_explicit_inverted = False
+        current_mode_source = None
+        try:
+            ext_avail = _is_external_api_available(workspace_root, config)
+            snap = load_runtime_mode(workspace_root, ext_avail)
+            current_mode_source = snap.mode_source
+            is_explicit_inverted = bool(snap.effective_mode == "inverted" and snap.mode_source == "explicit")
+        except Exception:
+            is_explicit_inverted = False
+            current_mode_source = None
+
         raw_log_path = policy.audit_log_path or (
             config.observability.verdict_path if hasattr(config, "observability") and config.observability else ".agents/logs/reviewer/verdicts.jsonl"
         )
@@ -1126,8 +1138,16 @@ def _check_audit_gate(
         except Exception:
             rel_log_path = raw_log_path.replace("\\", "/")
 
-        # step 3: log 不存在 → log_missing [effective_on_degraded]
+        # step 3: log 不存在 → explicit_inverted_orchestrator 或 log_missing [effective_on_degraded]
         if not os.path.isfile(abs_log_path):
+            if is_explicit_inverted:
+                return {
+                    "allowed": True,
+                    "reason": "explicit_inverted_orchestrator",
+                    "artifact_ref": target_ref,
+                    "audit_ref": None,
+                    "parse_skipped_lines": 0,
+                }
             return {
                 "allowed": effective_on_degraded != "block",
                 "reason": "log_missing",
@@ -1245,13 +1265,6 @@ def _check_audit_gate(
                 }
 
             # auto_fallback 模式源硬门禁: auto_fallback 状态下的非 reviewer_client 凭据永不接受
-            current_mode_source = None
-            try:
-                ext_avail = _is_external_api_available(workspace_root, config)
-                snap = load_runtime_mode(workspace_root, ext_avail)
-                current_mode_source = snap.mode_source
-            except Exception:
-                pass
             effective_rec_mode_source = matching_rec.get("mode_source") or current_mode_source
             if effective_rec_mode_source == "auto_fallback" and source != "reviewer_client":
                 return {
@@ -1291,6 +1304,16 @@ def _check_audit_gate(
                 "reason": "matched",
                 "artifact_ref": target_ref,
                 "audit_ref": audit_ref_val,
+                "parse_skipped_lines": parse_skipped_lines,
+            }
+
+        # step 9/10 前置：显式委派模式下可读尾部无匹配记录直接安全放行
+        if is_explicit_inverted:
+            return {
+                "allowed": True,
+                "reason": "explicit_inverted_orchestrator",
+                "artifact_ref": target_ref,
+                "audit_ref": None,
                 "parse_skipped_lines": parse_skipped_lines,
             }
 
@@ -3518,7 +3541,7 @@ def _clamp_wait(wait_max_s: Any) -> float:
         raise ValueError(f"Invalid wait_max_s: '{wait_max_s}' must be an integer.") from exc
     if math.isnan(val) or math.isinf(val) or val < 0.0:
         return 0.0
-    return min(25.0, val)
+    return min(POLL_WAIT_MAX_S_HARD_CEILING, val)
 
 
 async def _poll_impl(

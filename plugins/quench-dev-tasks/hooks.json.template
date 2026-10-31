@@ -2,7 +2,7 @@
   "quench-file-guard": {
     "PreToolUse": [
       {
-        "matcher": "replace_file_content|multi_replace_file_content|write_to_file",
+        "matcher": "edit_file|write_file|replace_file_content|multi_replace_file_content|write_to_file|delete_file|run_command",
         "hooks": [
           {
             "type": "command",
@@ -15,6 +15,13 @@
   },
   "quench-context-injector": {
     "PreInvocation": [
+      {
+        "type": "command",
+        "command": "{{PYTHON_EXECUTABLE}} {{CONTEXT_INJECTOR_SCRIPT_PATH}}",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
       {
         "type": "command",
         "command": "{{PYTHON_EXECUTABLE}} {{CONTEXT_INJECTOR_SCRIPT_PATH}}",

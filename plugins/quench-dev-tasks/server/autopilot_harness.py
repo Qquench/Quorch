@@ -76,13 +76,43 @@ def _clean_path_for_overlap(p: str) -> str:
     return posix_path.strip()
 
 
+# Slice depth mapping for outer container directories (Zero I/O pure contract;
+# register new monorepo/container prefixes here rather than probing filesystem):
+#   _DEEP_SUBMODULE_CONTAINERS    -> dir_parts[:4] (distinguishes plugins/<pkg>/<mod> vs plugins/<pkg>/<mod>/<submod>)
+#   _SHALLOW_SUBMODULE_CONTAINERS -> dir_parts[:2] (distinguishes src/<submod>, docs/<submod>, tests/<submod>)
+_DEEP_SUBMODULE_CONTAINERS: frozenset[str] = frozenset({
+    "plugins",
+    "packages",
+    "apps",
+    "services",
+    "crates",
+    "libs",
+    "modules",
+})
+_SHALLOW_SUBMODULE_CONTAINERS: frozenset[str] = frozenset({
+    "src",
+    "lib",
+    "app",
+    "pkg",
+    "internal",
+    "docs",
+    "tests",
+    "test",
+})
+
+
 def _extract_top_module_dir(p: str) -> str:
-    if "/" not in p:
-        return "__root__"
-    parts = p.split("/")
-    if parts[0] in ("tests", "test") and len(parts) > 2:
-        return parts[1]
-    return parts[0]
+    cleaned = p.strip("/")
+    if not cleaned:
+        return ""
+    if "/" not in cleaned:
+        return f"__root__:{cleaned}"
+    dir_parts = cleaned.split("/")[:-1]
+    if dir_parts[0] in _DEEP_SUBMODULE_CONTAINERS:
+        return "/".join(dir_parts[:4])
+    if dir_parts[0] in _SHALLOW_SUBMODULE_CONTAINERS:
+        return "/".join(dir_parts[:2])
+    return dir_parts[0]
 
 
 def compute_batch_overlap_ratio(
