@@ -660,7 +660,7 @@ def _validate_accepted_sources(accepted: Sequence[str], effective_mode: str) -> 
 
 
 AuditGateReason = Literal[
-    "disabled", "not_managed_scope", "session_bypass_active", "matched",
+    "disabled", "not_managed_scope", "session_bypass_active", "explicit_inverted_orchestrator", "matched",
     "no_matching_record", "record_stale", "record_timestamp_invalid", "record_degraded",
     "tail_window_exhausted", "log_missing", "log_unparsable", "record_unparsable",
     "precondition_changed", "internal_error",

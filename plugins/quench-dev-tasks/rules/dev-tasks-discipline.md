@@ -126,11 +126,12 @@ Pre-commit guard blocks commits modifying out-of-scope files or without an activ
 1. **disabled**: 门禁未开启时放行；
 2. **not_managed_scope**: 未涉及受管路径时放行；
 3. **session_bypass_active**: Tier-2 旁路有效且 session_id 匹配时放行；
-4. **日志完整性与记录匹配**:
+4. **explicit_inverted_orchestrator**: 当工作区处于显式委派编排模式（`effective_mode == "inverted"` 且 `mode_source == "explicit"`，旗舰主会话直接担任 `reviewer_orchestrator`）且无可读审计日志（`log_missing`）或可读尾部无匹配记录（`tail_window_exhausted` / `no_matching_record`）时安全放行；`auto_fallback` 模式绝不适用该放行；
+5. **日志完整性与记录匹配**:
    - 降级族 (`log_missing`, `log_unparsable`, `record_degraded`, `record_timestamp_invalid`, `tail_window_exhausted`) 受 `effective_on_degraded` 策略控制；
    - 缺失族 (`record_stale`, `no_matching_record`, `record_source_not_accepted`, `record_auto_fallback_not_accepted`, `record_rework`) 受 `on_missing_record` 控制；
    - 内部错误 (`internal_error`) fail-open 放行；
-5. **matched**: 尾部记录逆序扫描匹配到未过期的有效审查记录时放行。
+6. **matched**: 尾部记录逆序扫描匹配到未过期的有效审查记录时放行。
 
 ### ④ 锁内重校验与 precondition_changed
 `dev_tasks_confirm` 获锁后重算 `canonical_artifact_ref` 并断言状态仍为 `⬜ 待确认`，不满足时阻断。

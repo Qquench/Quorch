@@ -417,3 +417,77 @@ pytest src/submodule_{i}/tests/test_service.py -q
     assert len(scan.statuses_ordered) == 250
     assert elapsed_ms < 25.0, f"性能耗时超标: {elapsed_ms:.2f}ms >= 25ms"
 
+
+def test_mutating_tools_includes_write_and_edit_file():
+    """断言 MUTATING_TOOLS 包含 write_file 与 edit_file。"""
+    assert "write_file" in MUTATING_TOOLS
+    assert "edit_file" in MUTATING_TOOLS
+
+
+def test_build_post_image_write_file():
+    """断言 build_post_image 支持 write_file 的全量覆盖与追加模式。"""
+    old = "initial content\n"
+
+    # 全量覆盖
+    res_overwrite = build_post_image("write_file", {"Content": "new content"}, old)
+    assert res_overwrite == "new content"
+
+    # Append 模式
+    res_append = build_post_image("write_file", {"Content": "appended", "Append": True}, old)
+    assert res_append == "initial content\nappended"
+
+    # Content 非 str 返回 None
+    assert build_post_image("write_file", {"Content": 123}, old) is None
+    assert build_post_image("write_file", {}, old) is None
+
+
+def test_build_post_image_edit_file():
+    """断言 build_post_image 支持 edit_file 的精准替换、空替换与未命中安全返回。"""
+    old = "def foo():\n    return 42\n"
+
+    # 正常替换
+    res = build_post_image("edit_file", {"Target": "42", "Replacement": "100"}, old)
+    assert res == "def foo():\n    return 100\n"
+
+    # 删除目标（Replacement 为空字符串）
+    res_del = build_post_image("edit_file", {"Target": "\n    return 42", "Replacement": ""}, old)
+    assert res_del == "def foo():\n"
+
+    # Target 未命中返回 None
+    assert build_post_image("edit_file", {"Target": "not_there", "Replacement": "bar"}, old) is None
+
+    # Target 为空字符串返回 None
+    assert build_post_image("edit_file", {"Target": "", "Replacement": "bar"}, old) is None
+
+    # 非字符串参数返回 None
+    assert build_post_image("edit_file", {"Target": 123, "Replacement": "bar"}, old) is None
+    assert build_post_image("edit_file", {"Target": "42", "Replacement": None}, old) is None
+
+
+def test_task_status_guard_with_edit_file_and_write_file(tmp_path):
+    """断言 check_task_status_guard 对 edit_file 与 write_file 篡改状态进行拦截。"""
+    task_file = tmp_path / "docs" / "dev_tasks" / "2026-10-20_sample.md"
+    task_file.parent.mkdir(parents=True, exist_ok=True)
+    task_file.write_text(SAMPLE_TASK_CONTENT, encoding="utf-8")
+
+    # 1. edit_file 尝试直接将 1.1 的待确认篡改为已完成
+    args_edit = {
+        "Target": f"### 任务 1.1 {STATUS_PENDING}",
+        "Replacement": f"### 任务 1.1 {STATUS_COMPLETED}",
+    }
+    res_edit = check_task_status_guard(str(task_file), "edit_file", args_edit)
+    assert res_edit is not None
+    assert res_edit["decision"] == "ask"
+    assert "状态被直接修改" in res_edit["reason"] or "FastMCP" in res_edit["reason"]
+
+    # 2. write_file 尝试直接全量重写篡改状态
+    tampered_content = SAMPLE_TASK_CONTENT.replace(f"### 任务 1.1 {STATUS_PENDING}", f"### 任务 1.1 {STATUS_COMPLETED}")
+    args_write = {
+        "Content": tampered_content,
+        "Overwrite": True,
+    }
+    res_write = check_task_status_guard(str(task_file), "write_file", args_write)
+    assert res_write is not None
+    assert res_write["decision"] == "ask"
+
+

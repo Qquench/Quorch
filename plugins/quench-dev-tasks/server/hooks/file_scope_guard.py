@@ -370,6 +370,8 @@ MUTATING_TOOLS: Final[frozenset[str]] = frozenset({
     "multi_replace_file_content",
     "insert_content",
     "delete_file",
+    "write_file",
+    "edit_file",
 })
 
 READ_ONLY_TOOLS: Final[frozenset[str]] = frozenset({
@@ -389,6 +391,23 @@ def build_post_image(tool_name: str, args: dict, old_content: str) -> Optional[s
 
     if tool_name == "delete_file":
         return ""
+
+    if tool_name == "write_file":
+        content = args.get("Content")
+        if content is None or not isinstance(content, str):
+            return None
+        if bool(args.get("Append", False)):
+            return old_content + content
+        return content
+
+    if tool_name == "edit_file":
+        tc = args.get("Target")
+        rc = args.get("Replacement")
+        if tc is None or rc is None or not isinstance(tc, str) or not isinstance(rc, str):
+            return None
+        if tc == "" or old_content.count(tc) == 0:
+            return None
+        return old_content.replace(tc, rc)
 
     if tool_name == "replace_file_content":
         tc = args.get("TargetContent")
@@ -836,7 +855,7 @@ def main():
 
         tool_call = payload.get("toolCall", {})
         args = tool_call.get("args", {})
-        target_file = args.get("TargetFile") or ""
+        target_file = args.get("TargetFile") or args.get("Path") or ""
         tool_name = tool_call.get("name", "")
         conversation_id = adapter.extract_session_id(payload)
 
@@ -979,6 +998,7 @@ def main():
         desc = (
             args.get("Description")
             or args.get("Instruction")
+            or args.get("toolSummary")
             or "模型未在工具参数中填写修改理由"
         )
 

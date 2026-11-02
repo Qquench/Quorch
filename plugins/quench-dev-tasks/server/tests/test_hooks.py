@@ -403,3 +403,109 @@ def test_file_scope_guard_hook_logging(tmp_path):
     assert "target=" in content
 
 
+def test_file_scope_guard_edit_file_and_write_file_with_path(tmp_path):
+    """断言 file_scope_guard 支持 edit_file / write_file 使用 Path 与 toolSummary 字段。"""
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = agents_dir / "quench_stack.yaml"
+    stack_yaml.write_text("schema_version: '1.0'\nproject_name: 'PathSummaryProj'\n", encoding="utf-8")
+
+    ws_str = str(tmp_path)
+
+    # 1. edit_file 未纳管文件拦截，提取 toolSummary
+    res_edit = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "edit_file",
+            "args": {
+                "Path": str(tmp_path / "src" / "core.py"),
+                "Target": "old",
+                "Replacement": "new",
+                "toolSummary": "Refactor core module",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_edit["decision"] == "force_ask"
+    assert "Refactor core module" in res_edit["reason"]
+
+    # 2. write_file 未纳管文件拦截，提取 toolSummary
+    res_write = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "write_file",
+            "args": {
+                "Path": str(tmp_path / "src" / "new_file.py"),
+                "Content": "hello",
+                "toolSummary": "Create brand new file",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_write["decision"] == "force_ask"
+    assert "Create brand new file" in res_write["reason"]
+
+
+def test_stop_hook_circuit_breaker_and_guardrails(tmp_path):
+    """断言 Stop Hook 六重护栏与单次熔断续跑行为。"""
+    ws_str = str(tmp_path)
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = agents_dir / "quench_stack.yaml"
+    stack_yaml.write_text("schema_version: '1.0'\nproject_name: 'StopHookProj'\n", encoding="utf-8")
+
+    dev_tasks_dir = tmp_path / "docs" / "dev_tasks"
+    dev_tasks_dir.mkdir(parents=True)
+    task_file = dev_tasks_dir / "2026-10-31_test.md"
+    task_file.write_text("""# 2026-10-31 Sample
+### 任务 1.1 ⬜ 待确认 — 示例任务
+#### 【涉及文件】
+```
+[MODIFY] src/app.py
+```
+""", encoding="utf-8")
+
+    base_payload = {
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "conversationId": "test_conv_123",
+        "lastUserInput": "continue the tasks",
+        "workspacePaths": [ws_str],
+    }
+
+    # 1. 首次触发：处于连续接力（REVIEW）状态，返回 continue
+    res1 = run_hook(CONTEXT_INJECTOR, base_payload)
+    assert res1["decision"] == "continue"
+    assert "Autopilot relay" in res1["reason"]
+
+    # 验证登记了指纹文件
+    stop_guard_file = agents_dir / ".quench_stop_guard.json"
+    assert stop_guard_file.exists()
+    guard_data = json.loads(stop_guard_file.read_text(encoding="utf-8"))
+    assert any("test_conv_123" in k for k in guard_data.get("history", {}))
+
+    # 2. 第二次触发（同一指纹）：单次熔断生效，返回 allow
+    res2 = run_hook(CONTEXT_INJECTOR, base_payload)
+    assert res2 == {"decision": "allow"}
+
+    # 3. 护栏 2: terminationReason 非 NO_TOOL_CALL -> allow
+    res_other_reason = run_hook(CONTEXT_INJECTOR, {
+        **base_payload,
+        "terminationReason": "MAX_TOKENS",
+    })
+    assert res_other_reason == {"decision": "allow"}
+
+    # 4. 护栏 2: fullyIdle 为 False -> allow
+    res_not_idle = run_hook(CONTEXT_INJECTOR, {
+        **base_payload,
+        "fullyIdle": False,
+    })
+    assert res_not_idle == {"decision": "allow"}
+
+    # 5. 护栏 3: 子代理会话包含 [QUENCH-DISPATCH: -> allow
+    res_subagent = run_hook(CONTEXT_INJECTOR, {
+        **base_payload,
+        "lastUserInput": "[QUENCH-DISPATCH: RUNNER] Please implement task 1.1",
+    })
+    assert res_subagent == {"decision": "allow"}
+
+
+

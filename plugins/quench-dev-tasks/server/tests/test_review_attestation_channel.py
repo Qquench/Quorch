@@ -25,6 +25,9 @@ from server import (
     _check_audit_gate,
     _inject_harness_next_action,
     dev_tasks_refine_spec,
+    dev_tasks_status,
+    dev_tasks_confirm,
+    dev_tasks_propose,
 )
 from runtime_mode import (
     EffectiveModeSnapshot,
@@ -204,3 +207,101 @@ def test_harness_cas_mismatch_recomputes_and_reenvelopes(tmp_path):
     assert "harness_next_action" in res_data
     harness = res_data["harness_next_action"]
     assert "[recomputed after CAS mismatch]" in harness["reason"]
+
+
+def test_explicit_inverted_mode_confirm_allows_without_verdicts(tmp_path):
+    """显式 switch_mode='inverted' 下无 verdicts.jsonl 或无匹配记录时 dev_tasks_confirm 以 explicit_inverted_orchestrator 放行。"""
+    ws, log_path, cfg = _setup_ws(tmp_path)
+    if os.path.exists(log_path):
+        os.remove(log_path)
+    tf_name = "2026-10-31_test.md"
+    tasks = [
+        {
+            "id": "1.1",
+            "title": "Inverted task",
+            "affected_files": ["[MODIFY] src/core.py"],
+            "root_cause_and_goal": "G",
+            "type_contracts": "C",
+            "steps": ["1"],
+            "defensive_checks": ["-"],
+            "dod_commands": ["pytest"],
+        },
+    ]
+    dev_tasks_propose(ws, tf_name, tasks)
+    status_res = dev_tasks_status(workspace_root=ws, switch_mode="inverted")
+    assert status_res["effective_mode"] == "inverted"
+    assert status_res["mode_source"] == "explicit"
+
+    conf = dev_tasks_confirm(workspace_root=ws, task_file=tf_name, task_ids=["1.1"], action="confirm")
+    assert len(conf.get("updated", [])) == 1
+    assert conf["updated"][0]["id"] == "1.1"
+
+
+def test_auto_fallback_inverted_mode_confirm_blocked_when_no_record(tmp_path):
+    """auto_fallback 委派模式下无记录仍被 no_matching_record / log_missing 阻断。"""
+    ws, log_path, cfg = _setup_ws(tmp_path)
+    if os.path.exists(log_path):
+        os.remove(log_path)
+    tf_name = "2026-10-31_test.md"
+    tasks = [
+        {
+            "id": "1.1",
+            "title": "Auto fallback task",
+            "affected_files": ["[MODIFY] src/core.py"],
+            "root_cause_and_goal": "G",
+            "type_contracts": "C",
+            "steps": ["1"],
+            "defensive_checks": ["-"],
+            "dod_commands": ["pytest"],
+        },
+    ]
+    dev_tasks_propose(ws, tf_name, tasks)
+    with patch("server._is_external_api_available", return_value=False):
+        status_res = dev_tasks_status(workspace_root=ws)
+        assert status_res["effective_mode"] == "inverted"
+        assert status_res["mode_source"] == "auto_fallback"
+
+        conf = dev_tasks_confirm(workspace_root=ws, task_file=tf_name, task_ids=["1.1"], action="confirm")
+        assert conf.get("ok") is False
+        assert conf["reason"] in ("log_missing", "no_matching_record")
+
+
+def test_explicit_inverted_mode_confirm_blocked_when_matching_rework(tmp_path):
+    """显式 inverted 模式下若账本已存在匹配 verdict='rework' 记录仍被 record_rework 阻断。"""
+    ws, log_path, cfg = _setup_ws(tmp_path)
+    tf_name = "2026-10-31_test.md"
+    tasks = [
+        {
+            "id": "1.1",
+            "title": "Rework task",
+            "affected_files": ["[MODIFY] src/core.py"],
+            "root_cause_and_goal": "G",
+            "type_contracts": "C",
+            "steps": ["1"],
+            "defensive_checks": ["-"],
+            "dod_commands": ["pytest"],
+        },
+    ]
+    dev_tasks_propose(ws, tf_name, tasks)
+    status_res = dev_tasks_status(workspace_root=ws, switch_mode="inverted")
+    assert status_res["effective_mode"] == "inverted"
+    assert status_res["mode_source"] == "explicit"
+
+    target_path = os.path.join(ws, "docs", "dev_tasks", tf_name)
+    ref = canonical_artifact_ref(ws, target_path, "1.1")
+    now_wall = datetime.now(timezone.utc).isoformat()
+    _write_verdict_line(log_path, {
+        "job_id": "job_rwk",
+        "session_id": "s1",
+        "created_wall_utc": now_wall,
+        "updated_wall_utc": now_wall,
+        "context_files": [ref],
+        "source": "reviewer_client",
+        "verdict": "rework",
+        "status": "ok",
+    })
+
+    conf = dev_tasks_confirm(workspace_root=ws, task_file=tf_name, task_ids=["1.1"], action="confirm")
+    assert conf.get("ok") is False
+    assert conf["reason"] == "record_rework"
+

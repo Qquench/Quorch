@@ -1,203 +1,113 @@
-# 💡 Future Roadmap Ideas & Prospective Proposals (未来路线构想与灵感暂存)
+# 💡 Future Roadmap Ideas & Evaluated Ledger (未来路线构想与去留评估账本)
 
 <!-- quench-doc-meta: {"normative": false, "generates_tasks": false} -->
 
-> ⚠️ **Non-Normative Brainstorm Pool / 非当期排期承诺**  
-> This document serves as a dedicated holding area for future architectural brainstorms, exploratory RFCs, and prospective feature ideas not scheduled for the active version milestone.  
-> **Notice for Agents & Reviewer**: Ideas documented here represent exploratory proposals. Do NOT automatically decompose entries from this file into DevTasks until they are formally matured and scheduled into an active roadmap under `docs/roadmap/`.
+> ⚠️ **Non-Normative Brainstorm & Disposition Ledger / 非当期排期承诺**  
+> This document serves two purposes:
+> 1. **Active Candidate Pool (§1)**: High-value engineering directions that remain uniquely valuable on top of the **Gemini 4 Argon + `v1.25–v1.27` Standard/Inverted Dual-Mode + Antigravity 2.0** baseline.
+> 2. **Evaluated Ledger (§2)**: Historical ideas marked `✔️ Graduated` or `❌ Rejected / Superseded` (retained intentionally so future AI agents and maintainers never re-propose dead-end designs).
+>
+> **Notice for Agents & Reviewer**: Do NOT automatically decompose entries from this file into DevTasks until they are formally scheduled into a versioned roadmap under `docs/roadmap/`.
 
 ---
 
-## 🧭 How to Use This Idea Pool (使用指引)
+## 🧭 Ledger Maintenance Rules (账本维护准则)
 
-- **Adding a new idea**: When a spontaneous idea or future feature comes up that does not belong in the current milestone, simply append a new section below with:
-  - `## YYYY-MM-DD — <Idea Title>`
-  - **Motivation & Background (背景与契机)**
-  - **Why not now? (为什么当期不做)**
-  - **Key Architecture & Preconditions (核心构想与前置条件)**
-- **No catalog maintenance**: You do NOT need to maintain a separate README index or table for this file.
-- **Graduating an idea**: When an idea matures and is scheduled into a release cycle, move it to `docs/roadmap/` as part of that stage's roadmap.
-- **Rejecting an idea**: If an idea is evaluated and rejected, mark it as `❌ Rejected: <Reason>` and keep the record to prevent future AI agents or maintainers from repeatedly revisiting the same dead-end.
+- **Adding a new idea**: Append under **§1 Active Candidate Pool** with `### YYYY-MM-DD — <Idea Title>`, **Motivation**, **Target Scope**, and **Guardrails**.
+- **Graduating an idea**: When scheduled into `docs/roadmap/vX.YY_*.md` and delivered, move it to **§2 Evaluated Ledger** with `✔️ Graduated (vX.YY)`.
+- **Rejecting / Superseding an idea**: Mark as `❌ Rejected / Superseded (YYYY-MM-DD): <Reason>` in **§2 Evaluated Ledger** and preserve the rationale.
 
 ---
 
-## 🔀 Hybrid Reviewer: Native Subagent & External API Dynamic Routing
-*(Originally drafted for Stage 5 exploratory research)*
+## 1. Active Candidate Pool (待演进高价值方向 — Post-Gemini-4 & Antigravity 2.0)
 
-### 1. Motivation & Context
-Developers frequently have access to multiple complementary reviewer capabilities:
-1. **Host-Native Subagents**: Built-in IDE agents (Antigravity, Claude Code) with native access to IDE workspace state, browser simulators, and zero external API token costs.
-2. **External / Local Deep Reasoning APIs**: Frontier thinking models (DeepSeek-Reasoner / Flash, OpenAI o-series, local Ollama models) with strong deadlock detection and exhaustive branch reasoning.
+### 1.1 [P1] Progressive Governance Tier (`minimal` Mode) & `frozen_paths` Overlay (渐进式轻量治理档位与冻结路径层)
+*(Refined from 2026-09-21 & 2026-10-07 proposals)*
 
-The current system relies on a static priority waterfall (`strategy_order: ["subagent", "engine", "manual"]`). A future dynamic router would allow intelligent, context-aware traffic splitting.
-
-### 2. Core Architecture: Dynamic Reviewer Router
-- **Task-Aware Semantic Routing**:
-  - *UI / Visual / Accessibility Tasks*: Route preferentially to native subagents with DOM/screenshot inspection capabilities.
-  - *Concurrency / State Machine / Crypto Core*: Route to external thinking reasoning models to exhaustively probe race conditions and edge states.
-  - *Documentation / Configuration Tweaks*: Rapid pass-through or lightweight local check.
-- **Red-Team Duel (Adversarial Cross-Validation)**:
-  - For high-risk refactorings (`[P0-CRITICAL]`), employ host subagents for readability and architectural design review, combined with external reasoning models acting as an adversarial red-team to search for boundary flaws before task checkout.
-- **Quota & Cost Elasticity**:
-  - Dynamically fallback between host quotas and external API tokens when encountering 429 rate limits or context window exhaustion.
+- **Motivation & Background (背景与契机)**:
+  - Antigravity 2.0 now provides `/plan`, `/grill-me`, and Terminal Sandbox, **but still lacks task-scoped dynamic file-whitelist enforcement and Git-diff DoD physical verification**.
+  - However, forcing all six verbose Markdown fields on small tasks creates high output-token friction—especially in `inverted` mode where flagship **Gemini 4 Argon** authors the task spec in the main session—and raises onboarding barriers for external projects.
+- **Key Architecture (核心构想)**:
+  - **`governance.level` in `quench_stack.yaml`**:
+    - `strict` (default for `quorch` self-governance): Full six core fields + AST feasibility lint + strict audit gate.
+    - `minimal` (recommended default for downstream business repos / small fixes): Requires **only the two physical enforcement fields**—`[Affected Files] / 【涉及文件】` and `[DoD Verification Commands] / 【DoD 验证命令】`—turning the four narrative fields optional while preserving **100% of `FileScopeGuard` and `dev_tasks_complete` physical guarantees**.
+  - **`frozen_paths` Immutable Overlay**: Optional glob list in `quench_stack.yaml` (e.g., lockfiles, protocol snapshots, production migrations) where `FileScopeGuard` enforces hard `deny` regardless of active task scope unless explicitly unlocked by the human developer.
 
 ---
 
-## 🛡️ Cross-Language Zoning Governance & Anti-Degradation Guards
-*(Originally drafted for multi-language enterprise codebases)*
+### 1.2 [P1] Anti-Reward-Hacking Deterministic Diff Audit (防伪造完工：测试断言净增量与 `skip` 拦截)
+*(Distilled from Cross-Language Zoning & Cost/Hardening Epic A)*
 
-### 1. Motivation & Context
-File-path whitelists alone do not prevent semantic degradation inside allowed files:
-1. AI models may silently prune error handling branches or weaken assertions during refactoring.
-2. AI may lower assertion strictness in unit tests to artificially turn DoD green.
-3. AI tends to rewrite multi-thousand-line files from scratch, accidentally destroying concurrency locks and performance optimizations.
-
-### 2. Core Architecture: Four-Zone Model & Frozen Overlay
-- **`Z-KERNEL` (Logic Microkernel)**: Core state machines, critical algorithms. Rule: error handling branches and assertion counts must never net-decrease.
-- **`Z-CONTRACT` (Interface Layer)**: Public APIs, Protocol/Trait definitions, `.d.ts`. Rule: breaking changes mandate companion migration tests and task records.
-- **`Z-TEST` (Adversarial Test Suite)**: Unit and integration tests. Rule: test coverage and assertion strength must not be diluted.
-- **`Z-GLUE` (Glue & Wiring)**: CLI wiring, adapter glue. Rule: business logic expansion inside glue code is intercepted.
-- **`⊕ FROZEN` (Frozen Overlay)**: Machine-generated code, lockfiles. Rule: immutable, any write triggers physical DENY.
-- **Pluggable Adapters (`LanguageZoningAdapter`)**: AST-based auditing for Python and TypeScript, with lexical fallback for Go, Rust, and C++.
+- **Motivation & Background (背景与契机)**:
+  - In both `inverted` mode (where lightweight `Flash` subagents act as code runners) and `standard` mode, agile execution models under pressure to pass DoD tests may weaken existing assertions, delete failing `assert` lines, or decorate tests with `@pytest.mark.skip` / `xfail`.
+- **Key Architecture & Scope Restraint (核心构想与克制边界)**:
+  - **Deterministic Static Diff Gate (Adopt)**: During `dev_tasks_complete` Git diff auditing on test files, enforce **non-negative assertion delta (`added_assertions >= removed_assertions`)** unless an explicit `test_evidence` rationale is supplied, and block newly introduced unconditional `skip` / `xfail` markers. Zero LLM token cost, sub-50ms execution.
+  - **Runtime Semantic Mutation Testing (Defer)**: Automatically mutating production AST and re-running `pytest` on every `complete` is intentionally excluded from the synchronous lifecycle due to latency and Windows file-lock risks.
 
 ---
 
-## 2026-09-21 — Cross-Host Hard Interception Bridge & Universal Hook Proxy (跨宿主硬性拦截桥接与通用 Hook 代理)
+### 1.3 [P2] Standardized Packaging (`uvx quorch init`) & Thin `ClaudeCodeAdapter` (标准插件化一键分发与同构 Hook 宿主薄适配)
+*(Refined from 2026-09-21 Onboarding & Cross-Host proposals)*
 
-### 1. Motivation & Background (背景与契机)
-当前在 Antigravity 宿主环境下，系统借助原生 `PreToolUse` Hook 实现了针对未授权文件修改的真实交互式弹窗阻断（`force_ask`）。然而在 Cursor, Windsurf, Claude Code 等外部 IDE 环境中，目前主要退化为依托 `.cursorrules` / `.mdc` 等提示词软约束与 Git 提交前的后置防护 (`git_pre_commit_guard.py`)。缺乏跨编辑器的统一中途物理拦截能力，导致不同客户端用户的安全防护体验存在非均质性。
-
-### 2. Why not now? (为什么当期不做)
-- Antigravity 是当前核心且深度实战验证的主力研发环境，现有方案已满足日常生产闭环。
-- 各大 AI 编辑器的拦截与插件生态规范仍在剧烈迭代（例如 Cursor 尚未开放对等的外部进程实时 Tool Call 阻断 Hook），过早深入私有逆向会导致巨大的兼容性负担与脆弱维护成本。
-
-### 3. Key Architecture & Preconditions (核心构想与前置条件)
-- **Universal Pre-Tool Proxy / LSP Shim**:
-  - 构建轻量级本地文件代理层或语言服务器（LSP）拦截 Shim，在任何外部工具触发写入前透明捕获 I/O 事件并向 `FileScopeGuard` 请求鉴权。
-- **Host Extension Bridge**:
-  - 开发通用的轻量 VS Code / Cursor 扩展插件，通过 IPC 与本地 Quench FastMCP 进程心跳同步，将文件越界事件投递至编辑器原生 Modal 确认窗口。
-- **前置依赖**: 跨平台进程间通信 (IPC) 协议抽象与低开销文件系统监听机制。
+- **Motivation & Background (背景与契机)**:
+  - Current external project setup still relies on `setup_workspace.py` path templating. Aligning with PyPI `[project.scripts]` (`uvx quorch init --minimal`) and Antigravity 2.0's native plugin layout (`~/.gemini/config/plugins/quench-dev-tasks/`) enables zero-boilerplate adoption across repositories.
+- **Key Architecture (核心构想)**:
+  - **`quorch init`**: Generates a clean `.agents/quench_stack.yaml` + minimal `AGENTS.md` pointer without polluting downstream repos with absolute-path scripts.
+  - **`ClaudeCodeAdapter` Only (No Universal FS/LSP Shim)**: Restrict cross-host hard interception adapters strictly to hosts that natively expose `PreToolUse` / `Stop` JSON stdin/stdout hooks (such as Claude Code `.claude/settings.json`), reusing 95% of `file_scope_guard.py` and `context_injector.py`.
 
 ---
 
-## 2026-09-21 — DAG-Based Concurrency & Multi-Task State Machine (基于有向无环图的并发任务状态机与资源隔离)
+## 2. Evaluated Ledger: Graduated & Rejected / Superseded Ideas (已评估历史账本)
 
-### 1. Motivation & Background (背景与契机)
-当前 `state_machine.py` 严格基于 `filelock` 实现跨进程单核排他锁，硬性保证“同一时刻全项目仅有一项任务处于 `In_Progress`”。对于单开发者结对编程而言，这构成了极强的心智防线；但在大型企业协作场景或多 Subagent 树状并行开发（如前端、后端、数据模型互不依赖的模块同时推进）时，该串行设计构成了自动化吞吐瓶颈。
-
-### 2. Why not now? (为什么当期不做)
-- 现阶段重心是单兵作战的“防翻车”与“零越界”，全局互斥锁能够杜绝所有死锁与状态竞态，可靠性收益最高。
-- 引入并发任务依赖管理将显著复杂化状态转移矩阵与冲突回滚逻辑。
-
-### 3. Key Architecture & Preconditions (核心构想与前置条件)
-- **Disjoint File Set Locking (不相交文件集合锁)**:
-  - 检出任务时计算任务间 `[Affected Files]` 的交集。若两个已确认任务的作用域集合不重叠（$S_A \cap S_B = \emptyset$），允许不同的 Worker 子代理并行 Checkout 执行。
-- **DAG Dependency Graph & Conflict Detection**:
-  - 任务元数据支持声明 `depends_on: [Task_ID]`，构建严格拓扑序的有向无环图执行流水线。
-- **Phase Merge Gate (阶段合并门禁)**:
-  - 当并行分支任务汇合时，触发统一的回归测试与 Git 冲突消解门禁。
+### ✔️ 2026-10-31 — Dual-Mode AuditGate Alignment, Single-Source Plugin Mounting & Hook Hardening — Graduated (v1.28)
+- **Status**: **✔️ Graduated (v1.28)** — Delivered in roadmap `docs/roadmap/v1.28_dual_mode_audit_gate_and_agy2_single_mount_roadmap.md`.
+- **Delivered Capabilities**:
+  1. **Dual-Mode AuditGate Alignment**: Added `explicit_inverted_orchestrator` to `AuditGateReason` and `SAFETY_KEY_DOMAINS` (18 literals SSOT); enabled explicit inverted mode audit sign-off with audit logging and session bypass guardrails.
+  2. **Job Supervisor GC & Hard Ceiling**: Defined `POLL_WAIT_MAX_S_HARD_CEILING = 25.0` in `tool_surface_constants.py`; added opportunistic `gc_terminal_jobs()` during new task submissions in `ReviewerJobSupervisor`.
+  3. **Single-Source Plugin Deduplication**: Added `is_workspace_plugin_mounted` and auto-heal stripping of redundant `.agents/hooks.json` and `.agents/mcp_config.json` while preserving third-party configs.
+  4. **Hook & Rules Hardening**: Extended `file_scope_guard` to intercept `edit_file`, `write_file`, and `run_command` with full `build_post_image` simulation; added 6-guardrail 1-shot circuit-breaker `Stop` Hook in `context_injector.py`; added `plugins/quench-dev-tasks/rules/AGENTS.md` with 3-way sentinel synchronization.
 
 ---
 
-## 2026-09-21 — Minimal Governance Tier & One-Click Distribution (分级治理门槛与单命令分发包)
-
-### 1. Motivation & Background (背景与契机)
-Quench 强制推行的六大核心字段规范（涉及文件、缺陷根因、签名契约、步骤指引、边缘校验、DoD命令）极大保障了高风险复杂业务的交付质量，但对初阶开源使用者和日常极小粒度修补（如修复单点文本、调整常量值）而言，门槛较高、流程偏重，容易在开源社区初次体验阶段产生认知摩擦。
-
-### 2. Why not now? (为什么当期不做)
-- 治理套件首要目标是立规矩，先树立“绝对严谨、无死角防御”的技术标杆，避免因过早放松校验而削弱防御护城河。
-- 模板与脚手架需等待底层各适配器（Adapters）进一步稳定后再行固化。
-
-### 3. Key Architecture & Preconditions (核心构想与前置条件)
-- **Progressive Governance Tier (渐进式治理级别)**:
-  - 在 `quench_stack.yaml` 中支持配置治理模式：
-    - `strict`: 完整六大字段 + 刚性 DoD 断言审计 + AST 探查；
-    - `minimal`: 仅强制约束 `[Affected Files]` 白名单与 `[DoD Verification Commands]`，其余字段转为选填，降低轻度任务负担。
-- **One-Click Package Distribution (开箱即用分发)**:
-  - 自动化构建并发布至 PyPI，允许外部开发者直接执行 `uvx quorch --init` 或 `pipx run quorch init` 一键初始化任何第三方技术栈项目。
-- **Interactive TUI / CLI Wizard**:
-  - 增强 `quorch` CLI 交互式向导，支持通过键盘方向键与问答一键生成符合规范的标准任务草案。
+### ❌ 2026-10-07 — Antigravity Native Pro Subagent Reviewer Integration (从 Flash 主会话向上唤起原生 Pro/Argon 子代理审查)
+- **Status**: **❌ Rejected / Superseded (2026-10-31)** — Superseded by `v1.25` **Inverted Mode (`inverted`)**.
+- **Evaluation & Empirical Verification (`2026-10-31`)**:
+  1. **Model Lineup Reality**: Gemini 4 shipped **Gemini 4 Argon** without a "Gemini 4 Pro" tier.
+  2. **Live Antigravity 2.0 Subagent Probe (`2026-10-31`)**:
+     - `invoke_subagent` `Model` enum remains strictly `["inherit", "flash_lite", "flash", "pro"]` (and custom subagent `.md` YAML frontmatter `model:` supports the exact same four values)—there is **no `"argon"` enum option**.
+     - Controlled runtime probing confirmed that `invoke_subagent(..., Model="pro")` still routes to the legacy **Gemini 3.x Pro** tier (`input_tokens: 29,499` matching `Model="flash"`'s `29,480` tokenizer framing rather than Argon's `28,954`, with ~170s single-turn latency), so **a `Flash` main session still cannot invoke `Argon` upward as a Reviewer subagent**.
+     - Conversely, when **Argon** is the main session, `invoke_subagent(..., Model="inherit")` **does cleanly spawn Argon subagents** (`input_tokens: 28,954`), and `Model="flash"` spawns fast `Flash` worker/research subagents.
+  3. **Resolution**: `v1.25` Inverted Mode (Argon as Main Session orchestrator/reviewer + downward `Model="flash"` Runner/Research subagents) achieves the exact `$0` extra API cost goal cleanly without needing upward subagent elevation or custom subagent verdict-signing tools. Existing `reviewer_channel="host_subagent"` and `agents/reviewer/agent.md` remain frozen as minimal compatibility stubs only.
 
 ---
 
-## 2026-09-23 — Microkernel Decoupling & Inversion of Control: Zero-API-Cost Pure Governance (微内核彻底解耦与控制权反转：零额外 API 费用的纯粹治理微内核)
-
-### 1. Motivation & Background (背景与契机)
-随着现代 AI IDE（如 Antigravity / Claude Code）普及原生 Subagent 多智能体协作并提供包月/包年订阅套餐，开发者倾向于将任务规划者（Reviewer）与工程搬砖者（Runner）全部配置为 IDE 内生子代理，实现 $0 额外第三方模型 API 账单。
-在此背景下，Quorch 服务端若继续强耦合主动出站 HTTP API 客户端，将导致逻辑冗余并割裂开发者已付费的 IDE 内置配额。需要推演系统从“代理执行编排者”向“纯粹任务治理微内核（Pure Governance Kernel）”的彻底解耦路径。
-
-### 2. Why not now? (为什么当期不做)
-- 当前 Stage 5 首要目标是实现厂商中立性（OpenAI 兼容协议标准化）与异步架构审查支持，现有基于 API 的外部 Reviewer 通路已通过 167 项完整测试验证，稳定性最高。
-- 剥离或降级出站调用逻辑属于协议拓扑维度的根本性架构演进，需先沉淀完备的子代理指令契约与租约回收机制，避免激进破坏当期交付节奏。
-
-### 3. Key Architecture & Preconditions (核心构想与前置条件)
-- **Control Inversion & Return Contract Seam (控制权反转与返回契约 Seam)**:
-  - 架构抽象点收敛于 `dev_tasks_refine_spec` 的返回契约（Discriminated Union）：
-    - `mode: subagent`: 返回 `dispatch_directive`（结构化调度指令，由主代理/IDE 分派子代理，零出站请求）；
-    - `mode: engine`: 返回 `inline_reasoning`（Quorch 接管多轮推理循环并流式返回，即现状）；
-    - `mode: manual`: 返回 `manual_handoff`（交接卡文本与待办指引）。
-- **Headless Microkernel Architecture (无头微内核架构)**:
-  - 状态机（FileLock 互斥锁）、六大字段校验器、FileScopeGuard 物理拦截、物理可行性门禁与 Git 审计构成不可变内核，绝不感知任何拓扑 `mode` 分支或厂商差异；出站网络请求完全下沉至可插拔扩展层。
-- **Lease Timeout & Deadlock Reaper (租约超时与僵尸任务回收器)**:
-  - 在 IDE 子代理调度并发域中，为 `In Progress` 检出引入租约生命周期（`lease_expires_at`），防止子代理意外崩溃后全局互斥锁永久死锁。
-- **Task Directory Physical Defense & Bypass Audit (任务目录物理防线与旁路拦截)**:
-  - 封堵具备文件编辑权限的内生子代理直接通过 `write_to_file` 绕过 `dev_tasks_propose` 篡改任务的漏洞，确保所有任务创建与流转强制通过内核门禁。
+### ❌ Stage 5 Draft — Hybrid Reviewer: Native Subagent & External API Dynamic Routing (内外混合动态路由与双盲红队)
+- **Status**: **❌ Rejected (2026-10-31)** — Unnecessary complexity under the explicit `Standard` vs `Inverted` binary architecture.
+- **Reason**: `Standard` mode (`Flash` main + `external_api` `ReviewerClient` with `v1.26` 64-token aligned prefix caching) and `Inverted` mode (`Argon` main + `Flash` subagents) already provide clear, deterministic, user-selectable topologies. Adding a third dynamic router or dual-blind multi-reviewer voting doubles latency/cost and muddies failure attribution.
 
 ---
 
-## 2026-09-24 — Reviewer Live Heartbeat & Streaming TUI Watcher CLI (Reviewer 思考心跳前台实时透传与轻量 TUI 监视器)
-
-### 1. Motivation & Background (背景与契机)
-资深架构 Reviewer 在执行架构挑刺（`critique`）与审计复核（`audit`）时，通常需要进行数十秒乃至数分钟的高强度深层思维链（CoT）推理。
-目前 FastMCP 服务端内部已完整实现了每秒级进度心跳（`ctx.info()`）并以时间戳严格实时落盘至 `.agents/logs/reviewer/` 目录。
-然而，在当前的现代 AI IDE（如 Antigravity / Cursor）中，MCP Tool Call 协议在客户端交互视窗中默认表现为折叠状态卡片（仅展示旋转指示器与工具名，等待工具整体执行完毕后一次性渲染输出）。
-这导致开发者在前台无法直观感知 Reviewer 的实时推理心跳与 token 消耗节奏，极易引发“进程是否假死、断联或死锁”的焦虑感与不透明感。
-
-### 2. Why not now? (为什么当期不做)
-- 底层推理心跳已 100% 毫秒级流式落盘到 `.agents/logs/reviewer/` 目录，通过分屏终端 `Get-Content -Wait` 或在编辑器中打开日志文件即可实时查阅，核心能力与链路完全闭环。
-- IDE 客户端对于 MCP Tool Call 进度事件的 UI 渲染能力正在上游快速演进，过早在插件层硬编码私有桌面通知或伪交互界面，维护成本高且容易与上游原生演进冲突。
-
-### 3. Key Architecture & Preconditions (核心构想与前置条件)
-- **`quorch reviewer watch` CLI (独立轻量 TUI 监视器)**:
-  - 在 `quorch` CLI / `quench-dev-tasks` 中提供 `reviewer watch` 子命令，依托 `rich` 或原生 ANSI 转义序列渲染终端轻量级实时仪表盘。
-  - **自动日志寻址**: 自动嗅探工作区 `.agents/logs/reviewer/` 目录下最新的 active 日志（支持匹配当前会话的 `latest-<session_id>.log`），通过非阻塞流式 reader 持续读取。
-  - **实时度量指标展示**:
-    - 当前推理耗时（秒 / 动态计时器）；
-    - 累计消耗 token 估算与推理速率；
-    - 最新思考流片段摘要预览（CoT preview window，自动滚动展示最近 3 行思考动态）；
-    - 状态指示器（🟢 思考中 / 🔵 工具调用中 / 🟡 子进程扩展中 / ✅ 审核完成）。
-- **IDE 终端自动附着联动 (IDE Terminal Split Hook)**:
-  - 在发起 `dev_reviewer_submit` 或规划前，由 Agent 或 Hook 命令一键在 IDE 底部或侧边拉起一个专属观察终端（Split Terminal）并自动运行 `quorch reviewer watch`，无需开发者手动编写命令。
-- **前置依赖**: 轻量级终端流式格式化支持（零繁重依赖），跨平台文件变动监听机制。
-
-
+### ❌ 2026-09-24 — `quorch reviewer watch` Streaming TUI & VS Code Status Bar Extension (独立 TUI 监视器与底边状态栏扩展)
+- **Status**: **❌ Rejected / Superseded (2026-10-31)** — Superseded by `v1.24` native MCP `notifications/progress` + Antigravity 2.0 Auxiliary Pane.
+- **Reason**:
+  1. `v1.24` delivered `ProgressBridge` (`notifications/progress`) in-place tool-card updates plus 20s long-polling (`_clamp_wait` 25s ceiling).
+  2. Antigravity 2.0 is a standalone Electron desktop app (using `sidecar.json` Auxiliary Pane web panels rather than VS Code `vscode.window.createStatusBarItem`) and natively surfaces **Subagents, Background Tasks, Terminals, and Files Changed** in its right-hand Auxiliary Pane.
+  3. In `inverted` mode, Argon reasons directly in the main session stream with zero background polling opacity.
 
 ---
 
-## 2026-10-07 — Antigravity Native Pro Subagent Reviewer Integration & Elastic Governance (Antigravity 原生 Pro Subagent 审查接入与弹性治理架构)
+### ❌ 2026-09-21 — Single-Worktree DAG Concurrency & Disjoint File Set Locking (`S_A ∩ S_B = ∅`) (单工作树并发状态机与不相交文件集合锁)
+- **Status**: **❌ Rejected / Superseded (2026-10-31)** — Superseded by Antigravity 2.0 native `invoke_subagent(Workspace="share" | "branch")`.
+- **Reason**: Running concurrent writers inside a single shared working tree corrupts `pytest` execution isolation and `reconcile_workspace_against_whitelist` baseline snapshots even when touched file sets are disjoint. Antigravity 2.0 now natively provides isolated Git worktrees/clones via `Workspace: "share"` and `Workspace: "branch"` plus `/teamwork`, solving parallel isolation at the OS/VCS layer while keeping `state_machine.py` (`INV-1`) simple and race-free.
 
-### 1. Motivation & Background (背景与契机)
-- **外部 API 妥协背景**：当前阶段受限于宿主环境中 Gemini Pro 系列模型代际尚未更新、单次长上下文与深层推理配额消耗等现实制约，系统被迫采用外部 API（`reviewer_engine.py` 外部网络 egress）作为 Reviewer 审查通道。
-- **内生体验诉求**：随着下一代 Gemini Pro 模型的发布与可用（推理深度、响应延迟与用量消耗均满足生产级基准），开发者期望彻底摆脱外部第三方 API 账单与外部网络配置，直接通过 Antigravity 原生直观的 Subagent 功能（`invoke_subagent` 且 `Model: "pro"`）无缝调度 Pro 模型充当架构 Reviewer。
-- **Quench 治理价值与现实摩擦权衡**：
-  - *实际工程价值*：物理级收敛 AI 破坏性修改半径（白名单硬拦截）、状态机磁盘化抗长会话上下文退化、解耦“自写自审”的认知偏见、强约束 DoD 自动化测试交付。
-  - *固有局限与负面影响*：敏捷性与心智负担过重（微小任务流程过重、杀鸡用牛刀）、多 Agent 等待与全局排他锁脆弱性（INV-1）、常驻规则提示词所征收的上下文“规则税”（Rule Tax）、复杂动态重构时的规约僵化。
+---
 
-### 2. Why not now? (为什么当期不做)
-- **底层模型前置依赖缺失**：下一代 Gemini Pro 系列模型在当前宿主环境中尚未正式推出，内生旗舰级推理底座尚不完备。
-- **外部引擎通道成熟闭环**：现行基于 OpenAI 兼容协议的外部 ReviewerClient 通道稳定可靠，已通过 167+ 项测试用例保障，足以支撑日常架构攻防。
-- **IDE Subagent 协议演进中**：Antigravity 等现代 AI IDE 的 Subagent 生命周期与通信规范仍在快速迭代，过早硬编码私有交互接口可能造成后续兼容脆弱性。
+### ❌ 2026-09-21 — Universal Pre-Tool LSP / Filesystem Interception Shim & Interactive CLI Task Wizard (通用文件系统拦截代理与 CLI 建单向导)
+- **Status**: **❌ Rejected (2026-10-31)** — Over-engineered / superseded by host-native capabilities.
+- **Reason**: Intercepting OS/LSP file writes for hosts without lifecycle hooks creates brittle false positives against compilers, formatters, and Git operations; Antigravity 2.0 natively provides Terminal Sandbox + `PreToolUse` hooks (and non-hook hosts remain covered by `git_pre_commit_guard.py` + `reconcile_workspace_against_whitelist`). Interactive requirement clarification is natively handled by Antigravity 2.0 `/plan` and `/grill-me`.
 
-### 3. Key Architecture & Preconditions (核心构想与前置条件)
-- **Native Pro Subagent 接入与审计门禁凭证闭环 (Audit Gate Credential Seam)**:
-  - *核心规格已就绪*：仓库内已定义 `plugins/quench-dev-tasks/agents/reviewer/agent.md`，`invoke_subagent` 原生支持 `Model: "pro"`。
-  - *门禁日志闭环*：当前 `dev_tasks_confirm` 强依赖 `.agents/logs/reviewer/verdicts.jsonl` 的物理审计日志。未来需打通两类凭证沉淀路径之一：
-    1. *工具内写入*：为 Reviewer Subagent 配置轻量审计工具（如 `dev_reviewer_record_verdict`），完成审查后直接写入标准裁决日志；
-    2. *主模型代录*：主模型在接收 Pro Subagent 的结构化评审意见后，通过 MCP 工具确认入库，使 Pre-Confirm 审计门禁能够无缝校验放行。
-- **单出口规范与纪律拓宽 (INV-9 & §6 Discipline Evolution)**:
-  - 在 `AGENTS.md` 与 `dev-tasks-discipline.md` 中拓宽合法审查源定义，将“宿主原生派生且指定为 Pro 模型的独立 Subagent”正式纳入与外部 API 并列的合规一级审查通道，消除与 INV-9（Single Provider Egress）的条款冲突。
-- **治理弹性分级（Dynamic Elastic Governance）消解摩擦**:
-  - 为避免过度流程化对轻度任务的敏捷性伤害，在 `quench_stack.yaml` 中支持弹性门禁分级：
-    - *Fast-Track 极简快车道*：低风险文档、配置、微小 Typo 仅约束涉及文件与基础单测，免除重型六字段审查与 Pro 轮询；
-    - *Full-Tier 核心攻防*：对涉及核心状态机、并发安全与高风险架构变更，强制唤醒 Pro Subagent 实施边缘防御检查与架构审查。
-- **前置依赖**: 下一代 Gemini Pro 模型在 Antigravity 环境下正式可用；Antigravity Subagent 稳定性与消息返回结构固化。
+---
+
+### ✔️ 2026-09-23 — Microkernel Decoupling, Control Inversion & Lease Reaper (微内核解耦、控制权反转与僵尸租约回收)
+- **Status**: **✔️ Graduated (`v1.06`, `v1.08`, `v1.25–v1.27`)**.
+- **Delivered Summary**: Fencing-token CAS task leases (`manifest_lease.py`), multi-dimensional liveness reaper (`reaper.py`), task-directory physical protection (`file_scope_guard.py`), two-way `.agents/.quorch/manifest.json` interlock, and `standard`/`inverted` Autopilot harness (`autopilot_harness.py`) are all in production.

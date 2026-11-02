@@ -31,7 +31,9 @@ import context_injector
 from context_injector import (
     _HALT_STATES,
     _RELAY_STATES,
+    _STOP_HOOK_RELAY_STATES,
     _build_reminder,
+    _handle_stop_event,
     _resolve_harness_baton,
     main,
 )
@@ -169,3 +171,107 @@ def test_discipline_doc_unified_on_important():
     assert "> [!NOTE]" not in content
     assert "> [!IMPORTANT]" in content
     assert "Continuous Relay Non-Braking Invariant" in content
+
+
+def test_handle_stop_event_guardrails_unit(tmp_path: Path, monkeypatch):
+    """单元测试直接校验 _handle_stop_event 的六重护栏与单次熔断机制。"""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    (agents_dir / "quench_stack.yaml").write_text("project_name: test\ndev_tasks_dir: docs/dev_tasks\n", encoding="utf-8")
+    dev_tasks_dir = ws / "docs" / "dev_tasks"
+    dev_tasks_dir.mkdir(parents=True)
+    task_file = dev_tasks_dir / "test_task.md"
+    task_file.write_text("### 任务 1.1 ⬜ 待确认 — 测试\n", encoding="utf-8")
+
+    # 1. 缺失 terminationReason -> allow
+    assert _handle_stop_event({"workspacePaths": [str(ws)]}) == {"decision": "allow"}
+
+    # 2. terminationReason 非 NO_TOOL_CALL -> allow
+    assert _handle_stop_event({
+        "terminationReason": "MAX_TOKENS",
+        "fullyIdle": True,
+        "workspacePaths": [str(ws)],
+    }) == {"decision": "allow"}
+
+    # 3. fullyIdle 为 False -> allow
+    assert _handle_stop_event({
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": False,
+        "workspacePaths": [str(ws)],
+    }) == {"decision": "allow"}
+
+    # 4. lastUserInput 含 [QUENCH-DISPATCH: -> allow
+    assert _handle_stop_event({
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "lastUserInput": "[QUENCH-DISPATCH: RUNNER] proceed",
+        "workspacePaths": [str(ws)],
+    }) == {"decision": "allow"}
+
+    # 5. 非 quench 项目 -> allow
+    non_quench_ws = tmp_path / "non_quench"
+    non_quench_ws.mkdir()
+    assert _handle_stop_event({
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "workspacePaths": [str(non_quench_ws)],
+    }) == {"decision": "allow"}
+
+    # 6. 接力态下的首次与第二次单次熔断
+    base = {
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "conversationId": "sess_unit_test",
+        "workspacePaths": [str(ws)],
+    }
+    monkeypatch.setattr(
+        context_injector,
+        "_resolve_harness_baton",
+        lambda *args, **kwargs: ("CHECKOUT", "检出下一任务"),
+    )
+    res_first = _handle_stop_event(base)
+    assert res_first["decision"] == "continue"
+    assert "Autopilot relay 'CHECKOUT' active" in res_first["reason"]
+
+    # 第二次必熔断放行
+    res_second = _handle_stop_event(base)
+    assert res_second == {"decision": "allow"}
+
+
+def test_main_routing_for_stop_event(tmp_path: Path, monkeypatch):
+    """端到端模拟 main() 接收 Stop Hook 时的分流输出。"""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    (agents_dir / "quench_stack.yaml").write_text("project_name: test\ndev_tasks_dir: docs/dev_tasks\n", encoding="utf-8")
+    dev_tasks_dir = ws / "docs" / "dev_tasks"
+    dev_tasks_dir.mkdir(parents=True)
+    task_file = dev_tasks_dir / "test_task.md"
+    task_file.write_text("### 任务 1.1 ⬜ 待确认 — 测试\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        context_injector,
+        "_resolve_harness_baton",
+        lambda *args, **kwargs: ("CONFIRM", "推进确认"),
+    )
+
+    stdin_payload = json.dumps({
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "conversationId": "sess_main_test",
+        "workspacePaths": [str(ws)],
+    })
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin_payload))
+
+    captured_stdout = io.StringIO()
+    monkeypatch.setattr("sys.stdout", captured_stdout)
+
+    main()
+
+    output = json.loads(captured_stdout.getvalue())
+    assert output["decision"] == "continue"
+    assert "CONFIRM" in output["reason"]
+
