@@ -1,45 +1,46 @@
 # Plan: Reviewer Anti-Anchoring & Runtime Verification Architecture
 # (Reviewer 防锚定与运行时反向探针治理蓝图)
 
-> **版本**: v1.28-proposal / Architecture Blueprint  
-> **状态**: 📋 Pending Blueprint / 提案阶段  
+> **版本**: v1.29-approved / Architecture Roadmap & Implementation Blueprint  
+> **状态**: ✅ Approved Roadmap / 已通过评审（经外部 Reviewer 模型审查仲裁）  
 > **上下文与触发场景**:  
 > Quorch 最初是为辅助精密制造执行系统（MES）开发而设计的治理框架。但在多 Agent 协同演化中，发现主 Agent（敏捷执行模型，如轻量级快速模型）在向评审模型（Reviewer）或外部推理引擎咨询时，存在普遍的“事实-推断坍缩”与“预设性提问注入”。  
-> 本规划旨在评估此类认知偏置在 MES 等经典软件工程与复杂排障场景中的差异，并为 Quorch Reviewer 的未来演进提供结构性解耦方案。
+> 本规划经外部架构评审（Reviewer）深度论证与多轮推演，明确了核心治理不变量（INV-4、INV-6、INV-8）的保护与正交解耦方案，并为 Quorch 确立了分阶段演进实施路线。
 
 ---
 
-## 1. 软件工程 (MES) vs 探索性场景 (ML/泛用排障) 的认知失效差异
+## 1. 核心治理不变量与威胁模型边界
 
-### 1.1 为什么 MES 等经典开发场景中，锚定效应的破坏性相对受控？
+在引入运行时验证与反锚定能力的同时，Quorch 必须无条件捍卫其核心架构不变量，绝不以牺牲系统底层稳定性为代价换取功能灵活性：
 
-在典型的 MES（制造执行系统，如工单排产、设备状态机、物料追溯、批次流转、ERP 接口对接）开发中，主 Agent 产生偏见或诱导 Reviewer 时，其**系统性破坏力通常显著小于开放式/生成式场景**：
+| 不变量 | 治理判定 | 历史威胁模型与演化设计 |
+|---|---|---|
+| **INV-4 (Stdio 纯净度)** | **绝对保留，零放宽** | FastMCP JSON-RPC 协议帧物理基石。任何探针或外部库的未受控 `print()` 都会切碎数据帧导致 IDE 会话不可逆失联。**探针数据必须严格走专用证据文件/日志侧信道，stdout 神圣不可侵犯**。 |
+| **INV-6 (Review 只读)** | **保留，细化动作分级** | 防止审查模型“顺手修复代码”造成自证偏见、基线破坏和写权并发冲突。明确**“只读 ≠ 零执行”**：<br>1. **纯观察**（读文件、AST 切片、diff）✅ 允许；<br>2. **观察性执行**（只读 subprocess、白名单探针，前后比对快照指纹）✅ 允许；<br>3. **副作用写入**（修改受管源码）❌ 绝对禁止。 |
+| **INV-8 (上下文配额)** | **保留框架，演化为双平面** | 防范成本 DoS 与长上下文退化（大量日志淹没关键业务边界缺陷）。从扁平化 40k 拆分为**静态源码切片配额（40k）**与**运行时证据独立配额（20k，且经结构化压缩）**，两平面正交计价、独立熔断。 |
 
-1. **客观物理底线的自动化证伪（Deterministic Hard Constraints）**：
-   - 传统软件开发拥有由编译器、静态类型检查器（TypeScript/Mypy）、单元测试框架（Pytest/Jest）、数据库 ACID 约束和外键关系构成的“客观裁判”。
-   - 即使主 Agent 误导 Reviewer 批准了一份错误的接口设计或数据迁移方案，代码在执行阶段几乎必然遭遇 `SyntaxError`、`TypeError`、`AssertionError` 或 DB 唯一性索引冲突。物理世界的执行失败会强行中断错误链条。
-2. **问题边界与状态机高度收敛（Bounded State Space）**：
-   - MES 业务规则（如“工单在未质检完成前不得进入包装库”）是白纸黑字的规格书（Spec）。代码正确与否有清晰的真值表与期望行为，不依赖主观解释。
-3. **Quorch 自身的硬性管控制约**：
-   - Quorch 内建的 `DoD Verification Commands`（DoD 验证命令）要求每个任务单必须附带可执行的自动化测试命令。即便 Reviewer 被叙事锚定，只要 DoD 测试未全绿，任务便无法流转关闭。
-
-### 1.2 MES 场景中依然存在的隐蔽锚定风险（不可盲目乐观）
-
-尽管有上述底线保护，主 Agent 仍可能在以下三种**“测试无法自动捕获的暗区”**中误导 Reviewer：
-
-1. **高并发与死锁/竞争条件（Concurrency & Race Conditions）**：
-   - 主 Agent：“*这段设备状态上报只会有单线程顺序写入，加互斥锁是过度设计，请确认。*”
-   - Reviewer 若轻信该假定，在本地单测全绿的情况下放行，但在车间多台 PLC 同时瞬时上报时将发生隐蔽的数据覆盖与死锁。
-2. **业务逻辑漂移与隐性假设违背（Spec Erosion）**：
-   - 主 Agent 误读了离线/断网重传机制，向 Reviewer 提交了一套“简化版”的幂等去重方案。Reviewer 在单一代码文件范围内审查，未能察觉这破坏了跨站点的物料批次守恒。
-3. **过拟合单测（Test Cheating / Confirmation Bias）**：
-   - 主 Agent 围绕自己的错误理解编写了自圆其说的测试用例，并在 Query 中强调“*测试已全通*”，Reviewer 放弃了对真实业务边界用例（如异常断电、缓冲区溢出）的深度推演。
+> **关键澄清：关于“证据控制权倒置”**  
+> 原蓝图将“由 Runner 挑选上下文”视为缺陷，经评审纠偏确认：这是保护 INV-6 与 INV-8 的**刻意防御设计**。若赋予 Reviewer 自主遍历磁盘权，将破坏沙箱边界。正确的解法是**使“未被审查的承重假定”具备显式可审计性（即 Epic C 翻转条件）**，而非颠倒文件挂载权限。
 
 ---
 
-## 2. Quorch Reviewer 机制现状的结构性盲区复盘
+## 2. 软件工程 (MES) vs 探索性场景的认知失效差异
 
-勘查当前 Quorch 源码（`server.py`、`consultation.py`、`reviewer_engine.py`），发现现有机制在防锚定层面存在以下四大瓶颈：
+### 2.1 为什么 MES 等经典开发场景中，锚定效应的破坏性相对受控？
+1. **客观物理底线的自动化证伪（Deterministic Hard Constraints）**：编译器、静态类型、Pytest 单测、数据库唯一性索引构成硬裁判，执行失败强行中断错误链条。
+2. **状态机与规则高度收敛（Bounded State Space）**：工单排产、质检放行、物料批次流转具有明确的真值表。
+3. **Quorch 硬性管控制约**：`DoD Verification Commands` 强制所有任务单附带可执行验证命令，未全绿无法流转关闭。
+
+### 2.2 MES 场景中依然存在的隐蔽锚定风险（不可盲目乐观）
+1. **高并发与竞争条件（Concurrency & Race Conditions）**：Reviewer 轻信主 Agent“单线程顺序写入”的假定，在车间多 PLC 瞬时并发时引发死锁或覆盖。
+2. **业务逻辑漂移与隐性假设违背（Spec Erosion）**：跨站点的物料批次守恒或离线重传幂等机制被局部简化，Reviewer 单文件审查未能觉察。
+3. **过拟合单测（Test Cheating / Confirmation Bias）**：测试用例围绕主 Agent 自身错误理解编写，自圆其说。
+
+---
+
+## 3. Quorch Reviewer 机制现状的结构性盲区复盘
+
+勘查当前 Quorch 源码（`server.py`、`consultation.py`、`reviewer_engine.py`），现有机制在防锚定层面存在以下四大瓶颈：
 
 ```
 主 Agent (Runner)                      Quorch 服务端                       Reviewer 模型
@@ -54,62 +55,73 @@
                                   (无运行时证据 / 无法执行探针)
 ```
 
-1. **入口无解耦契约**：
-   - `dev_reviewer_submit` 的入参仅有单一 `query: str`，直接拼入 Prompt：`### Consultation Query\n{query.strip()}`。
-   - 事实（观测数据）与推断（主观解释）完全坍缩，没有标记信道。
-2. **`<<<NEED-FILES>>>` 是“静态补全”，不是“动态实验”**：
-   - 当前的“多跳询问”机制只能从本地磁盘读取静态源码切片，**无法执行代码，无法获取运行时环境的动态遥测**（如数据库连接池实时状态、Redis 内存指标、张量 shape/stride 等）。
-3. **多跳门控冷启动（Gate Skip）**：
-   - `evaluate_multi_hop_gate` 要求历史上必须有 `>=20` 条样本且 `demand>30%` 才放行多跳。在低频突发或冷启动阶段，Reviewer 连静态文件补全的机会都会被熔断。
-4. **证据控制权倒置**：
-   - `context_files` 和初始范围均由被审查的主 Agent 选择，容易造成“选择性供给证据”。
+1. **入口无解耦契约**：`dev_reviewer_submit` 的入参仅有单一 `query: str`，直接拼入 Prompt，事实与推断信道坍缩。
+2. **`<<<NEED-FILES>>>` 局限于代码切片**：无法获取由测试或运行时产生的物化遥测数据。
+3. **多跳门控冷启动（Gate Skip）**：`evaluate_multi_hop_gate` 要求历史 `>=20` 条样本且 `demand>30%` 才放行多跳，冷启动阶段多跳静态补全会被熔断。
+4. **结论缺乏证伪契约**：Reviewer 的输出 `findings` 为自由文本，未显式声明其结论依赖的边界假定与证伪翻转条件。
 
 ---
 
-## 3. Quorch Reviewer 后续演进规划建议 (Evolution Roadmap)
+## 4. 演进路线图与分阶段实施规划 (Phased Roadmap)
 
-为彻底阻断主 Agent 认知偏置对 Reviewer 的穿透，建议在 Quorch 后续大版本中分步实施以下改造：
+经评审仲裁，实施顺序由原设想的 A → B → C 修正为**按风险递增、数据先行的 Phase 0 ~ Phase 5 渐进路线**：
 
-### Epic A: 输入双平面解耦 (Epistemic Input Plane)
-- **目标**：在 `dev_reviewer_submit` 接口中引入可选的解耦输入，区分遥测数据与调用者主张。
+```mermaid
+flowchart TD
+    P0["Phase 0: 遥测埋点基线 (✔️ 已完成 - v1.29)\n(consultation_telemetry.jsonl)"] --> P1["Phase 1: Epic C 前提审计契约 (✔️ 已完成 - v1.29)\n(<<<PREMISES>>> 纯增量解析与持久化)"]
+    P1 --> P2["Phase 2: Epic A 双平面输入\n(observations / caller_hypotheses A2 布局)"]
+    P2 --> P3["Phase 3: Epic B 物化制品读取\n(<<<NEED-FILES>>> log: 与 status: 扩展)"]
+    P3 --> P4["Phase 4: Epic C 门禁收紧\n(audit_gate 校验 premise falsified)"]
+    P4 -.-> P5["Phase 5: 受限隔离沙箱探针 (可选)\n(仅 audit 模式 & 严格只读白名单)"]
+```
+
+### Phase 0: 咨询遥测基线 (Consultation Telemetry Baseline) (✔️ 已完成 - v1.29)
+- **目标**：为后续门控与配额提供客观数据依据。
+- **改动**：新增 `consultation_telemetry.jsonl` sink，逐次记录调用中的字段分布、前缀长度、耗时与判决状态。零破坏性变更。
+- **交付状态**：已由任务 29.1 交付，落盘于 `.agents/logs/telemetry/consultation_telemetry.jsonl`，具备跨进程文件锁 `FileConsultationTelemetrySink`、Fail-Open 精准异常捕获与 GC 免疫。
+
+### Phase 1: Epic C 前提审计输出契约 (Structured Premises Contract) (✔️ 已完成 - v1.29)
+- **目标**：规范 Reviewer 审查输出，强制将承重假设结构化。
 - **改动**：
-  ```python
-  async def dev_reviewer_submit(
-      workspace_root: str,
-      query: str,
-      context_files: list[str] | None = None,
-      mode: str = "evaluate",
-      observations: str | None = None,      # 原始日志、报错堆栈、命令原始输出
-      caller_hypotheses: str | None = None, # 标记为待验证假说
-      ...
-  )
-  ```
-- **收益**：Reviewer 在系统层面获得“未污染证据”，优先依据 `observations` 建立独立假说。
+  - 约定输出语法定界符：
+    ```text
+    <<<PREMISES>>>
+    premise: "单实例部署，无多节点共享内存"
+    flip_condition: "配置中出现集群负载均衡"
+    falsifiable: true
+    <<<END>>>
+    ```
+  - 新增 `PremiseRecord` dataclass 与 `parse_premises()` 纯函数解析器；
+  - 结果计入遥测记录与 `verdicts.jsonl`；解析失败降级记录 stderr，不阻断流程；
+  - 建立严格覆盖矩阵：2048/2049 悬崖双锚、覆写优先级高于 token、三布尔 presence 8 组合、Windows 句柄回收防御。
+- **交付状态**：已由任务 29.1 交付，单测 `test_premises_parsing.py` (12 passed) 与 `test_consultation_telemetry.py` (19 passed) 全量绿灯。
 
-### Epic B: 认知探针协议替换静态补全 (Dynamic Probe Protocol)
-- **目标**：超越 `<<<NEED-FILES>>>`，允许 Reviewer 向 Quorch 发起动态探针请求。
-- **协议草案**：
-  ```text
-  <<<PROBE_REQUEST>>>
-  goal: 检查车间物料流水号高并发竞争状态
-  eval_command: pytest tests/integration/test_concurrency_race.py -k test_lot_generation
-  expected_invariants: no duplicate lot IDs across 100 concurrent workers
-  <<<END>>>
-  ```
-- **收益**：Reviewer 可直接要求运行环境给出裁决结果，而非靠理论空对空脑补。
+### Phase 2: Epic A 输入双平面解耦 (Epistemic Input Plane A2 Layout)
+- **目标**：解耦主 Agent 事实输入与推测假说，同时保证 Prompt Cache 极高命中率。
+- **改动**：
+  - `dev_reviewer_submit` 与 `dev_tasks_refine_spec` 增加可选入参 `observations: str | None = None`、`caller_hypotheses: str | None = None`；
+  - **A2 尾置布局**：在静态系统前缀（含工作区文件树与模式锚点）后、`<<<NEED-FILES>>>` 之前插入动态双平面块，保持前缀哈希一致；
+  - 纳入 `HopBudget` 统一配额（各限 16,000 字符）。
 
-### Epic C: 承重前提审计与翻转条件 (Premise Audit & Flip Invariants)
-- **目标**：强制 Reviewer 输出必须附带“支撑该审查意见的核心假定”与“翻转条件”。
-- **规范**：
-  - Reviewer 在批准（LGTM）或否定时，必须显式列出：
-    1. `【审查前提】`: 如“假定本模块为单机单实例部署，无多节点共享内存”；
-    2. `【翻转条件】`: 如“若未来接入集群式负载均衡，本方案必须重构为分布式悲观锁”。
+### Phase 3: Epic B 物化制品只读读取 (Materialized Artifact Reads)
+- **目标**：在零进程执行风险下，为 Reviewer 提供运行时物理证据。
+- **改动**：
+  - 扩展 `<<<NEED-FILES>>>` 语法，支持提取 Runner 已物化的测试日志与退出状态：
+    ```text
+    <<<NEED-FILES>>>
+    docs/dev_tasks/task.md:40-90
+    log:tests/.last_run.log:tail:400
+    status:tests/.last_junit.xml
+    <<<END>>>
+    ```
+  - 调优多跳门控：将 `MIN_TELEMETRY_SAMPLES`（原硬编码 20）开放为配置项（如默认降为 8），并支持工作区首查快速通道（first-consult fast path）。
 
----
+### Phase 4: Epic C 门禁收紧与翻转核查 (Audit Gate Enforcement)
+- **目标**：让前提假定在任务流转中产生约束力。
+- **改动**：
+  - 在 `.agents/quench_stack.yaml` 引入 `audit_gate.require_premise_audit: false`（默认关闭）；
+  - 开启后，若 review 记录中存在 `falsifiable: true` 且存在反向证据，触发任务确认阻断。
 
-## 4. 总结与分工备忘
-
-- **Quorch 的定位**：围绕实际项目（如 MES 系统），依托工程文件、单测套件、DoD 门禁和静态多跳提供**高度受控的工程质量保证**；
-- **外部推理工具（如 Advisor MCP）的定位**：作为跨场景的高维外脑，在遇到探索性难题或认知死局时，击破主 Agent 的固有天花板。
-- 本规划作为 Quorch 下一阶段架构演进的储备蓝图，后续在专门的 Quorch 演进分支中细化实施。
-
+### Phase 5: 隔离受限探针执行器 (Guarded Sandbox Probe Supervisor, 可选)
+- **目标**：在深层架构排障（`audit` 模式）下提供受控探针。
+- **改动**：基于 `quench_stack.yaml` 的命令白名单与专用子进程 supervisor（`probe_runner.py`），在隔离快照目录中受限运行，执行前后严格比对工作区指纹，产生任何写修改一律 fail-closed 阻断。

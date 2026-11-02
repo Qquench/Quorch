@@ -5,18 +5,21 @@ Decouples verbose streaming I/O from permanent decision evidence:
 1. SinkMode: STREAM (engine), SNAPSHOT (subagent/manual), DISABLED;
 2. ObservabilityDecision: Frozen metadata contract governing stream and verdict sinks;
 3. VerdictAuditSink: Process-safe JSONL append with 16KB bounded structured truncation;
-4. Zero vendor literals, zero stdout pollution, strict cross-process locking.
+4. ConsultationTelemetrySink: Cross-process locked telemetry sink for consultation audit;
+5. Zero vendor literals, zero stdout pollution, strict cross-process locking.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import functools
 import json
 import os
 import sys
 from typing import Any, Mapping, Optional, Protocol
 
+import filelock
 from filelock import FileLock
 
 MAX_RECORD_BYTES: int = 16 * 1024  # 16KB 有界截断硬上限 (SSOT 常量 D11)
@@ -37,6 +40,25 @@ class ObservabilityDecision:
     verdict_enabled: bool         # STREAM 与 SNAPSHOT 为 True，DISABLED 为 False (D4)
     verdict_path: str             # 归一化后的裁决快照落盘绝对路径 (D3)
     max_record_bytes: int = MAX_RECORD_BYTES
+    telemetry_enabled: bool = True
+    telemetry_path: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ConsultationTelemetryRecord:
+    ts: str
+    workspace_root: str
+    job_id: str
+    session_id: str
+    prompt_hash: str
+    prompt_chars: int
+    observations_present: bool
+    hypotheses_present: bool
+    need_files_present: bool
+    premises_parsed_count: int
+    verdict_state: str     # 原始状态: COMPLETED/DEGRADED/FAILED/CANCELLED
+    is_degraded: bool
+    schema_version: int = 1   # N1'：默认值字段必须居末尾
 
 
 class VerdictAuditSink(Protocol):
@@ -53,11 +75,20 @@ class VerdictAuditSink(Protocol):
         ...
 
 
+class ConsultationTelemetrySink(Protocol):
+    """咨询遥测汇接口契约。"""
+    def emit_telemetry(self, record: ConsultationTelemetryRecord) -> None:
+        """安全原子追加一条咨询遥测记录至审计清单。"""
+        ...
+
+
 def resolve_observability_policy(
     reviewer_mode: str,
     *,
     verdict_path: str,
     explicit_disable_verdict: bool = False,
+    telemetry_path: Optional[str] = None,
+    explicit_disable_telemetry: bool = False,
 ) -> ObservabilityDecision:
     """模式驱动的拓扑自适应观测分流纯函数。
 
@@ -67,6 +98,12 @@ def resolve_observability_policy(
     - 未知模式: 保守退避至 STREAM 模式并记录告警。
     """
     normalized_path = os.path.abspath(os.path.normpath(verdict_path))
+    default_telemetry = os.path.abspath(os.path.normpath(".agents/logs/telemetry/consultation_telemetry.jsonl"))
+    normalized_telemetry_path = (
+        os.path.abspath(os.path.normpath(telemetry_path))
+        if telemetry_path is not None
+        else default_telemetry
+    )
     raw_mode = (reviewer_mode or "").strip().lower()
 
     if raw_mode == "disabled":
@@ -76,6 +113,8 @@ def resolve_observability_policy(
             verdict_enabled=False,
             verdict_path=normalized_path,
             max_record_bytes=MAX_RECORD_BYTES,
+            telemetry_enabled=False,
+            telemetry_path=normalized_telemetry_path,
         )
 
     if raw_mode in ("subagent", "manual"):
@@ -95,6 +134,7 @@ def resolve_observability_policy(
         stream_enabled = True
 
     verdict_enabled = not explicit_disable_verdict
+    telemetry_enabled = not explicit_disable_telemetry
 
     return ObservabilityDecision(
         mode=mode,
@@ -102,6 +142,8 @@ def resolve_observability_policy(
         verdict_enabled=verdict_enabled,
         verdict_path=normalized_path,
         max_record_bytes=MAX_RECORD_BYTES,
+        telemetry_enabled=telemetry_enabled,
+        telemetry_path=normalized_telemetry_path,
     )
 
 
@@ -205,3 +247,48 @@ class FileVerdictAuditSink:
 def make_verdict_sink(path: str, lock_path: Optional[str] = None) -> VerdictAuditSink:
     """创建跨进程线程安全的 VerdictAuditSink 实例。"""
     return FileVerdictAuditSink(path=path, lock_path=lock_path)
+
+
+class FileConsultationTelemetrySink:
+    """基于跨进程文件锁 (FileLock) 的 JSONL 咨询遥测汇。"""
+
+    def __init__(
+        self,
+        path: str,
+        lock_path: Optional[str] = None,
+    ) -> None:
+        self.path = os.path.abspath(os.path.normpath(path))
+        self.lock_path = lock_path if lock_path is not None else f"{self.path}.lock"
+        self._lock = FileLock(self.lock_path, timeout=2.0)
+
+    def emit_telemetry(self, record: ConsultationTelemetryRecord) -> None:
+        raw_dict = asdict(record)
+        raw_line = json.dumps(raw_dict, ensure_ascii=False)
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            with self._lock:
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(raw_line + "\n")
+                    f.flush()
+        except (filelock.Timeout, OSError, ValueError) as e:
+            try:
+                sys.stderr.write(f"[ConsultationTelemetrySink] Failed to write telemetry: {e}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+
+
+def make_consultation_telemetry_sink(path: str, lock_path: Optional[str] = None) -> ConsultationTelemetrySink:
+    """创建跨进程线程安全的 ConsultationTelemetrySink 实例。"""
+    return FileConsultationTelemetrySink(path=path, lock_path=lock_path)
+
+
+@functools.lru_cache(maxsize=32)
+def _get_consultation_telemetry_sink(path: str) -> ConsultationTelemetrySink:
+    """按路径缓存的 ConsultationTelemetrySink 单例工厂。"""
+    return make_consultation_telemetry_sink(path)
+
+
+def reset_consultation_telemetry_sink_cache() -> None:
+    """测试 fixture 专用，生产禁止调用。清空 sink 的 lru_cache。"""
+    _get_consultation_telemetry_sink.cache_clear()

@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-02] 2026-11-02_v1_29_batch1_reviewer_anti_anchoring_phase1.md
+
+- **Task 29.1**: Reviewer 前提审计输出契约与咨询遥测埋点 (Phase 1, r7.2 终极闭环版)
+
 ## [2026-10-31] 2026-10-31_v1_28_batch3_harness_overlap_drilldown.md
 
 - **Task 28.5**: 升级 autopilot_harness._extract_top_module_dir 支持外层容器目录子模块下钻与根文件桶隔离

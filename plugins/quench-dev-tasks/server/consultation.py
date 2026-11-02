@@ -129,6 +129,102 @@ class AbortHandle:
 NEED_FILES_PATTERN = re.compile(r"<<<NEED-FILES>>>\s*(.*?)\s*<<<END>>>", re.DOTALL)
 TASK_DRAFT_PATTERN = re.compile(r"<<<TASK_DRAFT>>>\s*(.*?)\s*<<<END>>>", re.DOTALL)
 
+# 语义定义：PREMISES_PATTERN 满足：匹配 <<<PREMISES>>> 前后可选空白，中间非贪婪任意内容（DOTALL），以 <<<END>>> 闭合。
+# 反向锚定：空白匹配正确性由 test_premises_pattern_has_no_textual_corruption 锁定，无 '/s'，无双重转义。
+PREMISES_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"<<<PREMISES>>>\s*(.*?)\s*<<<END>>>",
+    re.DOTALL,
+)
+OBSERVATIONS_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"<<<OBSERVATIONS>>>\s*(.*?)\s*<<<END>>>",
+    re.DOTALL,
+)
+HYPOTHESES_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"<<<HYPOTHESES>>>\s*(.*?)\s*<<<END>>>",
+    re.DOTALL,
+)
+
+MAX_PREMISES_PER_VERDICT: Final[int] = 12
+MAX_PREMISE_FIELD_CHARS: Final[int] = 2048
+_FALSIFIABLE_TRUE_TOKENS: Final[frozenset[str]] = frozenset({"true", "yes", "1"})
+
+
+@dataclass(frozen=True, slots=True)
+class PremiseRecord:
+    premise: str
+    flip_condition: str
+    falsifiable: bool
+
+
+def parse_premises(findings: str) -> list[PremiseRecord]:
+    """从 findings 中解析 <<<PREMISES>>> ... <<<END>>> 块为结构化 PremiseRecord 列表。"""
+    try:
+        if not findings or not isinstance(findings, str):
+            return []
+        records: list[PremiseRecord] = []
+        for match in PREMISES_PATTERN.finditer(findings):
+            block_text = match.group(1)
+            premise_val = ""
+            flip_val = ""
+            falsifiable_val = ""
+            for line in block_text.splitlines():
+                key, sep, val = line.partition(":")
+                if not sep:
+                    continue
+                norm_key = key.strip().lower()
+                norm_val = val.strip()
+                if norm_key == "premise":
+                    premise_val = norm_val
+                elif norm_key == "flip_condition":
+                    flip_val = norm_val
+                elif norm_key == "falsifiable":
+                    falsifiable_val = norm_val
+
+            token_truth = falsifiable_val.lower() in _FALSIFIABLE_TRUE_TOKENS
+            if len(premise_val) > MAX_PREMISE_FIELD_CHARS or len(flip_val) > MAX_PREMISE_FIELD_CHARS:
+                final_falsifiable = False
+            else:
+                final_falsifiable = token_truth
+
+            records.append(
+                PremiseRecord(
+                    premise=premise_val,
+                    flip_condition=flip_val,
+                    falsifiable=final_falsifiable,
+                )
+            )
+            if len(records) >= MAX_PREMISES_PER_VERDICT:
+                break
+        return records
+    except Exception as e:
+        try:
+            sys.stderr.write(f"[parse_premises] Failed to parse premises: {e}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+        return []
+
+
+def assert_premises_wellformed(records: Sequence[PremiseRecord]) -> None:
+    """断言 PremiseRecord 序列格式良好（测试专用，生产禁止调用）。
+
+    调用方保证：生产路径永不将 parse_premises 结果喂入此函数；测试须手工构造非法 records 以触发断言。
+    """
+    if not records:
+        return
+    if len(records) > MAX_PREMISES_PER_VERDICT:
+        raise AssertionError(f"Too many premises: {len(records)} > {MAX_PREMISES_PER_VERDICT}")
+    for i, r in enumerate(records):
+        if not r.premise:
+            raise AssertionError(f"Premise at index {i} is empty")
+        if not r.flip_condition:
+            raise AssertionError(f"Flip condition at index {i} is empty")
+        if len(r.premise) > MAX_PREMISE_FIELD_CHARS:
+            raise AssertionError(f"Premise at index {i} exceeds max length: {len(r.premise)} > {MAX_PREMISE_FIELD_CHARS}")
+        if len(r.flip_condition) > MAX_PREMISE_FIELD_CHARS:
+            raise AssertionError(f"Flip condition at index {i} exceeds max length: {len(r.flip_condition)} > {MAX_PREMISE_FIELD_CHARS}")
+
+
 MAX_CONTEXT_FILES = 6
 DEFAULT_WINDOW_LINES = 200
 MIN_WINDOW_LINES = 30
@@ -287,11 +383,23 @@ async def _emit_consultation_audit(
     status: str,
     degraded_reason: Optional[str] = None,
     has_need_files: bool = False,
+    *,
+    findings: str = "",
+    verdict_state: str = "COMPLETED",
+    job_id: str = "",
+    workspace_root: str = "",
+    telemetry_path: Optional[str] = None,
+    telemetry_enabled: bool = True,
+    observations_present: Optional[bool] = None,
+    hypotheses_present: Optional[bool] = None,
+    need_files_present: Optional[bool] = None,
 ) -> None:
     """线程安全落盘闩锁：在任何 await 或 offload 之前同步完成 check-and-set，杜绝重复落盘。"""
     if latch.is_set():
         return
     latch.set()
+
+    prompt_hash = compute_prompt_hash(messages)
 
     # 1. 遥测账本 cache_telemetry.jsonl
     try:
@@ -299,7 +407,6 @@ async def _emit_consultation_audit(
         c_toks = int(usage.get("prompt_cache_hit_tokens", 0))
         m_toks = max(0, p_toks - c_toks)
         h_ratio = round(c_toks / p_toks, 4) if p_toks > 0 else 0.0
-        prompt_hash = compute_prompt_hash(messages)
         rec = CacheTelemetryRecord(
             ts=datetime.now(timezone.utc).isoformat(),
             prompt_hash=prompt_hash,
@@ -337,6 +444,108 @@ async def _emit_consultation_audit(
         )
     except Exception:
         pass
+
+    # 3. 咨询遥测账本 consultation_telemetry.jsonl
+    if telemetry_enabled:
+        try:
+            import filelock
+            from observability_policy import (
+                ConsultationTelemetryRecord,
+                _get_consultation_telemetry_sink,
+            )
+
+            # D-A 唯一权威判定
+            effective_verdict_state = verdict_state
+            if effective_verdict_state == "COMPLETED" and status.lower() in ("degraded", "failed", "cancelled"):
+                effective_verdict_state = status.upper()
+
+            is_degraded = (effective_verdict_state.upper() in {"DEGRADED", "FAILED", "CANCELLED"}) or (degraded_reason is not None)
+
+            if is_degraded:
+                effective_findings = ""
+                premises_parsed_count = 0
+            else:
+                effective_findings = findings or ""
+                premises_parsed_count = len(parse_premises(effective_findings))
+
+            # 三布尔 presence 准确映射
+            if need_files_present is not None:
+                final_need_files = bool(need_files_present)
+            else:
+                final_need_files = bool(has_need_files or NEED_FILES_PATTERN.search(effective_findings))
+
+            if observations_present is not None:
+                final_obs = bool(observations_present)
+            else:
+                final_obs = bool(
+                    OBSERVATIONS_PATTERN.search(effective_findings)
+                    or any(
+                        m.get("observations_present")
+                        or m.get("observations")
+                        or "<<<OBSERVATIONS>>>" in str(m.get("content", ""))
+                        for m in messages
+                    )
+                )
+
+            if hypotheses_present is not None:
+                final_hypo = bool(hypotheses_present)
+            else:
+                final_hypo = bool(
+                    HYPOTHESES_PATTERN.search(effective_findings)
+                    or any(
+                        m.get("hypotheses_present")
+                        or m.get("hypotheses")
+                        or "<<<HYPOTHESES>>>" in str(m.get("content", ""))
+                        for m in messages
+                    )
+                )
+
+            # 确定 workspace_root
+            ws_root = workspace_root
+            if not ws_root:
+                try:
+                    cur = log_dir.resolve()
+                    for parent in [cur] + list(cur.parents):
+                        if (parent / ".agents").is_dir():
+                            ws_root = str(parent)
+                            break
+                        if parent.name == ".agents":
+                            ws_root = str(parent.parent)
+                            break
+                    if not ws_root:
+                        ws_root = str(log_dir.parent)
+                except Exception:
+                    ws_root = ""
+
+            prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
+
+            telemetry_rec = ConsultationTelemetryRecord(
+                ts=datetime.now(timezone.utc).isoformat(),
+                workspace_root=ws_root,
+                job_id=job_id,
+                session_id=session_id,
+                prompt_hash=prompt_hash,
+                prompt_chars=prompt_chars,
+                observations_present=final_obs,
+                hypotheses_present=final_hypo,
+                need_files_present=final_need_files,
+                premises_parsed_count=premises_parsed_count,
+                verdict_state=effective_verdict_state,
+                is_degraded=is_degraded,
+            )
+
+            t_path = telemetry_path or str(log_dir / "consultation_telemetry.jsonl")
+            tsink = _get_consultation_telemetry_sink(t_path)
+            tsink.emit_telemetry(telemetry_rec)
+        except (filelock.Timeout, OSError, ValueError) as e:
+            try:
+                sys.stderr.write(f"[_emit_consultation_audit] Telemetry sink error: {e}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
 
 
 # CodeSlice is imported from reviewer_engine.py for single source of truth and backward compatibility.
@@ -1172,6 +1381,8 @@ async def _execute_consultation(
                 status="ok",
                 degraded_reason=None,
                 has_need_files=has_need_files,
+                findings=all_findings,
+                verdict_state="COMPLETED",
             )
 
             return ConsultResult(
