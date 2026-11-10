@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-10] 2026-11-10_v1_30_batch1_cursor_pagination_and_progressive_code_exploration.md
+
+- **Task 30.1**: 代码探索器游标分页、行原子化窗口与渐进式展开原语（Phases 1-5）
+
 ## [2026-11-02] 2026-11-02_v1_29_batch1_reviewer_anti_anchoring_phase1.md
 
 - **Task 29.1**: Reviewer 前提审计输出契约与咨询遥测埋点 (Phase 1, r7.2 终极闭环版)
