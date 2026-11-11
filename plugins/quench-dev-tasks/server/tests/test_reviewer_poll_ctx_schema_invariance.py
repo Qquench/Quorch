@@ -115,16 +115,13 @@ def test_shadow_schema_matches_pending_poll_signature() -> None:
         wait_max_s: int = 0,
         ctx: Context = None,
     ) -> dict:
-        """Poll status or result of a background Reviewer task.
-        Enforces 1KB non-terminal snapshot contract.
-
-        轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，恒定返回结构化字典。
+        """Poll status or result of a background Reviewer task with 1KB snapshot contract.
 
         Args:
-            workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-            job_id: Target job ID to poll / 待轮询的任务ID。
-            session_id: Caller session ID for multi-session authorization / 会话隔离标识符。
-            wait_max_s: Server-side long polling wait timeout in seconds (0-25) / 服务端长轮询最大挂起等待秒数。
+            workspace_root: Root path of the target workspace.
+            job_id: Target job ID to poll.
+            session_id: Caller session ID for multi-session authorization.
+            wait_max_s: Server-side long polling wait timeout in seconds (0-25).
             ctx: FastMCP Context injected by server framework.
         """
         return {}

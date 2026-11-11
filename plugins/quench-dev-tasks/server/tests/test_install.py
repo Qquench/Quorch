@@ -189,7 +189,7 @@ def test_render_configs_success(mock_plugin_env):
     with open(mcp_path, "r", encoding="utf-8") as f:
         mcp_data = json.load(f)
 
-    assert mcp_data["mcpServers"]["quench-dev-tasks"]["command"] == python_exe
+    assert mcp_data["mcpServers"]["core"]["command"] == python_exe
 
     with open(hooks_path, "r", encoding="utf-8") as f:
         hooks_data = json.load(f)

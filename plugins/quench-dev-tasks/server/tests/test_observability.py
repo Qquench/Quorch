@@ -28,7 +28,7 @@ from tool_surface_constants import (
     RESPONSE_BUDGET_BYTES,
     STATUS_COMPACT_MAX_TASKS,
 )
-from response_compactor import canonical_json
+from response_compactor import canonical_json, STATUS_COMPACT_DROP_ORDER
 
 
 def test_safe_rotating_file_handler_basic(tmp_path):
@@ -313,17 +313,27 @@ def test_full_superset_invariant(tmp_path_factory):
         "last_hook_log_entries_compact",
     })
 
-    # 1. full extra keys strictly subset of {"session_role_contract", "governance_scope", "hook_log"}
+    # 1. full extra keys strictly subset of {"session_role_contract", "governance_scope", "hook_log"} + dropped keys
     diff_full_compact = set(full.keys()) - set(compact.keys())
-    assert diff_full_compact <= {"session_role_contract", "governance_scope", "hook_log"}, (
+    base_full_only = {"session_role_contract", "governance_scope", "hook_log"}
+    dropped_in_compact = diff_full_compact - base_full_only
+    assert dropped_in_compact <= set(STATUS_COMPACT_DROP_ORDER), (
         f"Unexpected full-only keys: {diff_full_compact}"
     )
+    if dropped_in_compact:
+        assert "truncated_sections" in compact
+        for k in dropped_in_compact:
+            assert k in compact["truncated_sections"]
 
-    # 2. compact extra keys strictly equal to COMPACT_ONLY_KEYS
+    # 2. compact extra keys strictly subset of COMPACT_ONLY_KEYS
     diff_compact_full = set(compact.keys()) - set(full.keys())
-    assert diff_compact_full == COMPACT_ONLY_KEYS, (
+    assert diff_compact_full <= COMPACT_ONLY_KEYS, (
         f"Compact-only mismatch: {diff_compact_full} vs {COMPACT_ONLY_KEYS}"
     )
+    assert "entitlements_hash" in diff_compact_full
+    if "last_hook_log_entries_compact" not in diff_compact_full:
+        assert "truncated_sections" in compact
+        assert "last_hook_log_entries_compact" in compact["truncated_sections"]
 
     # 3. tasks prefix equality
     assert full["tasks"][: len(compact["tasks"])] == compact["tasks"]

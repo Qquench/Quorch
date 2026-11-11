@@ -268,7 +268,7 @@ def test_dev_tasks_status_reports_bypass_queue(reconcile_workspace_fixture):
     _create_sample_task_md(rogue_file, task_id="2.1", status="🔨 执行中")
 
     with patch("manifest._get_git_tracked_files", return_value=set()):
-        status_res = dev_tasks_status(str(ws))
+        status_res = dev_tasks_status(str(ws), verbosity="full")
 
     rel_rogue = "docs/dev_tasks/2026-09-24_rogue.md"
     rel_valid = "docs/dev_tasks/2026-09-24_valid.md"

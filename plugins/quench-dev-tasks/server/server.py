@@ -3059,7 +3059,7 @@ async def dev_tasks_refine_spec(
             "dev_tasks_refine_spec",
             res_dict,
             drop_order=("persist_result", "title", "path"),
-            always_keep=("ok", "task_id", "content_sha256", "bytes_written", "validation", "harness_next_action"),
+            always_keep=("ok", "task_id", "content_sha256", "bytes_written", "validation", "harness_next_action", "refined", "degraded", "persisted", "engine"),
         )
 
     # 2. 组装 System Prompt 与代码上下文 (四段式稳定性梯度拓扑)
@@ -3187,7 +3187,7 @@ async def dev_tasks_refine_spec(
             "dev_tasks_refine_spec",
             res_dict,
             drop_order=("persist_result", "title", "path"),
-            always_keep=("ok", "task_id", "content_sha256", "bytes_written", "validation", "harness_next_action"),
+            always_keep=("ok", "task_id", "content_sha256", "bytes_written", "validation", "harness_next_action", "refined", "degraded", "persisted", "engine"),
         )
     except Exception as e:
         err_dict = {

@@ -1606,6 +1606,50 @@
       "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
       "git_index_mtime": 1794357418.797837,
       "released": true
+    },
+    "2026-11-11_ci_test_failures_fix::1.1": {
+      "task_id": "2026-11-11_ci_test_failures_fix::1.1",
+      "md_sha256": "86d7f5abfe137b48f3180638221cdc0806082c2ea6b8e4dfd8d5f81f2575bd03",
+      "generation": 1,
+      "holder_token": "token_1794384571832_5456",
+      "last_heartbeat_monotonic_ns": 421223875000000,
+      "last_heartbeat_wall_utc": "2026-11-11T08:13:49.270184+00:00",
+      "git_head_sha": "51c33b4086c95761039afdbf08530dd3a41ad8b8",
+      "git_index_mtime": 1794383487.1435685,
+      "released": true
+    },
+    "2026-11-11_ci_test_failures_fix::1.2": {
+      "task_id": "2026-11-11_ci_test_failures_fix::1.2",
+      "md_sha256": "7c51e3b575fd0f756aae3b479a3780f57aa675c5224fe000392675be57743dc6",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 421230734000000,
+      "last_heartbeat_wall_utc": "2026-11-11T08:13:56.141806+00:00",
+      "git_head_sha": "51c33b4086c95761039afdbf08530dd3a41ad8b8",
+      "git_index_mtime": 1794383487.1435685,
+      "released": true
+    },
+    "2026-11-11_ci_fix_engine_key::1.3": {
+      "task_id": "2026-11-11_ci_fix_engine_key::1.3",
+      "md_sha256": "04cde49fd740eee707273196a1cdddc5255429dfafdbd85aa8219b6cdff17311",
+      "generation": 1,
+      "holder_token": "token_1794385792361_5456",
+      "last_heartbeat_monotonic_ns": 422285031000000,
+      "last_heartbeat_wall_utc": "2026-11-11T08:31:30.423538+00:00",
+      "git_head_sha": "51c33b4086c95761039afdbf08530dd3a41ad8b8",
+      "git_index_mtime": 1794385889.970876,
+      "released": true
+    },
+    "2026-11-11_fix_refine_spec_engine_key::1.1": {
+      "task_id": "2026-11-11_fix_refine_spec_engine_key::1.1",
+      "md_sha256": "d304544debb4101dca7597e85e71345310b2d4366c16e07567bf2e77bb3a6c34",
+      "generation": 0,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 422015984000000,
+      "last_heartbeat_wall_utc": "2026-11-11T08:27:01.380810+00:00",
+      "git_head_sha": "51c33b4086c95761039afdbf08530dd3a41ad8b8",
+      "git_index_mtime": 1794385357.3162212,
+      "released": false
     }
   }
 }

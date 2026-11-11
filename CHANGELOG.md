@@ -3,6 +3,15 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-11] 2026-11-11_ci_fix_engine_key.md
+
+- **Task 1.3**: 补全 refine_spec 压缩保全中的 engine 关键字段
+
+## [2026-11-11] 2026-11-11_ci_test_failures_fix.md
+
+- **Task 1.1**: 修复跨平台路径拒绝、安装模板键名、Poll测试签名及卫生审计白名单
+- **Task 1.2**: 修复响应压缩截断保留、RefineSpec核心键保全及可观测性测试鲁棒性
+
 ## [2026-11-11] 2026-11-11_v1_33_mcp_response_slimming.md
 
 - **Task 33.0**: 预算 SSOT 去重、溢出常量化与 INV-10 措辞对账 (Budget SSOT De-duplication & Overflow Constants)

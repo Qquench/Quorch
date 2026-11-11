@@ -196,12 +196,12 @@ def fit_to_budget(
                     result[hook_key] = result[hook_key][:STATUS_COMPACT_MAX_HOOK_ENTRIES]
                     truncated_sections.append(hook_key)
 
-    if measure_payload_bytes(result) <= budget:
-        if truncated_sections:
-            cand = dict(result)
-            cand["truncated_sections"] = list(dict.fromkeys(truncated_sections))
-            if measure_payload_bytes(cand) <= budget:
-                result = cand
+    if truncated_sections:
+        cand = dict(result)
+        cand["truncated_sections"] = list(dict.fromkeys(truncated_sections))
+        if measure_payload_bytes(cand) <= budget:
+            return cand
+    elif measure_payload_bytes(result) <= budget:
         return result
 
     # Step 2: Drop keys according to drop_order
@@ -211,16 +211,10 @@ def fit_to_budget(
         if key in result:
             del result[key]
             truncated_sections.append(key)
-            if measure_payload_bytes(result) <= budget:
-                break
-
-    if measure_payload_bytes(result) <= budget:
-        if truncated_sections:
             cand = dict(result)
             cand["truncated_sections"] = list(dict.fromkeys(truncated_sections))
             if measure_payload_bytes(cand) <= budget:
-                result = cand
-        return result
+                return cand
 
     # Step 3: Tier-2 discriminator guarantee & Tier-3 observability marker
     # Tier-2: Minimize harness_next_action to action-only and drop any remaining non-always_keep keys
@@ -228,20 +222,27 @@ def fit_to_budget(
         action_val = result["harness_next_action"].get("action")
         result["harness_next_action"] = {"action": action_val} if action_val is not None else {}
 
-    keys_to_drop = [k for k in result.keys() if k not in effective_always_keep]
+    keys_to_drop = [k for k in result.keys() if k not in effective_always_keep and k != "truncated_sections"]
     for k in keys_to_drop:
         del result[k]
         truncated_sections.append(k)
 
+    uniq_truncated = list(dict.fromkeys(truncated_sections))
+    if len(uniq_truncated) > 5:
+        uniq_truncated = uniq_truncated[:5]
+    result["truncated_sections"] = uniq_truncated
+
     current_bytes = measure_payload_bytes(result)
     if current_bytes > budget:
-        # Tier-3: inject observability marker
-        result["over_budget_bytes"] = current_bytes - budget
-    elif truncated_sections:
-        cand = dict(result)
-        cand["truncated_sections"] = list(dict.fromkeys(truncated_sections))
-        if measure_payload_bytes(cand) <= budget:
-            result = cand
+        while len(result["truncated_sections"]) > 1 and measure_payload_bytes(result) > budget:
+            result["truncated_sections"].pop()
+        current_bytes = measure_payload_bytes(result)
+        if current_bytes > budget:
+            del result["truncated_sections"]
+            result["truncated"] = True
+            current_bytes = measure_payload_bytes(result)
+            if current_bytes > budget:
+                result["over_budget_bytes"] = current_bytes - budget
 
     return result
 

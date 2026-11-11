@@ -188,6 +188,7 @@ def test_a6_root_rejection_family(tmp_path: Path):
 
     # allowed_roots 中若传入 C:/ 或 / 恒被拒绝
     assert resolve_within_roots(ws_str, "C:/Windows", allowed_roots=["C:/"]) is None
+    assert resolve_within_roots(ws_str, "D:/data", allowed_roots=None) is None
 
     # 合法兄弟目录多根支持
     sibling = tmp_path / "sibling"

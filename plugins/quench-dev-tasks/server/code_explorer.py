@@ -17,6 +17,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import PureWindowsPath
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 # 敏感文件/凭据黑名单：坚决禁止将敏感密钥切片灌入 LLM Prompt
@@ -185,6 +186,9 @@ def resolve_within_roots(
     if norm in ("", "/"):
         return None
     if re.match(r"^[A-Za-z]:/?$", norm):
+        return None
+    # 跨平台语义歧义：POSIX 视为相对、但 Windows 视为绝对的盘符路径，判定为不可解析并拒绝
+    if not os.path.isabs(norm) and PureWindowsPath(norm).is_absolute():
         return None
     if norm.startswith("//"):
         return None
