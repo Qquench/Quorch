@@ -20,6 +20,7 @@ from server import (
     dev_reviewer_poll,
     dev_reviewer_cancel,
 )
+from tool_surface_constants import CHECKOUT_REASON_CODES
 
 @pytest.fixture
 def mock_workspace():
@@ -47,7 +48,11 @@ def test_full_tool_workflow(mock_workspace):
     ws = mock_workspace
 
     # 1. 初始状态检查
-    st = dev_tasks_status(ws)
+    st_compact = dev_tasks_status(ws)
+    assert st_compact["project_name"] == "MockProject"
+    assert len(st_compact["files"]) == 0
+
+    st = dev_tasks_status(ws, verbosity="full")
     assert st["project_name"] == "MockProject"
     assert len(st["files"]) == 0
     assert "governance_scope" in st
@@ -190,6 +195,8 @@ def test_batch_and_rework_workflow(mock_workspace):
     assert chk_next["has_rework_tasks"] is True
     assert chk_next["has_pending_tasks"] is True
     assert chk_next["handoff_recommended"] is True
+    assert chk_next["reason_code"] == "REWORK_REQUIRED"
+    assert chk_next["reason_code"] in CHECKOUT_REASON_CODES
 
 
 def test_dev_tasks_set_bypass_and_anti_abuse(mock_workspace):

@@ -7,7 +7,8 @@ DO NOT RELOAD THIS MODULE.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Final
+from types import MappingProxyType
+from typing import Any, Callable, Final, Mapping
 
 EXPECTED_TOOL_NAMES: Final[frozenset[str]] = frozenset({
     "dev_tasks_status",
@@ -35,6 +36,71 @@ SCHEMA_META_KEY: Final[str] = "_meta"
 SNAPSHOT_SCHEMA_VERSION: Final[int] = 1
 META_ALLOWED_KEYS: Final[frozenset[str]] = frozenset({"schema_version"})
 POLL_WAIT_MAX_S_HARD_CEILING: Final[float] = 25.0
+
+SCHEMA_BYTE_MEASURE_ENCODING: Final[str] = "compact-json-utf8"
+MAX_TOOL_SCHEMA_BYTES: Final[int] = 1000
+WARN_TOOL_SCHEMA_BYTES: Final[int] = 900
+MAX_TOTAL_SCHEMA_BYTES: Final[int] = 12000
+
+MAX_NONTERMINAL_SNAPSHOT_BYTES: Final[int] = 1024
+STATUS_COMPACT_MAX_TASKS: Final[int] = 5
+STATUS_COMPACT_MAX_HOOK_ENTRIES: Final[int] = 3
+HOOK_LOG_TAIL_BYTES: Final[int] = 65536
+
+HOOK_LOG_CODES: Final[frozenset[str]] = frozenset({
+    "ASK_MODAL_BLOCKED",
+    "SCOPE_VIOLATION",
+    "BYPASS_ACTIVE",
+    "TASK_STATUS_TAMPER",
+    "PATH_OUT_OF_SCOPE",
+    "OTHER",
+})
+
+CHECKOUT_REASON_CODES: Final[frozenset[str]] = frozenset({
+    "REWORK_REQUIRED",
+    "PENDING_REVIEW",
+    "NO_CONFIRMED_TASKS",
+})
+
+RESPONSE_BUDGET_BYTES: Final[Mapping[str, int]] = MappingProxyType({
+    "dev_tasks_status": 2048,
+    "dev_tasks_checkout": 800,
+    "dev_tasks_refine_spec": 600,
+    "dev_tasks_promote_draft": 1200,
+    "dev_tasks_escalate": 1500,
+    "dev_reviewer_submit": 400,
+    "dev_reviewer_poll": MAX_NONTERMINAL_SNAPSHOT_BYTES,
+    "dev_reviewer_cancel": 512,
+    "dev_tasks_propose": 800,
+    "dev_tasks_confirm": 800,
+    "dev_tasks_complete": 800,
+    "dev_tasks_heartbeat": 512,
+    "dev_tasks_reclaim": 512,
+    "dev_tasks_archive": 800,
+    "dev_tasks_set_bypass": 800,
+    "dev_tasks_export_handoff_card": 2048,
+})
+
+
+def measure_payload_bytes(payload: Any) -> int:
+    """Return canonical UTF-8 byte length of ``payload`` under sorted compact JSON.
+
+    Contract:
+      * ``sort_keys=True`` — required for cross-process hash stability (33.1 E6).
+      * ``separators=(",", ":")`` and ``ensure_ascii=False`` — required by SSOT.
+      * Docstring MUST explicitly forbid use of this function for hashing;
+        hashing MUST transit ``canonical_json`` in ``response_compactor`` (33.1).
+    """
+    import json
+    return len(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
+def measure_tool_schema_bytes(schema: dict[str, Any]) -> int:
+    """Return UTF-8 byte length of compact JSON serialization of a single tool schema.
+
+    Delegates to ``measure_payload_bytes`` to ensure a single canonical measurement path.
+    """
+    return measure_payload_bytes(schema)
 
 
 def _missing_singleton() -> "_MissingSentinel":

@@ -44,8 +44,8 @@ RING1_MAX_LINES = 40          # 外环（非主工作区）单次读取硬上限
 RING1_MAX_BYTES = 64 * 1024   # 外环单次读取硬上限（字节，64 KiB）
 MAX_LIST_ENTRIES = 200        # 单次目录列表最大条目数
 MAX_GREP_HITS = 200           # grep 全局最大命中行数
-MAX_GREP_HITS_PER_FILE = 5    # grep 单文件最大匹配行数（保证广度）
-MAX_GREP_PATTERN_CHARS = 200  # 正则表达式最大长度限制（防 ReDoS sanity 限制）
+MAX_GREP_HITS_PER_FILE = 20   # grep 单文件最大匹配行数（保证广度与深度均衡）
+MAX_GREP_PATTERN_CHARS = 1024 # 正则表达式最大长度限制（防 ReDoS sanity 限制）
 GREP_LINE_SCAN_CHARS = 4096   # 单行正则扫描窗口，截断后参与匹配
 
 
@@ -94,6 +94,8 @@ class DirListing:
     entries: List[DirEntryInfo]
     total_entries: int
     omitted: int               # == total_entries - len(entries)
+    offset: int = 0
+    next_offset: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -417,9 +419,10 @@ def list_dir(
     rel_path: str = ".",
     allowed_roots: Optional[Sequence[str]] = None,
     max_entries: int = MAX_LIST_ENTRIES,
+    offset: int = 0,
 ) -> DirListing:
     """严格单层 scandir，过滤 .git / node_modules / __pycache__ 等。
-    目录优先、名称字典序升序。超限返回 omitted 计数，不递归。
+    目录优先、名称字典序升序。支持游标分页（offset / next_offset）。超限返回 omitted 计数，不递归。
     """
     res = resolve_within_roots(workspace_root, rel_path, allowed_roots)
     if res is None:
@@ -467,7 +470,18 @@ def list_dir(
 
     total_entries = len(raw_entries)
     effective_max = max(1, int(max_entries))
-    clipped = raw_entries[:effective_max]
+    effective_offset = max(0, int(offset))
+
+    if effective_offset >= total_entries:
+        clipped: List[DirEntryInfo] = []
+        next_offset: Optional[int] = None
+    else:
+        clipped = raw_entries[effective_offset : effective_offset + effective_max]
+        if effective_offset + len(clipped) < total_entries:
+            next_offset = effective_offset + len(clipped)
+        else:
+            next_offset = None
+
     omitted = max(0, total_entries - len(clipped))
 
     rel_clean = rel_path.replace("\\", "/")
@@ -477,6 +491,8 @@ def list_dir(
         entries=clipped,
         total_entries=total_entries,
         omitted=omitted,
+        offset=effective_offset,
+        next_offset=next_offset,
     )
 
 
@@ -489,12 +505,12 @@ def grep(
     deadline: float = DEFAULT_DEADLINE_SECONDS,
 ) -> GrepResult:
     """纯 Python 正则检索。
-    1. pattern 校验长度 <= 200，编译失败抛出 CodeExplorerError；
+    1. pattern 校验长度 <= 1024，编译失败抛出 CodeExplorerError；
     2. deadline 为相对秒数，若 deadline <= 0 立即返回 files_scanned=0, truncated=True；
     3. 确定性遍历，目录与文件按字典序排序；
     4. 跳过 .git，跳过 >512KB 文件与 NUL 二进制文件；
     5. 每行仅对前 GREP_LINE_SCAN_CHARS (4096) 字符执行正则搜索；
-    6. 每文件最多 5 条 matches（原始行），但 histogram 记录真实匹配次数；
+    6. 每文件最多 20 条 matches（原始行），但 histogram 记录真实匹配次数；
     7. 全局最多 200 条 matches，超限置 truncated=True；
     8. 逐文件处理后检查 deadline，超时置 truncated=True 立即退出。
     """
@@ -590,17 +606,16 @@ def grep(
                             text=line,
                         )
                     )
-                if len(matches) >= MAX_GREP_HITS:
-                    truncated = True
-                    break
 
         if file_match_count > 0:
             histogram_map[rel_to_root] = file_match_count
 
-        if time.monotonic() >= deadline_at:
+        if len(matches) >= MAX_GREP_HITS:
             truncated = True
             break
-        if truncated:
+
+        if time.monotonic() >= deadline_at:
+            truncated = True
             break
 
     histogram = [

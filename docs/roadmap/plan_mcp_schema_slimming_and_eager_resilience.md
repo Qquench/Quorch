@@ -1,0 +1,79 @@
+# Milestone v1.31 — MCP Tool Surface Schema Slimming & Eager Resilience Roadmap
+
+> **Status**: 🚀 Active Implementation  
+> **Target Version**: `v1.31`  
+> **Preceding Milestone**: `v1.30` (Cursor Pagination, Progressive Code Exploration & Multi-Root Sandbox)  
+> **Succeeding Milestone**: `v1.32` (Code Explorer Constants Evolution & Architecture Hardening)
+
+---
+
+## 1. Executive Summary & Root Cause (背景与根因)
+
+### 1.1 背景与严重工程故障 (Context & Failure Mode)
+在长交互或任务复杂度较高的开发会话中，IDE 宿主（Antigravity）在消耗大量 Token 后会触发自动**上下文截断（Context Truncation / Compact）**。
+截断重新组装后，系统平台会重新计算 Function Declaration 预算：
+* Quench 现存 16 个 MCP 工具的 Schema 总体积高达 **19,891 字节**（近 20KB / ~5000 Tokens）；
+* 其中 8 个重型工具单体体积超过 **1,100 字节**（最大达 2,002 字节），包含了大量长篇大论的英文说明与重复的 `[中文对照]`；
+* IDE 宿主在截断后实施了硬配额裁剪，**物理丢弃了所有 ≥1,103 字节的 8 个工具**（包括核心生命周期工具 `dev_tasks_status`、`dev_tasks_checkout`、`dev_tasks_confirm`、`dev_tasks_complete`、`dev_reviewer_submit` 等）；
+* 宿主未将超额 Eager 工具降级放入 `Lazy:` 列表，导致前置 Cortex 权限网关直接在本地拦截，阻断任务推进与审查提交通道。
+
+### 1.2 根因分析 (Root Cause)
+1. **中英双语冗余堆砌**：每个工具和参数均编写双份说明，单体体积膨胀 100%；
+2. **缺乏单工具 Schema 体积硬上限**：没有防范 IDE 上下文截断裁决的体积门禁（Hard Ceiling < 800 Bytes）；
+3. **Eager 预算超载**：16 个工具总体积超标，引爆了宿主语言服务器的防御性裁剪。
+
+---
+
+## 2. Objectives & Non-Goals (目标与非目标)
+
+### 2.1 核心目标 (Goals)
+1. **彻底消除双语冗余**：将 `server.py` 中 16 个 `@mcp.tool()` 的 Docstring 统一优化为高信息密度的专业技术英文，移除长篇叙述与中英重复段落。
+2. **单工具硬封顶 (Single Tool Hard Cap)**：确保全部 16 个工具的 Schema JSON 物理体积全部压缩至 **1,000 字节以下**（低于 1,024 字节截断红线与 1,087 字节丢弃线，含安全裕度）。
+3. **总预算瘦身 (Global Budget Slimming)**：将 16 个工具的 Schema 总体积从 ~20KB 骤降至 **~11KB**（缩减 45% 以上，严格 <= 12,000 字节累计门禁）。
+4. **快照与契约自动化同步**：通过 `scripts/export_ide_schemas.py --write` 重新生成 `docs/architecture/ide_tool_schemas.json` 快照，并通过 `test_snapshot_drift_gate_contract.py` 和全部已有单元测试。
+
+### 2.2 非目标 (Non-Goals)
+* 不增删任何工具，严格维持 16 个工具的现有命名与拓扑；
+* 不改变任何工具参数的字段名、数据类型和默认值语义，保持 100% 协议向后兼容；
+* 不改动 FastMCP 工具的业务实现逻辑。
+
+---
+
+## 3. Tool Schema Slimming Spec (16 工具精简指标表)
+
+| # | MCP 工具名称 | 优化前体积 | 目标体积 | 优化重点 |
+|---|---|:---:|:---:|---|
+| 1 | `dev_tasks_status` | 1,827 B | **< 550 B** | 精简状态看板描述，精简 switch_mode/stop_at 枚举说明 |
+| 2 | `dev_tasks_propose` | 1,005 B | **< 450 B** | 移除双语对照，精简六大核心字段提要 |
+| 3 | `dev_tasks_confirm` | 1,236 B | **< 450 B** | 精简 confirm/rework 动作说明 |
+| 4 | `dev_tasks_checkout` | 1,103 B | **< 400 B** | 精简单向检出指引说明 |
+| 5 | `dev_tasks_complete` | 1,454 B | **< 480 B** | 移除双语与长篇 diff 说明，仅保留 DoD 与产物验证要求 |
+| 6 | `dev_tasks_heartbeat` | 1,040 B | **< 400 B** | 精简租约续订说明 |
+| 7 | `dev_tasks_reclaim` | 1,209 B | **< 420 B** | 精简超期回收语义说明 |
+| 8 | `dev_tasks_promote_draft` | 786 B | **< 380 B** | 精简物理可行性 Lint 说明 |
+| 9 | `dev_tasks_refine_spec` | 1,608 B | **< 550 B** | 精简 AST 提取与规约强化说明 |
+| 10 | `dev_tasks_escalate` | 1,087 B | **< 450 B** | 精简架构升级理由说明 |
+| 11 | `dev_tasks_export_handoff_card` | 385 B | **< 350 B** | 保持极简 |
+| 12 | `dev_tasks_archive` | 688 B | **< 380 B** | 精简归档与 CHANGELOG 同步说明 |
+| 13 | `dev_tasks_set_bypass` | 2,002 B | **< 580 B** | 移除冗余类别展开说明，仅保留 bypass 核心参数 |
+| 14 | `dev_reviewer_submit` | 1,485 B | **< 520 B** | 精简异步咨询参数描述 |
+| 15 | `dev_reviewer_poll` | 876 B | **< 420 B** | 保持极简白名单契约 |
+| 16 | `dev_reviewer_cancel` | 675 B | **< 380 B** | 保持极简取消语义 |
+
+---
+
+## 4. Phase Breakdown & Execution Plan (分步实施计划)
+
+### Phase 1: Docstring 瘦身与精简重构
+- 涉及文件：`plugins/quench-dev-tasks/server/server.py`
+- 操作：逐一精简 16 个 `@mcp.tool()` 的 Docstring，剔除 `[中文对照]` 与重复中文字段，采用高精度专业技术英文。
+
+### Phase 2: Schema 快照重新生成与体积门禁断言
+- 涉及文件：`docs/architecture/ide_tool_schemas.json`
+- 执行 `python scripts/export_ide_schemas.py --write` 刷新快照。
+- 在 `test_snapshot_drift_gate_contract.py` 中断言所有工具 Schema 单体字节数严格 `<= 1000` 字节，且总字节数 `<= 12000` 字节。
+
+### Phase 3: 全量回归与 Eager 保全验证
+- 运行完整测试套件：`pytest plugins/quench-dev-tasks/server/tests/`。
+- 验证 `test_snapshot_drift_gate_contract.py`、`test_tool_surface_contract.py` 100% 通过。
+

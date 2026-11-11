@@ -35,7 +35,8 @@ def test_templates_exist_and_valid_structure():
     mcp_dummy = re.sub(r"\{\{[A-Z_]+\}\}", "dummy_val", mcp_raw)
     mcp_data = json.loads(mcp_dummy)
     assert "mcpServers" in mcp_data
-    assert "quench-dev-tasks" in mcp_data["mcpServers"]
+    assert "core" in mcp_data["mcpServers"]
+    assert "quench-dev-tasks" not in mcp_data["mcpServers"]
 
     hooks_dummy = re.sub(r"\{\{[A-Z_]+\}\}", "dummy_val", hooks_raw)
     hooks_data = json.loads(hooks_dummy)
@@ -84,8 +85,9 @@ def test_render_with_unix_paths():
 
     mcp_rendered = mcp_text.replace("{{PYTHON_EXECUTABLE}}", python_exe).replace("{{SERVER_SCRIPT_PATH}}", server_script)
     mcp_obj = json.loads(mcp_rendered)
-    assert mcp_obj["mcpServers"]["quench-dev-tasks"]["command"] == python_exe
-    assert mcp_obj["mcpServers"]["quench-dev-tasks"]["args"] == [server_script]
+    server_key = "core"
+    assert mcp_obj["mcpServers"][server_key]["command"] == python_exe
+    assert mcp_obj["mcpServers"][server_key]["args"] == [server_script]
 
     hooks_rendered = (
         hooks_text.replace("{{PYTHON_EXECUTABLE}}", python_exe)
@@ -129,8 +131,9 @@ def test_render_windows_backslash_safety():
         "{{SERVER_SCRIPT_PATH}}", json_escape(win_server)
     )
     mcp_obj = json.loads(safe_mcp)
-    assert mcp_obj["mcpServers"]["quench-dev-tasks"]["command"] == win_python
-    assert mcp_obj["mcpServers"]["quench-dev-tasks"]["args"] == [win_server]
+    server_key = "core"
+    assert mcp_obj["mcpServers"][server_key]["command"] == win_python
+    assert mcp_obj["mcpServers"][server_key]["args"] == [win_server]
 
     safe_hooks = (
         hooks_text.replace("{{PYTHON_EXECUTABLE}}", json_escape(win_python))

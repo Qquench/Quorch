@@ -134,9 +134,9 @@ def test_consumed_for_never_uses_task_file_key(tmp_path):
 
 def test_status_response_backward_compat(tmp_path):
     ws = _init_mock_workspace(tmp_path)
-    res = dev_tasks_status(ws)
+    res_full = dev_tasks_status(ws, verbosity="full")
 
-    # Legacy keys set frozen
+    # Legacy keys set frozen in full mode
     legacy_keys = {
         "project_name",
         "dev_tasks_dir",
@@ -145,12 +145,12 @@ def test_status_response_backward_compat(tmp_path):
         "session_bypass",
         "static_fast_track_patterns",
         "governance_scope",
-        "last_hook_log_entries",
+        "hook_log",
         "reconcile_report",
         "bypass_queue",
     }
     for k in legacy_keys:
-        assert k in res, f"Missing legacy key: {k}"
+        assert k in res_full, f"Missing legacy key in full mode: {k}"
 
     # New dual mode keys
     new_keys = {
@@ -164,12 +164,20 @@ def test_status_response_backward_compat(tmp_path):
         "autopilot",
     }
     for k in new_keys:
-        assert k in res, f"Missing new dual mode key: {k}"
+        assert k in res_full, f"Missing new dual mode key: {k}"
 
-    contract = res["session_role_contract"]
+    contract = res_full["session_role_contract"]
     assert contract["role"] in ("runner", "reviewer_orchestrator")
     assert "[QUENCH-DISPATCH: RUNNER]" in contract["dispatch_envelope"]
     assert contract["handshake_rule"] == "status_called_by_main_only"
+
+    # Default mode is compact
+    res_compact = dev_tasks_status(ws)
+    assert "entitlements_hash" in res_compact
+    assert "last_hook_log_entries_compact" in res_compact
+    assert "governance_scope" not in res_compact
+    assert "session_role_contract" not in res_compact
+    assert "hook_log" not in res_compact
 
 
 def test_stop_at_none_clears_consumed_even_when_foreign_task(tmp_path):

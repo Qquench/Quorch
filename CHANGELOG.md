@@ -3,6 +3,29 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-11] 2026-11-11_v1_33_mcp_response_slimming.md
+
+- **Task 33.0**: 预算 SSOT 去重、溢出常量化与 INV-10 措辞对账 (Budget SSOT De-duplication & Overflow Constants)
+- **Task 33.1**: 运行时预算钳制管道与分类器可达性对账 (Runtime Budget Clamp & Classifier Reachability Reconciliation)
+- **Task 33.2**: dev_tasks_status 有界钳制接入、Hook 日志尾部读与 full 超集不变量
+- **Task 33.3**: 交互工具冻结词表对账、回显剥离与全表面预算回归
+
+## [2026-11-11] 2026-11-11_v1_32_code_explorer_constants_and_robustness.md
+
+- **Task 32.1**: Code Explorer Constants Evolution & list_dir Cursor Pagination
+
+## [2026-11-11] 2026-11-11_v1_31c_mcp_schema_size_gate_hardening.md
+
+- **Task 31.3**: Schema 尺寸门禁物理化落地与模板断言硬化
+
+## [2026-11-11] 2026-11-11_v1_31b_mcp_eager_resilience.md
+
+- **Task 31.2**: Slim Heavy MCP Tool Schemas under 850B for Antigravity Eager Resilience
+
+## [2026-11-11] 2026-11-11_v1_31_mcp_schema_slimming.md
+
+- **Task 31.1**: MCP Tool Surface Docstring Slimming & Hard Cap under 600B
+
 ## [2026-11-10] 2026-11-10_v1_30_batch1_cursor_pagination_and_progressive_code_exploration.md
 
 - **Task 30.1**: 代码探索器游标分页、行原子化窗口与渐进式展开原语（Phases 1-5）

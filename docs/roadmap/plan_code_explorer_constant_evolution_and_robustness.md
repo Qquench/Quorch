@@ -1,0 +1,26 @@
+# Milestone v1.32 — Code Explorer Constants Evolution & Architecture Hardening Roadmap
+
+> **Status**: 📋 Upcoming Pipeline (Follows v1.31)  
+> **Target Version**: `v1.32`  
+> **Preceding Milestone**: `v1.31` (MCP Tool Surface Schema Slimming & Eager Resilience)  
+> **Diagnostic Reviewer Job**: `job_1794315890_9bf81dfa` (DeepSeek Critique)
+
+---
+
+## 1. Executive Summary & Reviewer Findings (背景与 Reviewer 裁决)
+
+在 v1.30 落地代码探索器渐进式演进与游标分页后，外部 Senior Architecture Reviewer (DeepSeek) 对 `code_explorer.py` §3.1 模块级常量进行了首轮批判性审计（Job ID: `job_1794315890_9bf81dfa`），指出了以下核心缺陷：
+1. **`MAX_GREP_HITS_PER_FILE = 5` (🔴 Severe)**：单文件仅展示 5 处匹配，在特征密集型库中造成“广度对深度的残酷倾轧”，掐断关键集中定义处的排查；
+2. **`MAX_GREP_PATTERN_CHARS = 200` (🔴 虚假防御)**：字符长度无法防御短 ReDoS（6~8 字符即可引发灾难性回溯），且 4096 字符输入窗口已构成真实物理防线，200 字符限制误伤了合法高级联合正则；
+3. **`GREP_LINE_SCAN_CHARS = 4096` (🟡 直方图统计污染)**：4096 字符前置截断导致长行/压缩文件中的直方图计数系统性偏低，破坏全局统计完整性；
+4. **`list_dir` 缺乏分页游标**：在超大规模目录中，后序文件被计算为 omitted 后物理不可达。
+
+---
+
+## 2. Core Objectives (核心目标)
+
+1. **`MAX_GREP_HITS_PER_FILE` 弹性扩容**：从 5 提升至 15~20，并支持单文件精细展开；
+2. **`MAX_GREP_PATTERN_CHARS` 扩容解除误伤**：从 200 扩容至 1024 字符，消除对联合枚举/状态机长正则的虚假拦截；
+3. **`list_dir` 引入游标分页**：补齐 `offset` / `next_offset` 协议，根除大目录信息黑洞；
+4. **解耦 `grep` matches 截断与直方图统计**：确保全局符号分布图统计真实完整。
+

@@ -223,7 +223,8 @@ The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_C
     "stop_at": null,
     "switch_mode": null,
     "switch_reviewer_channel": null,
-    "task_file": null
+    "task_file": null,
+    "verbosity": "compact"
   }
 }
 ```

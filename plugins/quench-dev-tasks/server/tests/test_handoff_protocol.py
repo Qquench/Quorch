@@ -329,14 +329,13 @@ def test_path_traversal_defense(test_workspace):
 
 
 def test_legacy_backward_compatibility_fields(test_workspace):
-    """Verify checkout and escalate maintain 100% backward compatibility for legacy clients."""
-    # 1. dev_tasks_checkout batch finished return schema
+    """Verify checkout compact schema (v1.33) and escalate backward compatibility for legacy clients."""
+    # 1. dev_tasks_checkout batch finished return compact schema (v1.33 response slimming)
     res_checkout = dev_tasks_checkout(workspace_root=test_workspace)
-    assert "reviewer_handoff" in res_checkout
-    assert "handoff_card" in res_checkout
-    assert res_checkout["handoff_card"] == res_checkout["reviewer_handoff"]["legacy_card_markdown"]
     assert res_checkout["batch_finished"] is True
-    assert "instruction" in res_checkout
+    assert res_checkout.get("has_pending_tasks") is True
+    assert res_checkout.get("reason_code") == "PENDING_REVIEW"
+    assert "harness_next_action" in res_checkout
 
     # 2. dev_tasks_escalate return schema
     res_esc = dev_tasks_escalate(

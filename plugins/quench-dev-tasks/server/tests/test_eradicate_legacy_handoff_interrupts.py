@@ -104,8 +104,10 @@ def test_dev_tasks_checkout_no_interruption(temp_workspace):
     res = dev_tasks_checkout(workspace_root=temp_workspace)
     assert res.get("has_pending_tasks") is True
     assert res.get("batch_finished") is True
-    assert "instruction" in res
-    instruction = res["instruction"]
+    assert res.get("reason_code") == "PENDING_REVIEW"
+    assert "harness_next_action" in res
+    action_dict = res["harness_next_action"]
+    instruction = action_dict.get("instruction", res.get("instruction", ""))
 
     # Assert legacy brake instructions are eradicated
     assert "请输出【Quench 任务交接卡】" not in instruction
@@ -113,12 +115,7 @@ def test_dev_tasks_checkout_no_interruption(temp_workspace):
     assert "开新会话" not in instruction
 
     # Assert positive automation alignment
-    assert "harness_next_action" in instruction or "dev_reviewer_submit" in instruction or "dev_tasks_confirm" in instruction
-
-    # Assert backward-compatible schema fields are maintained
-    assert "reviewer_handoff" in res
-    assert "handoff_card" in res
-    assert "batch_finished" in res
+    assert "harness_next_action" in instruction or "dev_reviewer_submit" in instruction or "dev_tasks_confirm" in instruction or "REVIEW" in str(action_dict.get("action"))
 
 
 def test_dev_tasks_escalate_instruction(temp_workspace):

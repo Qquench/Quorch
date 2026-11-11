@@ -1518,6 +1518,94 @@
       "git_head_sha": "dad6191d2149bf3e964d078de9ea4e1cef24fd2a",
       "git_index_mtime": 1793970280.0748496,
       "released": true
+    },
+    "2026-11-11_v1_31_mcp_schema_slimming::31.1": {
+      "task_id": "2026-11-11_v1_31_mcp_schema_slimming::31.1",
+      "md_sha256": "98b61c699b80f3b2b4c1e633f85451fe51e0f7e0bb462738cba89757d925921f",
+      "generation": 2,
+      "holder_token": "token_1794356715797_22340",
+      "last_heartbeat_monotonic_ns": 393260890000000,
+      "last_heartbeat_wall_utc": "2026-11-11T00:27:45.096715+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794311560.2946315,
+      "released": true
+    },
+    "2026-11-11_v1_32_code_explorer_constants_and_robustness::32.1": {
+      "task_id": "2026-11-11_v1_32_code_explorer_constants_and_robustness::32.1",
+      "md_sha256": "d9af47c81253ee066aaae4fe41807fae026e899f1fd013ce1688bbe0e2885aad",
+      "generation": 3,
+      "holder_token": "token_1794372218969_5456",
+      "last_heartbeat_monotonic_ns": 409047875000000,
+      "last_heartbeat_wall_utc": "2026-11-11T04:50:53.269974+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
+    },
+    "2026-11-11_v1_31b_mcp_eager_resilience::31.2": {
+      "task_id": "2026-11-11_v1_31b_mcp_eager_resilience::31.2",
+      "md_sha256": "6d71569850f11e22c2967a0c2b055b04301e37f849196ded62e177e004ad7d35",
+      "generation": 1,
+      "holder_token": "token_1794359793641_22340",
+      "last_heartbeat_monotonic_ns": 396365500000000,
+      "last_heartbeat_wall_utc": "2026-11-11T01:19:29.710502+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
+    },
+    "2026-11-11_v1_31c_mcp_schema_size_gate_hardening::31.3": {
+      "task_id": "2026-11-11_v1_31c_mcp_schema_size_gate_hardening::31.3",
+      "md_sha256": "af213eb518e68cf90073557c5f190dc1b35dced5fe71fe055defa8a56df4282f",
+      "generation": 1,
+      "holder_token": "token_1794371888541_5456",
+      "last_heartbeat_monotonic_ns": 408597265000000,
+      "last_heartbeat_wall_utc": "2026-11-11T04:43:21.475464+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
+    },
+    "2026-11-11_v1_33_mcp_response_slimming::33.1": {
+      "task_id": "2026-11-11_v1_33_mcp_response_slimming::33.1",
+      "md_sha256": "73f162bac7e53b28e3b93e6b574d94b7634c7dc886e65bd3c8f0b4b89a8296e0",
+      "generation": 1,
+      "holder_token": "token_1794373837462_5456",
+      "last_heartbeat_monotonic_ns": 410903953000000,
+      "last_heartbeat_wall_utc": "2026-11-11T05:21:49.352482+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
+    },
+    "2026-11-11_v1_33_mcp_response_slimming::33.2": {
+      "task_id": "2026-11-11_v1_33_mcp_response_slimming::33.2",
+      "md_sha256": "6438914a6b16513827d3570b873b159dea2be6a3bbfea817a61fd4f3844c5503",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 410231812000000,
+      "last_heartbeat_wall_utc": "2026-11-11T05:10:37.213352+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
+    },
+    "2026-11-11_v1_33_mcp_response_slimming::33.3": {
+      "task_id": "2026-11-11_v1_33_mcp_response_slimming::33.3",
+      "md_sha256": "4441655a2fff3900bf8f9d579e92bce5dfe1748a992da8643343a7977974a787",
+      "generation": 1,
+      "holder_token": "token_1794378020103_5456",
+      "last_heartbeat_monotonic_ns": 416735765000000,
+      "last_heartbeat_wall_utc": "2026-11-11T06:59:01.166080+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
+    },
+    "2026-11-11_v1_33_mcp_response_slimming::33.0": {
+      "task_id": "2026-11-11_v1_33_mcp_response_slimming::33.0",
+      "md_sha256": "73f162bac7e53b28e3b93e6b574d94b7634c7dc886e65bd3c8f0b4b89a8296e0",
+      "generation": 1,
+      "holder_token": "token_1794373102261_5456",
+      "last_heartbeat_monotonic_ns": 409963906000000,
+      "last_heartbeat_wall_utc": "2026-11-11T05:06:09.305407+00:00",
+      "git_head_sha": "43f99d00514a1828d833102cc1552a938832cd6b",
+      "git_index_mtime": 1794357418.797837,
+      "released": true
     }
   }
 }

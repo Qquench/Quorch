@@ -164,7 +164,10 @@ async def test_dev_tasks_refine_spec_offline_fallback(sample_ws):
     assert res["degraded"] is True
     assert res["engine"] == "fallback_offline"
     assert res["task_id"] == "3.1"
-    assert "重构订单状态机" in res["refined_spec"]
+    assert "content_sha256" in res
+    assert "bytes_written" in res
+    assert "refined_spec" not in res
+    assert len(res["content_sha256"]) == 64
 
 
 @pytest.mark.anyio
@@ -210,9 +213,10 @@ async def test_dev_tasks_refine_spec_mock_success(sample_ws):
         assert res["ok"] is True
         assert res["degraded"] is False
         assert res["validation"]["is_valid"] is True
-        assert "【涉及文件】" in res["refined_spec"]
-        assert "【缺陷根因与修改目标】" in res["refined_spec"]
-        assert "【DoD 验证命令】" in res["refined_spec"]
+        assert "content_sha256" in res
+        assert "bytes_written" in res
+        assert "refined_spec" not in res
+        assert len(res["content_sha256"]) == 64
         assert res["task_id"] == "3.2"
 
 

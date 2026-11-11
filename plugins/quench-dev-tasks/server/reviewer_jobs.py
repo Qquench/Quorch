@@ -37,6 +37,7 @@ from log_naming import (
 from project_config import resolve_reviewer_log_dir
 from workspace_lease import WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
 from reviewer_engine import format_heartbeat_line
+from tool_surface_constants import MAX_NONTERMINAL_SNAPSHOT_BYTES
 
 _REAL_ASYNCIO_SLEEP = asyncio.sleep
 
@@ -85,7 +86,6 @@ TERMINAL_RESULT_ALLOWED_FIELDS: Final[frozenset[str]] = frozenset(
     }
 )
 
-MAX_NONTERMINAL_SNAPSHOT_BYTES: Final[int] = 1024
 AUDIT_LINE_MAX_BYTES: Final[int] = 16384
 if MAX_NONTERMINAL_SNAPSHOT_BYTES != 1024:
     raise ValueError("MAX_NONTERMINAL_SNAPSHOT_BYTES must be 1024")

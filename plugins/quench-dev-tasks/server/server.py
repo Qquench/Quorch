@@ -7,6 +7,7 @@ import asyncio
 import datetime
 from datetime import datetime, timezone, timedelta, date
 import glob
+import hashlib
 import json
 import math
 import os
@@ -21,7 +22,17 @@ from typing import Any, Dict, List, Mapping, Optional, Literal, Sequence, TypedD
 from fastmcp import Context, FastMCP
 
 from log_naming import SESSION_ID_PATTERN
-from tool_surface_constants import POLL_WAIT_MAX_S_HARD_CEILING
+from tool_surface_constants import (
+    HOOK_LOG_TAIL_BYTES,
+    POLL_WAIT_MAX_S_HARD_CEILING,
+    STATUS_COMPACT_MAX_HOOK_ENTRIES,
+    STATUS_COMPACT_MAX_TASKS,
+)
+from response_compactor import (
+    classify_hook_log_entry,
+    compute_entitlements_hash,
+    fit_to_budget,
+)
 
 
 def _atomic_write_json(filepath: str, data: dict) -> None:
@@ -433,39 +444,225 @@ def _audit_test_changes(
     }
 
 
-def _get_recent_hook_logs(workspace_root: str, max_lines: int = 10) -> List[str]:
-    """Read the last N lines of .agents/.quench_hook.log with integrity validation. / 读取 .agents/.quench_hook.log 最近 N 条日志，若不存在返回空列表。"""
+def _read_hook_log_tail(path: Union[Path, str], max_bytes: int = HOOK_LOG_TAIL_BYTES) -> list[str]:
+    """Bounded fail-open tail reader for hook governance logs.
 
-    log_file = os.path.join(workspace_root, ".agents", ".quench_hook.log")
-    if not os.path.isfile(log_file):
-        return []
-
+    Contract:
+      - Reads at most max_bytes from the tail of the file.
+      - If seeking was performed, drops the first (potentially partial) line.
+      - Uses errors='replace' to tolerate multibyte UTF-8 / CJK boundary splits safely.
+      - Never raises: returns [] on any I/O, path, or decoding failure.
+    """
     try:
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-            raw_content = f.read()
-
-        if not raw_content:
+        p = Path(path)
+        if not p.is_file():
+            return []
+        file_size = p.stat().st_size
+        if file_size <= 0:
             return []
 
-        has_trailing_newline = raw_content.endswith("\n") or raw_content.endswith("\r")
-        raw_lines = raw_content.splitlines()
-        if not raw_lines:
-            return []
+        with open(p, "rb") as f:
+            if file_size > max_bytes:
+                f.seek(file_size - max_bytes)
+                raw_bytes = f.read(max_bytes)
+                text = raw_bytes.decode("utf-8", errors="replace")
+                lines = text.splitlines()
+                # Drop first potentially broken line when seeking from middle
+                lines = lines[1:] if len(lines) > 1 else []
+            else:
+                raw_bytes = f.read(file_size)
+                text = raw_bytes.decode("utf-8", errors="replace")
+                lines = text.splitlines()
 
-        # 若文件末尾没有换行符，说明末行正处于子进程写入半途（未刷盘换行），属于不完整行，剔除
-        if not has_trailing_newline:
-            raw_lines.pop()
+        if lines and lines[-1] and not text.endswith(("\n", "\r")):
+            lines.pop()
 
-        if not raw_lines:
-            return []
-
-        # 剔除可能包含异常空字符的残缺末行
-        if "\x00" in raw_lines[-1]:
-            raw_lines.pop()
-
-        return raw_lines[-max_lines:]
+        result = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped and "\x00" not in stripped:
+                result.append(stripped)
+        return result
     except Exception:
         return []
+
+
+def _get_recent_hook_logs(workspace_root: str, max_lines: int = 10) -> List[str]:
+    """Read the last N lines of .agents/.quench_hook.log with bounded tail read and integrity validation."""
+    log_file = os.path.join(workspace_root, ".agents", ".quench_hook.log")
+    lines = _read_hook_log_tail(log_file)
+    return lines[-max_lines:] if lines else []
+
+
+def _build_full_status_sync(
+    workspace_root: str,
+    config: Any,
+    snapshot: Any,
+    bypass_status: Optional[Dict[str, Any]],
+    file_records: List[Dict[str, Any]],
+    active_task: Optional[Dict[str, Any]],
+    reconcile_report: Any,
+    runtime_mode_changed: bool,
+    rejection_reason: Optional[str],
+    runtime_mode_warning: Optional[str],
+    all_tasks: List[Dict[str, Any]],
+    raw_hook_logs: List[str],
+    task_file: Optional[str] = None,
+    empty_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+    res = {
+        "project_name": config.project_name,
+        "dev_tasks_dir": dev_tasks_dir,
+        "files": file_records,
+        "active_task": active_task,
+        "session_bypass": bypass_status,
+        "static_fast_track_patterns": config.get_fast_track_patterns(),
+        "governance_scope": config.governance_scope,
+        "hook_log": raw_hook_logs[-10:] if raw_hook_logs else [],
+        "reconcile_report": {
+            "bypass_queue": list(reconcile_report.bypass_queue) if hasattr(reconcile_report, "bypass_queue") else [],
+            "drift_queue": list(reconcile_report.drift_queue) if hasattr(reconcile_report, "drift_queue") else [],
+            "matched_queue": list(reconcile_report.matched_queue) if hasattr(reconcile_report, "matched_queue") else [],
+        },
+        "bypass_queue": list(reconcile_report.bypass_queue) if hasattr(reconcile_report, "bypass_queue") else [],
+        "effective_mode": snapshot.effective_mode,
+        "mode_source": snapshot.mode_source,
+        "effective_reviewer_channel": snapshot.effective_reviewer_channel,
+        "runner_subagent_model_hint": snapshot.runner_subagent_model_hint,
+        "fallback_notice": snapshot.fallback_notice,
+        "runtime_mode_warning": runtime_mode_warning,
+        "session_role_contract": snapshot.session_role_contract,
+        "autopilot": snapshot.autopilot.to_dict(),
+        "tasks": all_tasks,
+    }
+    if empty_message:
+        res["message"] = empty_message
+    if runtime_mode_changed or rejection_reason:
+        res["runtime_mode_changed"] = runtime_mode_changed
+        if rejection_reason is not None:
+            res["reason"] = rejection_reason
+    if hasattr(reconcile_report, "bypass_queue") and reconcile_report.bypass_queue:
+        res["bypass_warning"] = (
+            f"⚠️ Detected {len(reconcile_report.bypass_queue)} unauthorized rogue task files quarantined in bypass_queue: "
+            f"{list(reconcile_report.bypass_queue)} / 检测到未授权旁路任务单已物理隔离"
+        )
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_status",
+        res,
+        last_success=True,
+        task_file=task_file,
+        current_task_id=(active_task.get("id") if active_task else None),
+        config=config,
+        compact=False,
+    )
+    return res
+
+
+def _build_compact_status_sync(
+    workspace_root: str,
+    config: Any,
+    snapshot: Any,
+    bypass_status: Optional[Dict[str, Any]],
+    file_records: List[Dict[str, Any]],
+    active_task: Optional[Dict[str, Any]],
+    reconcile_report: Any,
+    runtime_mode_changed: bool,
+    rejection_reason: Optional[str],
+    runtime_mode_warning: Optional[str],
+    all_tasks: List[Dict[str, Any]],
+    raw_hook_logs: List[str],
+    task_file: Optional[str] = None,
+    empty_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+    rel_dev_tasks_dir = os.path.relpath(dev_tasks_dir, workspace_root).replace("\\", "/")
+
+    canonical_cfg = {
+        "governance_scope": config.governance_scope,
+        "session_role_contract": snapshot.session_role_contract,
+    }
+    entitlements_hash = compute_entitlements_hash(canonical_cfg)
+
+    compact_hook_entries = []
+    rel_log_ref = ".agents/.quench_hook.log"
+    for line in (raw_hook_logs[-STATUS_COMPACT_MAX_HOOK_ENTRIES:] if raw_hook_logs else []):
+        code = classify_hook_log_entry(line)
+        ts = line[:19] if len(line) >= 19 and line[4] == "-" else ""
+        if ts:
+            compact_hook_entries.append(f"{ts} [{code}] log_ref={rel_log_ref}")
+        else:
+            compact_hook_entries.append(f"[{code}] log_ref={rel_log_ref}")
+
+    tasks_total = len(all_tasks)
+    compact_tasks = all_tasks[:STATUS_COMPACT_MAX_TASKS]
+    truncated_sections: list[str] = []
+    if tasks_total > STATUS_COMPACT_MAX_TASKS:
+        truncated_sections.append("tasks")
+
+    compact_files = []
+    for f in file_records:
+        cf = {
+            "name": f.get("name"),
+            "path": os.path.relpath(f["path"], workspace_root).replace("\\", "/") if "path" in f else "",
+            "total_tasks": f.get("total_tasks", 0),
+            "summary": {k: v for k, v in f.get("summary", {}).items() if v > 0},
+            "batches": {k: v for k, v in f.get("batches", {}).items() if v or k == "completed_count"},
+            "quarantined": f.get("quarantined", False),
+        }
+        if f.get("quarantine_reason"):
+            cf["quarantine_reason"] = f["quarantine_reason"]
+        compact_files.append(cf)
+
+    res = {
+        "project_name": config.project_name,
+        "dev_tasks_dir": rel_dev_tasks_dir,
+        "files": compact_files,
+        "active_task": active_task,
+        "session_bypass": bypass_status,
+        "static_fast_track_patterns": config.get_fast_track_patterns(),
+        "entitlements_hash": entitlements_hash,
+        "last_hook_log_entries_compact": compact_hook_entries,
+        "reconcile_report": {
+            "bypass_queue": list(reconcile_report.bypass_queue) if hasattr(reconcile_report, "bypass_queue") else [],
+            "drift_queue": list(reconcile_report.drift_queue) if hasattr(reconcile_report, "drift_queue") else [],
+            "matched_queue": list(reconcile_report.matched_queue) if hasattr(reconcile_report, "matched_queue") else [],
+        },
+        "bypass_queue": list(reconcile_report.bypass_queue) if hasattr(reconcile_report, "bypass_queue") else [],
+        "effective_mode": snapshot.effective_mode,
+        "mode_source": snapshot.mode_source,
+        "effective_reviewer_channel": snapshot.effective_reviewer_channel,
+        "runner_subagent_model_hint": snapshot.runner_subagent_model_hint,
+        "fallback_notice": snapshot.fallback_notice,
+        "runtime_mode_warning": runtime_mode_warning,
+        "autopilot": snapshot.autopilot.to_dict(),
+        "tasks_total": tasks_total,
+        "tasks": all_tasks,
+    }
+    if empty_message:
+        res["message"] = empty_message
+    if runtime_mode_changed or rejection_reason:
+        res["runtime_mode_changed"] = runtime_mode_changed
+        if rejection_reason is not None:
+            res["reason"] = rejection_reason
+    if hasattr(reconcile_report, "bypass_queue") and reconcile_report.bypass_queue:
+        res["bypass_warning"] = (
+            f"⚠️ Detected {len(reconcile_report.bypass_queue)} rogue task file(s) quarantined in bypass_queue"
+        )
+
+    _inject_harness_next_action(
+        workspace_root,
+        "dev_tasks_status",
+        res,
+        last_success=True,
+        task_file=task_file,
+        current_task_id=(active_task.get("id") if active_task else None),
+        config=config,
+        compact=True,
+    )
+
+    return fit_to_budget("dev_tasks_status", res)
 
 
 # ==============================================================================
@@ -480,18 +677,18 @@ def dev_tasks_status(
     switch_reviewer_channel: Optional[Literal["external_api", "host_subagent"]] = None,
     stop_at: Optional[Literal["none", "after_propose", "after_review", "after_confirm", "before_archive", "after_batch"]] = None,
     task_file: Optional[str] = None,
+    verbosity: Literal["compact", "full"] = "compact",
 ) -> Dict[str, Any]:
-    """Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks. Supports runtime orchestration mode switching and autopilot breakpoint configuration.
-
-    [中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务，支持双模运行时切换与 Autopilot 断点配置。
+    """Task status.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        include_drafts: Whether to include draft tasks in pending queue (default False) / 是否在待领队列中包含草案任务（默认隔离）。
-        switch_mode: Target orchestration mode ('standard', 'inverted') / 目标编排模式。
-        switch_reviewer_channel: Target reviewer channel ('external_api', 'host_subagent') / 目标审查通信渠道。
-        stop_at: Autopilot breakpoint stage ('none', 'after_propose', 'after_review', 'after_confirm', 'before_archive', 'after_batch') / Autopilot 停靠断点阶段。
-        task_file: Optional target task file name to bind / 可选绑定的任务单文件名。
+        workspace_root: Workspace.
+        include_drafts: Drafts ok.
+        switch_mode: Mode set.
+        switch_reviewer_channel: Channel.
+        stop_at: Stop at.
+        task_file: Task doc.
+        verbosity: Full/min.
     """
     try:
         config = load_project_config(workspace_root)
@@ -568,41 +765,25 @@ def dev_tasks_status(
                 runtime_mode_changed = applied
                 runtime_mode_warning = snapshot.runtime_mode_warning
 
-        empty_res = {
-            "project_name": config.project_name,
-            "dev_tasks_dir": dev_tasks_dir,
-            "files": [],
-            "active_task": None,
-            "session_bypass": bypass_status,
-            "static_fast_track_patterns": config.get_fast_track_patterns(),
-            "governance_scope": config.governance_scope,
-            "last_hook_log_entries": _get_recent_hook_logs(workspace_root, max_lines=10),
-            "reconcile_report": {
-                "bypass_queue": [],
-                "drift_queue": [],
-                "matched_queue": [],
-            },
-            "bypass_queue": [],
-            "effective_mode": snapshot.effective_mode,
-            "mode_source": snapshot.mode_source,
-            "effective_reviewer_channel": snapshot.effective_reviewer_channel,
-            "runner_subagent_model_hint": snapshot.runner_subagent_model_hint,
-            "fallback_notice": snapshot.fallback_notice,
-            "runtime_mode_warning": runtime_mode_warning,
-            "session_role_contract": snapshot.session_role_contract,
-            "autopilot": snapshot.autopilot.to_dict(),
-            "message": f"Tasks directory created: {dev_tasks_dir}. No task files currently found. / 任务目录已创建: {dev_tasks_dir}，当前暂无任务单。",
-        }
-        if has_mutation:
-            empty_res["runtime_mode_changed"] = runtime_mode_changed
-            if rejection_reason is not None:
-                empty_res["reason"] = rejection_reason
-        _inject_harness_next_action(workspace_root, "dev_tasks_status", empty_res, last_success=True, task_file=task_file, config=config)
-        return empty_res
+        raw_hook_logs = _get_recent_hook_logs(workspace_root, max_lines=10)
+        empty_msg = f"Tasks directory created: {dev_tasks_dir}. No task files currently found. / 任务目录已创建: {dev_tasks_dir}，当前暂无任务单。"
+        empty_reconcile = type("ReconcileDummy", (), {"bypass_queue": [], "drift_queue": [], "matched_queue": []})()
+        if verbosity == "full":
+            return _build_full_status_sync(
+                workspace_root, config, snapshot, bypass_status, [], None, empty_reconcile,
+                runtime_mode_changed, rejection_reason, runtime_mode_warning, [], raw_hook_logs,
+                task_file=task_file, empty_message=empty_msg,
+            )
+        return _build_compact_status_sync(
+            workspace_root, config, snapshot, bypass_status, [], None, empty_reconcile,
+            runtime_mode_changed, rejection_reason, runtime_mode_warning, [], raw_hook_logs,
+            task_file=task_file, empty_message=empty_msg,
+        )
 
     md_files = glob.glob(os.path.join(dev_tasks_dir, "*.md"))
     file_records = []
     active_task = None
+    all_tasks: List[Dict[str, Any]] = []
 
     reconcile_report = reconcile_workspace(workspace_root, dev_tasks_dir)
     norm_bypass = {p.replace("\\", "/").lower() for p in reconcile_report.bypass_queue}
@@ -669,6 +850,13 @@ def dev_tasks_status(
                 file_rec["quarantine_reason"] = "UNAUTHORIZED_BYPASS: Untracked task file not registered in manifest"
             file_records.append(file_rec)
 
+            for t in tasks:
+                all_tasks.append({
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                })
+
             if not active_task and not is_quarantined:
                 for t in tasks:
                     if t.status == STATUS_IN_PROGRESS:
@@ -708,49 +896,19 @@ def dev_tasks_status(
             runtime_mode_changed = applied
             runtime_mode_warning = snapshot.runtime_mode_warning
 
-    result_data = {
-        "project_name": config.project_name,
-        "dev_tasks_dir": dev_tasks_dir,
-        "files": file_records,
-        "active_task": active_task,
-        "session_bypass": bypass_status,
-        "static_fast_track_patterns": config.get_fast_track_patterns(),
-        "governance_scope": config.governance_scope,
-        "last_hook_log_entries": _get_recent_hook_logs(workspace_root, max_lines=10),
-        "reconcile_report": {
-            "bypass_queue": list(reconcile_report.bypass_queue),
-            "drift_queue": list(reconcile_report.drift_queue),
-            "matched_queue": list(reconcile_report.matched_queue),
-        },
-        "bypass_queue": list(reconcile_report.bypass_queue),
-        "effective_mode": snapshot.effective_mode,
-        "mode_source": snapshot.mode_source,
-        "effective_reviewer_channel": snapshot.effective_reviewer_channel,
-        "runner_subagent_model_hint": snapshot.runner_subagent_model_hint,
-        "fallback_notice": snapshot.fallback_notice,
-        "runtime_mode_warning": runtime_mode_warning,
-        "session_role_contract": snapshot.session_role_contract,
-        "autopilot": snapshot.autopilot.to_dict(),
-    }
-    if has_mutation:
-        result_data["runtime_mode_changed"] = runtime_mode_changed
-        if rejection_reason is not None:
-            result_data["reason"] = rejection_reason
-    if reconcile_report.bypass_queue:
-        result_data["bypass_warning"] = (
-            f"⚠️ Detected {len(reconcile_report.bypass_queue)} unauthorized rogue task files quarantined in bypass_queue: "
-            f"{list(reconcile_report.bypass_queue)} / 检测到未授权旁路任务单已物理隔离"
+    raw_hook_logs = _get_recent_hook_logs(workspace_root, max_lines=10)
+    if verbosity == "full":
+        return _build_full_status_sync(
+            workspace_root, config, snapshot, bypass_status, file_records, active_task,
+            reconcile_report, runtime_mode_changed, rejection_reason, runtime_mode_warning,
+            all_tasks, raw_hook_logs, task_file=task_file,
         )
-    _inject_harness_next_action(
-        workspace_root,
-        "dev_tasks_status",
-        result_data,
-        last_success=True,
-        task_file=task_file,
-        current_task_id=(active_task.get("id") if active_task else None),
-        config=config,
+
+    return _build_compact_status_sync(
+        workspace_root, config, snapshot, bypass_status, file_records, active_task,
+        reconcile_report, runtime_mode_changed, rejection_reason, runtime_mode_warning,
+        all_tasks, raw_hook_logs, task_file=task_file,
     )
-    return result_data
 
 
 @mcp.tool()
@@ -760,15 +918,13 @@ def dev_tasks_propose(
     tasks: List[Dict[str, Any]],
     mode: Literal["append", "overwrite", "upsert"] = "append",
 ) -> Dict[str, Any]:
-    """Create or append standard development task items. Each task item must adhere to the six-core-field contract.
-
-    [中文对照] 创建或追加标准开发任务单。每条任务必须符合六大字段契约。
+    """Create or append development tasks conforming to the six-core-field contract.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file_name: Target task file name (e.g., '2026-09-13_feature.md') / 任务单文件名。
-        tasks: List of task specifications conforming to the six core fields / 符合六大核心字段的任务字典列表。
-        mode: Writing mode ('append', 'overwrite', 'upsert') / 写入模式。
+        workspace_root: Root path of the target workspace.
+        task_file_name: Target task file name (e.g., '2026-09-13_feature.md').
+        tasks: Task specifications conforming to the six core fields.
+        mode: Writing mode ('append', 'overwrite', 'upsert').
     """
     if mode not in ("append", "overwrite", "upsert"):
         return {
@@ -1387,6 +1543,7 @@ def _inject_harness_next_action(
     task_file: Optional[str] = None,
     current_task_id: Optional[str] = None,
     config: Optional[Any] = None,
+    compact: bool = False,
 ) -> None:
     try:
         if config is None:
@@ -1518,7 +1675,10 @@ def _inject_harness_next_action(
             except Exception:
                 pass
 
-        result_data["harness_next_action"] = action.to_dict()
+        if compact and hasattr(action, "to_compact_dict"):
+            result_data["harness_next_action"] = action.to_compact_dict()
+        else:
+            result_data["harness_next_action"] = action.to_dict()
     except Exception:
         pass
 
@@ -1531,16 +1691,14 @@ def dev_tasks_confirm(
     action: str = "confirm",
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Transition or adjust task states. action: 'confirm' (approved for execution) | 'rework' (requires review model revision) | 'skip' (skipped) | 'revoke' (revert to pending).
-
-    [中文对照] 推进或调整任务状态。action: 'confirm' (已确认待施工) | 'rework' (需返工/待审查模型重修) | 'skip' (跳过) | 'revoke' (撤回为待确认)。
+    """Transition task states ('confirm', 'rework', 'skip', 'revoke').
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file: Task file name or path / 任务单文件名或相对路径。
-        task_ids: List of task IDs to transition (e.g. ['1.1', '1.2']) / 待流转的任务ID列表。
-        action: Target transition action ('confirm', 'rework', 'skip', 'revoke') / 目标流转动作。
-        session_id: Optional caller session ID for Tier-2 bypass check / 可选的调用方会话 ID。
+        workspace_root: Root path of the target workspace.
+        task_file: Task file name or relative path.
+        task_ids: Task IDs to transition (e.g. ['1.1', '1.2']).
+        action: Target transition action ('confirm', 'rework', 'skip', 'revoke').
+        session_id: Optional caller session ID for bypass verification.
     """
     target_path = _resolve_task_file_path(workspace_root, task_file)
     action_map = {
@@ -1938,15 +2096,13 @@ def dev_tasks_checkout(
     task_id: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Check out a confirmed task, automatically transitioning it to '🔨 执行中' and returning detailed implementation instructions. Supports directed checkout via task file and ID.
-
-    [中文对照] 检出处于 ✅ 已确认 状态的任务，自动将其标记为 🔨 执行中 并下发详细指引。支持指定任务文件与任务ID定向领单。
+    """Check out a confirmed task to in-progress status with instructions.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file: Optional task file name / 可选指定任务文件。
-        task_id: Optional task ID for directed checkout / 可选指定任务ID定向领单。
-        session_id: Optional session UUID for multi-session isolation / 可选多会话隔离标识。
+        workspace_root: Root path of the target workspace.
+        task_file: Optional task file name.
+        task_id: Optional task ID for directed checkout.
+        session_id: Optional session UUID for multi-session isolation.
     """
     clean_session_id = None
     if session_id:
@@ -2132,6 +2288,7 @@ def dev_tasks_checkout(
         primary_tid = str(primary_task.get("id", ""))
         primary_file = str(primary_task.get("file", ""))
         handoff_reason = "rework_required" if rework_tasks else "batch_complete"
+        reason_code = "REWORK_REQUIRED" if rework_tasks else "PENDING_REVIEW"
 
         envelope = _resolve_handoff_envelope(
             workspace_root=workspace_root,
@@ -2165,6 +2322,8 @@ def dev_tasks_checkout(
 
         res_handoff = {
             "task_id": None,
+            "status": "rework" if rework_tasks else "pending",
+            "reason_code": reason_code,
             "batch_finished": True,
             "has_pending_tasks": len(pending_tasks) > 0,
             "has_rework_tasks": len(rework_tasks) > 0,
@@ -2186,10 +2345,28 @@ def dev_tasks_checkout(
             task_file=(os.path.basename(primary_file) if primary_file else None),
             config=config,
         )
-        return res_handoff
+        return fit_to_budget(
+            "dev_tasks_checkout",
+            res_handoff,
+            drop_order=("instruction", "message", "pending_tasks", "rework_tasks", "handoff_card", "reviewer_handoff"),
+            always_keep=(
+                "task_id",
+                "status",
+                "reason_code",
+                "batch_finished",
+                "has_pending_tasks",
+                "has_rework_tasks",
+                "pending_count",
+                "rework_count",
+                "handoff_recommended",
+                "harness_next_action",
+            ),
+        )
 
     res_completed = {
         "task_id": None,
+        "status": "completed",
+        "reason_code": "NO_CONFIRMED_TASKS",
         "batch_finished": True,
         "all_completed": True,
         "instruction": (
@@ -2211,7 +2388,19 @@ def dev_tasks_checkout(
         last_success=True,
         config=config,
     )
-    return res_completed
+    return fit_to_budget(
+        "dev_tasks_checkout",
+        res_completed,
+        drop_order=("instruction", "message"),
+        always_keep=(
+            "task_id",
+            "status",
+            "reason_code",
+            "batch_finished",
+            "all_completed",
+            "harness_next_action",
+        ),
+    )
 
 
 @mcp.tool()
@@ -2224,18 +2413,16 @@ def dev_tasks_complete(
     holder_token: Optional[str] = None,
     generation: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Submit task completion report. Performs physical auditing on test files and assertions via git diff; marks task as '✔️ 已完成' upon full verification.
-
-    [中文对照] 执行 Agent 提交任务完成报告。通过 git diff 审计测试文件与断言，全部通过后标记为 ✔️ 已完成。
+    """Submit task completion report verified against DoD.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file: Task file name or path / 任务单文件名或相对路径。
-        task_id: Task ID to complete (e.g. '1.1') / 待完成的任务ID。
-        dod_output: Execution output of Definition-of-Done commands / DoD 验证命令的终端执行输出。
-        test_evidence: Optional test evidence or exemption rationale / 可选的单测佐证或纯文档豁免说明。
-        holder_token: Optional fencing lease holder token to verify / 可选租约持有者令牌校验。
-        generation: Optional expected fencing generation / 可选租约代际校验。
+        workspace_root: Project root.
+        task_file: Task file path.
+        task_id: Task ID (e.g. '1.1').
+        dod_output: DoD verification output.
+        test_evidence: Test evidence or exemption.
+        holder_token: Fencing lease holder token.
+        generation: Expected fencing generation.
     """
     target_path = _resolve_task_file_path(workspace_root, task_file)
     try:
@@ -2375,15 +2562,13 @@ async def dev_tasks_heartbeat(
     holder_token: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Refresh active lease heartbeat for current or specified task, supporting multi-session isolation.
-
-    [中文对照] 刷新当前检出任务或指定任务的存活心跳租约，支持多会话隔离。
+    """Refresh active lease heartbeat for current or specified task.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录路径（默认当前目录）。
-        task_id: Optional task ID (e.g. '2.1' or 'spec::2.1') / 可选指定任务ID，缺省自动解析当前执行中任务。
-        holder_token: Optional fencing lease holder token / 可选独占持有者令牌校验。
-        session_id: Optional session UUID for multi-session disambiguation / 可选用于跨会话防歧义鉴权的会话ID。
+        workspace_root: Root path of the target workspace (default '.').
+        task_id: Optional task ID (e.g. '2.1' or 'spec::2.1').
+        holder_token: Optional fencing lease holder token.
+        session_id: Optional session UUID for multi-session disambiguation.
     """
     ws = os.path.abspath(workspace_root)
     clean_session_id = None
@@ -2538,16 +2723,14 @@ async def dev_tasks_reclaim(
     expected_holder_token: str = "",
     force: bool = False,
 ) -> dict[str, Any]:
-    """CAS 幂等回收疑似僵尸任务并重置为已确认待执行状态。
-
-    [中文对照] 针对疑似假死或心跳超时的僵尸任务执行 CAS 幂等回收。验证预期代际与持有者令牌，在双锁保护下复核健康探针，回收成功后递增代际作废旧令牌并将任务重置为已确认待执行状态。
+    """CAS idempotent task lease reclaim resetting zombie tasks to confirmed status.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录路径（默认当前目录）。
-        task_id: Target task ID (e.g. '2.1' or 'spec::2.1') / 目标任务ID。
-        expected_generation: Expected lease generation for CAS verification / 用于 CAS 比对的预期代际。
-        expected_holder_token: Expected holder token for CAS verification / 用于 CAS 比对的预期持有者令牌。
-        force: Force reclaim even if health probes judge target as healthy / 是否无视探针健康度判定强制回收。
+        workspace_root: Root path of the target workspace (default '.').
+        task_id: Target task ID (e.g. '2.1' or 'spec::2.1').
+        expected_generation: Expected lease generation for CAS comparison.
+        expected_holder_token: Expected holder token for CAS comparison.
+        force: Force reclaim ignoring health probe verdict.
     """
     ws = os.path.abspath(workspace_root)
     clean_tid = str(task_id).strip()
@@ -2630,14 +2813,12 @@ def dev_tasks_promote_draft(
     task_file: str,
     task_id: str,
 ) -> Dict[str, Any]:
-    """Validate physical feasibility of a draft task and promote it to formal [Pending] state.
-
-    [中文对照] 运行物理可行性 Lint 闸门校验任务草案。通过后抹除草案标记晋升为正式 ⬜ 待确认 待领任务；未通过则拦截并列出物理冲突。
+    """Validate physical feasibility of a draft task and promote it to pending status.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file: Task file name or path / 任务单文件名或相对路径。
-        task_id: Task ID to promote (e.g. '3.1') / 待晋升的草案任务ID。
+        workspace_root: Root path of the target workspace.
+        task_file: Task file name or relative path.
+        task_id: Task ID to promote (e.g. '3.1').
     """
     f_path = _resolve_task_file_path(workspace_root, task_file)
     if not os.path.isfile(f_path):
@@ -2754,19 +2935,15 @@ async def dev_tasks_refine_spec(
     persist: bool = False,
     task_file: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.
-    Ensures complete Six Core Fields, proportional boundary checks, and executable DoD assertions.
-
-    [中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。
-    补齐六大核心字段、成比例的边界校验与硬性 DoD 断言。
+    """Refine a draft task with proportional boundary checks (成比例的边界校验).
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        draft_task: Draft task dict containing at least id/title and rough description / 包含任务ID、标题与草案内容的字典。
-        context_files: Optional seed files for AST exploration / 可选用于代码探索的种子文件列表。
-        max_hops: Exploration depth (clamped to 0..3) / 拓扑探索跳数（最大为3）。
-        persist: If True, atomically updates the task in the markdown file (Pending tasks only) / 是否将规约强化写回待确认任务单。
-        task_file: Optional target task file name or path when persist=True / 可选目标任务单文件名或路径。
+        workspace_root: Project root.
+        draft_task: Draft task dict.
+        context_files: Seed files.
+        max_hops: Exploration depth (0 to 3).
+        persist: If True, updates task in markdown file.
+        task_file: Target task file name.
     """
     if persist:
         if not task_file or not str(task_file).strip():
@@ -2801,11 +2978,14 @@ async def dev_tasks_refine_spec(
         functools.partial(explore_code_slices, workspace_root, seeds, max_hops=max_hops)
     )
 
-    legacy_target = getattr(sys.modules[__name__], "".join(["Deep", "Seek", "Client"]), None)
-    if legacy_target is not None and legacy_target is not ReviewerClient:
-        client = legacy_target(config.reviewer_engine)
-    else:
-        client = create_reviewer_client(config.reviewer_engine)
+    try:
+        legacy_target = getattr(sys.modules[__name__], "".join(["Deep", "Seek", "Client"]), None)
+        if legacy_target is not None and legacy_target is not ReviewerClient:
+            client = legacy_target(config.reviewer_engine)
+        else:
+            client = create_reviewer_client(config.reviewer_engine)
+    except Exception:
+        client = None
 
     if client is None or not client.is_available():
         # 引擎离线平滑回退
@@ -2817,6 +2997,7 @@ async def dev_tasks_refine_spec(
 
         persisted = False
         persist_res = None
+        resolved_tf = None
         if persist:
             resolved_tf = _resolve_task_file_path(workspace_root, task_file)
             fallback_dict = dict(draft_task)
@@ -2837,13 +3018,24 @@ async def dev_tasks_refine_spec(
             )
             persisted = True
 
+        if persist and persisted and resolved_tf and os.path.exists(resolved_tf):
+            persisted_bytes = Path(resolved_tf).read_bytes()
+            content_sha256 = hashlib.sha256(persisted_bytes).hexdigest()
+            bytes_written = len(persisted_bytes)
+        else:
+            content_bytes = fallback_spec.encode("utf-8")
+            content_sha256 = hashlib.sha256(content_bytes).hexdigest()
+            bytes_written = len(content_bytes)
+
         res_dict = {
             "ok": True,
             "refined": True,
             "degraded": True,
             "task_id": task_id,
             "title": title,
-            "refined_spec": fallback_spec,
+            "path": task_file or "",
+            "content_sha256": content_sha256,
+            "bytes_written": bytes_written,
             "persisted": persisted,
             "persist_result": persist_res,
             "validation": {
@@ -2851,15 +3043,7 @@ async def dev_tasks_refine_spec(
                 "errors": [],
                 "warnings": ["Reviewer engine is offline or provider is 'none'. Preserved original draft."],
             },
-            "exploration": {
-                "files_scanned": len(explore_res.files),
-                "hops_used": explore_res.hops_used,
-                "skipped": [s.rel_path for s in explore_res.skipped],
-                "truncated": explore_res.truncated,
-                "elapsed_ms": explore_res.elapsed_ms,
-            },
             "engine": "fallback_offline",
-            "degraded_card": degraded_info,
         }
         _inject_harness_next_action(
             workspace_root,
@@ -2869,8 +3053,14 @@ async def dev_tasks_refine_spec(
             task_file=task_file,
             current_task_id=task_id,
             config=config,
+            compact=True,
         )
-        return res_dict
+        return fit_to_budget(
+            "dev_tasks_refine_spec",
+            res_dict,
+            drop_order=("persist_result", "title", "path"),
+            always_keep=("ok", "task_id", "content_sha256", "bytes_written", "validation", "harness_next_action"),
+        )
 
     # 2. 组装 System Prompt 与代码上下文 (四段式稳定性梯度拓扑)
     static_prefix = PromptAssembler.build_static_system_prefix(workspace_root, config)
@@ -2935,6 +3125,7 @@ async def dev_tasks_refine_spec(
 
         persisted = False
         persist_res = None
+        resolved_tf = None
         if persist:
             resolved_tf = _resolve_task_file_path(workspace_root, task_file)
             persist_res = await asyncio.to_thread(
@@ -2946,12 +3137,24 @@ async def dev_tasks_refine_spec(
             )
             persisted = True
 
+        if persist and persisted and resolved_tf and os.path.exists(resolved_tf):
+            persisted_bytes = Path(resolved_tf).read_bytes()
+            content_sha256 = hashlib.sha256(persisted_bytes).hexdigest()
+            bytes_written = len(persisted_bytes)
+        else:
+            content_bytes = rendered_markdown.encode("utf-8")
+            content_sha256 = hashlib.sha256(content_bytes).hexdigest()
+            bytes_written = len(content_bytes)
+
         res_dict = {
             "ok": True,
             "refined": True,
             "degraded": not val_res.is_valid or not lint_res.passed,
             "task_id": task_id,
             "title": title,
+            "path": task_file or "",
+            "content_sha256": content_sha256,
+            "bytes_written": bytes_written,
             "draft": not lint_res.passed,
             "persisted": persisted,
             "persist_result": persist_res,
@@ -2963,22 +3166,10 @@ async def dev_tasks_refine_spec(
                 ],
                 "validated_files": lint_res.validated_files,
             },
-            "session_id": session_id,
-            "log_file": file_sink.log_file,
-            "truncated": res.get("truncated", False),
-            "refined_spec": rendered_markdown,
-            "reasoning_summary": res.get("reasoning_content", "")[:500],
             "validation": {
                 "is_valid": val_res.is_valid,
                 "errors": val_res.errors,
                 "warnings": val_res.warnings,
-            },
-            "exploration": {
-                "files_scanned": len(explore_res.files),
-                "hops_used": explore_res.hops_used,
-                "skipped": [s.rel_path for s in explore_res.skipped],
-                "truncated": explore_res.truncated,
-                "elapsed_ms": explore_res.elapsed_ms,
             },
             "engine": config.reviewer_engine.provider,
         }
@@ -2990,8 +3181,14 @@ async def dev_tasks_refine_spec(
             task_file=task_file,
             current_task_id=task_id,
             config=config,
+            compact=True,
         )
-        return res_dict
+        return fit_to_budget(
+            "dev_tasks_refine_spec",
+            res_dict,
+            drop_order=("persist_result", "title", "path"),
+            always_keep=("ok", "task_id", "content_sha256", "bytes_written", "validation", "harness_next_action"),
+        )
     except Exception as e:
         err_dict = {
             "ok": False,
@@ -3019,16 +3216,14 @@ def dev_tasks_escalate(
     reason: str,
     context_files: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Escalate difficult bottlenecks or complex refactoring to senior architecture reviewer model for in-depth analysis.
-
-    [中文对照] 执行器遇到疑难卡点或复杂重构时，申请升级至高阶架构审查模型进行架构深析。
+    """Escalate difficult bottlenecks or complex refactoring to senior reviewer model.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file: Task file name or path / 任务单文件名或相对路径。
-        task_id: Task ID being escalated / 待升级的任务ID。
-        reason: Escalation rationale and core challenges / 申请升级的核心理由与技术痛点。
-        context_files: Optional list of relevant files for architectural context / 可选重点参考文件列表。
+        workspace_root: Root path of the target workspace.
+        task_file: Task file name or relative path.
+        task_id: Task ID being escalated.
+        reason: Escalation rationale and core challenges.
+        context_files: Optional list of relevant files for architectural context.
     """
     target_path = _resolve_task_file_path(workspace_root, task_file)
     context_snippets = []
@@ -3107,15 +3302,12 @@ def dev_tasks_export_handoff_card(
     task_id: str,
     include_context: bool = False,
 ) -> Dict[str, Any]:
-    """Export standard GFM handoff card for a task to facilitate seamless handover to a Reviewer model.
-    Supports optional <details> collapsible context embedding.
-
-    [中文对照] 导出指定任务的标准 GFM 架构交接卡，以便转交高阶架构审查模型。支持可选折叠任务上下文。
+    """Export standard GFM handoff card for a task for Reviewer handoff.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_id: Target task ID / 目标任务编号。
-        include_context: Whether to inject collapsible task context details / 是否折叠注入任务单上下文（涉及文件、缺陷根因、类型契约、DoD命令）。
+        workspace_root: Root path of the target workspace.
+        task_id: Target task ID.
+        include_context: Inject collapsible task context details.
     """
     clean_task_id = str(task_id).strip()
     try:
@@ -3198,13 +3390,11 @@ def dev_tasks_export_handoff_card(
 
 @mcp.tool()
 def dev_tasks_archive(workspace_root: str, task_file: str) -> Dict[str, Any]:
-    """Archive task file to archive_dir and sync completed tasks to CHANGELOG when all tasks are closed (✔️ 已完成 or ⏭️ 跳过).
-
-    [中文对照] 当任务单内所有条目均已达成 ✔️ 已完成 或 ⏭️ 跳过 时，将任务单移入 archive/ 并同步 CHANGELOG。
+    """Archive task file to archive_dir and sync completed tasks to CHANGELOG.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        task_file: Task file name or path to archive / 待归档的任务单文件名或路径。
+        workspace_root: Root path of the target workspace.
+        task_file: Task file name or relative path to archive.
     """
     target_path = _resolve_task_file_path(workspace_root, task_file)
     try:
@@ -3314,24 +3504,17 @@ def dev_tasks_set_bypass(
     session_id: Optional[str] = None,
     custom_patterns: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Configure session-locked fast-track bypass for lightweight edits (e.g. UI styling, documentation typo fixes).
-
-    [中文对照] 【用户专属快速旁路配置】在当前会话中临时开启特定类别的轻量修改旁路（如 UI 样式微调、文档排版）。
-
-    ⚠️ ANTI-ABUSE GUARD / 纪律红线警告:
-    Agent MUST NOT invoke this tool autonomously to bypass governance!
-    Only invoke when the human user explicitly instructs in chat (e.g. 'tweak styles, skip task governance').
-    Must pass user_authorized=True and record the user's explicit reason.
+    """Configure session bypass.
 
     Args:
-        workspace_root: Root path of the project / 项目根目录。
-        action: "enable" to activate bypass, "disable" to clear bypass / "enable" 开启，"disable" 关闭。
-        category: Bypass category ('ui_styling', 'docs_only', 'tests_only', 'custom', 'all') / 旁路类别。
-        reason: Required. Explicit reason or verbatim quote from user (>= 5 chars) / 用户授权原由或指令（不少于5字）。
-        user_authorized: Required. Must be True, representing explicit human consent / 必须为 True，代表用户明确授权。
-        duration_hours: Bypass validity in hours (default 4, max 8) / 旁路有效时长（小时）。
-        session_id: Session UUID for physical single-session isolation / 会话唯一标识符。
-        custom_patterns: Glob patterns when category is 'custom' / 自定义 Glob 规则列表。
+        workspace_root: Project root.
+        action: 'enable' or 'disable'.
+        category: Bypass category.
+        reason: Authorization reason.
+        user_authorized: Consent boolean.
+        duration_hours: Validity hours (1-8).
+        session_id: Session ID.
+        custom_patterns: Glob patterns.
     """
     bypass_file = os.path.join(workspace_root, ".agents", ".quench_bypass.json")
     agents_dir = os.path.join(workspace_root, ".agents")
@@ -3454,19 +3637,16 @@ async def dev_reviewer_submit(
     session_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Submit an asynchronous long-running Reviewer consultation task.
-    Returns initial JobRecord metadata without blocking.
-
-    提交 Reviewer 异步长推演任务：返回初始任务句柄与非终态元数据。
+    """Submit async review task.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        query: Review or consultation query content / 待推演或咨询的问题内容。
-        context_files: Optional list of relevant files for architectural context / 可选重点参考文件列表。
-        mode: Consultation mode ('critique', 'evaluate', 'brainstorm', 'audit') / 审查咨询模式。
-        max_hops: AST exploration depth for context expansion (0-3) / 拓扑探索跳数（最大为3）。
-        session_id: Optional session UUID for multi-session isolation / 可选多会话隔离标识。
-        idempotency_key: Optional idempotency key to prevent duplicate submissions / 可选幂等键以防止重复提交。
+        workspace_root: Project root path.
+        query: Review query content.
+        context_files: Context files relative to workspace root.
+        mode: Mode ('critique', 'evaluate', 'audit').
+        max_hops: Hop depth (0-3).
+        session_id: Optional session UUID lock.
+        idempotency_key: Client dedup key; same key returns cached job.
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {
@@ -3647,16 +3827,13 @@ async def dev_reviewer_poll(
     wait_max_s: int = 0,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Poll status or result of a background Reviewer task.
-    Enforces 1KB non-terminal snapshot contract.
-
-    轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，恒定返回结构化字典。
+    """Poll status or result of a background Reviewer task with 1KB snapshot contract.
 
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        job_id: Target job ID to poll / 待轮询的任务ID。
-        session_id: Caller session ID for multi-session authorization / 会话隔离标识符。
-        wait_max_s: Server-side long polling wait timeout in seconds (0-25) / 服务端长轮询最大挂起等待秒数。
+        workspace_root: Root path of the target workspace.
+        job_id: Target job ID to poll.
+        session_id: Caller session ID for multi-session authorization.
+        wait_max_s: Server-side long polling wait timeout in seconds (0-25).
         ctx: FastMCP Context injected by server framework.
     """
     if not workspace_root or not os.path.isdir(workspace_root):
@@ -3712,12 +3889,10 @@ async def dev_reviewer_cancel(
 ) -> dict[str, Any]:
     """Deterministically cancel a running Reviewer task and abort transport.
 
-    确定性取消在途推演任务：物理关闭 Socket 并保全实际计费 token 记录。
-
     Args:
-        workspace_root: Root path of the target workspace / 项目根目录绝对路径。
-        job_id: Target job ID to cancel / 待取消的任务ID。
-        session_id: Caller session ID for multi-session authorization / 会话隔离标识符。
+        workspace_root: Root path of the target workspace.
+        job_id: Target job ID to cancel.
+        session_id: Caller session ID for multi-session authorization.
     """
     if not workspace_root or not os.path.isdir(workspace_root):
         return {

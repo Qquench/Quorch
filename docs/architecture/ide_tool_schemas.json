@@ -3,20 +3,20 @@
     "schema_version": 1
   },
   "dev_reviewer_cancel": {
-    "description": "Deterministically cancel a running Reviewer task and abort transport.\n\n确定性取消在途推演任务：物理关闭 Socket 并保全实际计费 token 记录。",
+    "description": "Deterministically cancel a running Reviewer task and abort transport.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "job_id": {
-          "description": "Target job ID to cancel / 待取消的任务ID。",
+          "description": "Target job ID to cancel.",
           "type": "string"
         },
         "session_id": {
-          "description": "Caller session ID for multi-session authorization / 会话隔离标识符。",
+          "description": "Caller session ID for multi-session authorization.",
           "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -29,25 +29,25 @@
     }
   },
   "dev_reviewer_poll": {
-    "description": "Poll status or result of a background Reviewer task.\nEnforces 1KB non-terminal snapshot contract.\n\n轮询 Reviewer 异步推演任务：强约束 1KB 极简白名单契约，恒定返回结构化字典。",
+    "description": "Poll status or result of a background Reviewer task with 1KB snapshot contract.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "job_id": {
-          "description": "Target job ID to poll / 待轮询的任务ID。",
+          "description": "Target job ID to poll.",
           "type": "string"
         },
         "session_id": {
-          "description": "Caller session ID for multi-session authorization / 会话隔离标识符。",
+          "description": "Caller session ID for multi-session authorization.",
           "type": "string"
         },
         "wait_max_s": {
           "default": 0,
-          "description": "Server-side long polling wait timeout in seconds (0-25) / 服务端长轮询最大挂起等待秒数。",
+          "description": "Server-side long polling wait timeout in seconds (0-25).",
           "type": "integer"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -60,7 +60,7 @@
     }
   },
   "dev_reviewer_submit": {
-    "description": "Submit an asynchronous long-running Reviewer consultation task.\nReturns initial JobRecord metadata without blocking.\n\n提交 Reviewer 异步长推演任务：返回初始任务句柄与非终态元数据。",
+    "description": "Submit async review task.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -77,7 +77,7 @@
             }
           ],
           "default": null,
-          "description": "Optional list of relevant files for architectural context / 可选重点参考文件列表。"
+          "description": "Context files relative to workspace root."
         },
         "idempotency_key": {
           "anyOf": [
@@ -89,20 +89,20 @@
             }
           ],
           "default": null,
-          "description": "Optional idempotency key to prevent duplicate submissions / 可选幂等键以防止重复提交。"
+          "description": "Client dedup key; same key returns cached job."
         },
         "max_hops": {
           "default": 1,
-          "description": "AST exploration depth for context expansion (0-3) / 拓扑探索跳数（最大为3）。",
+          "description": "Hop depth (0-3).",
           "type": "integer"
         },
         "mode": {
           "default": "evaluate",
-          "description": "Consultation mode ('critique', 'evaluate', 'brainstorm', 'audit') / 审查咨询模式。",
+          "description": "Mode ('critique', 'evaluate', 'audit').",
           "type": "string"
         },
         "query": {
-          "description": "Review or consultation query content / 待推演或咨询的问题内容。",
+          "description": "Review query content.",
           "type": "string"
         },
         "session_id": {
@@ -115,10 +115,10 @@
             }
           ],
           "default": null,
-          "description": "Optional session UUID for multi-session isolation / 可选多会话隔离标识。"
+          "description": "Optional session UUID lock."
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Project root path.",
           "type": "string"
         }
       },
@@ -130,16 +130,16 @@
     }
   },
   "dev_tasks_archive": {
-    "description": "Archive task file to archive_dir and sync completed tasks to CHANGELOG when all tasks are closed (✔️ 已完成 or ⏭️ 跳过).\n\n[中文对照] 当任务单内所有条目均已达成 ✔️ 已完成 或 ⏭️ 跳过 时，将任务单移入 archive/ 并同步 CHANGELOG。",
+    "description": "Archive task file to archive_dir and sync completed tasks to CHANGELOG.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "task_file": {
-          "description": "Task file name or path to archive / 待归档的任务单文件名或路径。",
+          "description": "Task file name or relative path to archive.",
           "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -151,7 +151,7 @@
     }
   },
   "dev_tasks_checkout": {
-    "description": "Check out a confirmed task, automatically transitioning it to '🔨 执行中' and returning detailed implementation instructions. Supports directed checkout via task file and ID.\n\n[中文对照] 检出处于 ✅ 已确认 状态的任务，自动将其标记为 🔨 执行中 并下发详细指引。支持指定任务文件与任务ID定向领单。",
+    "description": "Check out a confirmed task to in-progress status with instructions.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -165,7 +165,7 @@
             }
           ],
           "default": null,
-          "description": "Optional session UUID for multi-session isolation / 可选多会话隔离标识。"
+          "description": "Optional session UUID for multi-session isolation."
         },
         "task_file": {
           "anyOf": [
@@ -177,7 +177,7 @@
             }
           ],
           "default": null,
-          "description": "Optional task file name / 可选指定任务文件。"
+          "description": "Optional task file name."
         },
         "task_id": {
           "anyOf": [
@@ -189,10 +189,10 @@
             }
           ],
           "default": null,
-          "description": "Optional task ID for directed checkout / 可选指定任务ID定向领单。"
+          "description": "Optional task ID for directed checkout."
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -203,12 +203,12 @@
     }
   },
   "dev_tasks_complete": {
-    "description": "Submit task completion report. Performs physical auditing on test files and assertions via git diff; marks task as '✔️ 已完成' upon full verification.\n\n[中文对照] 执行 Agent 提交任务完成报告。通过 git diff 审计测试文件与断言，全部通过后标记为 ✔️ 已完成。",
+    "description": "Submit task completion report verified against DoD.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "dod_output": {
-          "description": "Execution output of Definition-of-Done commands / DoD 验证命令的终端执行输出。",
+          "description": "DoD verification output.",
           "type": "string"
         },
         "generation": {
@@ -221,7 +221,7 @@
             }
           ],
           "default": null,
-          "description": "Optional expected fencing generation / 可选租约代际校验。"
+          "description": "Expected fencing generation."
         },
         "holder_token": {
           "anyOf": [
@@ -233,23 +233,23 @@
             }
           ],
           "default": null,
-          "description": "Optional fencing lease holder token to verify / 可选租约持有者令牌校验。"
+          "description": "Fencing lease holder token."
         },
         "task_file": {
-          "description": "Task file name or path / 任务单文件名或相对路径。",
+          "description": "Task file path.",
           "type": "string"
         },
         "task_id": {
-          "description": "Task ID to complete (e.g. '1.1') / 待完成的任务ID。",
+          "description": "Task ID (e.g. '1.1').",
           "type": "string"
         },
         "test_evidence": {
           "default": "",
-          "description": "Optional test evidence or exemption rationale / 可选的单测佐证或纯文档豁免说明。",
+          "description": "Test evidence or exemption.",
           "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Project root.",
           "type": "string"
         }
       },
@@ -263,13 +263,13 @@
     }
   },
   "dev_tasks_confirm": {
-    "description": "Transition or adjust task states. action: 'confirm' (approved for execution) | 'rework' (requires review model revision) | 'skip' (skipped) | 'revoke' (revert to pending).\n\n[中文对照] 推进或调整任务状态。action: 'confirm' (已确认待施工) | 'rework' (需返工/待审查模型重修) | 'skip' (跳过) | 'revoke' (撤回为待确认)。",
+    "description": "Transition task states ('confirm', 'rework', 'skip', 'revoke').",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "action": {
           "default": "confirm",
-          "description": "Target transition action ('confirm', 'rework', 'skip', 'revoke') / 目标流转动作。",
+          "description": "Target transition action ('confirm', 'rework', 'skip', 'revoke').",
           "type": "string"
         },
         "session_id": {
@@ -282,21 +282,21 @@
             }
           ],
           "default": null,
-          "description": "Optional caller session ID for Tier-2 bypass check / 可选的调用方会话 ID。"
+          "description": "Optional caller session ID for bypass verification."
         },
         "task_file": {
-          "description": "Task file name or path / 任务单文件名或相对路径。",
+          "description": "Task file name or relative path.",
           "type": "string"
         },
         "task_ids": {
-          "description": "List of task IDs to transition (e.g. ['1.1', '1.2']) / 待流转的任务ID列表。",
+          "description": "Task IDs to transition (e.g. ['1.1', '1.2']).",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -309,7 +309,7 @@
     }
   },
   "dev_tasks_escalate": {
-    "description": "Escalate difficult bottlenecks or complex refactoring to senior architecture reviewer model for in-depth analysis.\n\n[中文对照] 执行器遇到疑难卡点或复杂重构时，申请升级至高阶架构审查模型进行架构深析。",
+    "description": "Escalate difficult bottlenecks or complex refactoring to senior reviewer model.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -326,22 +326,22 @@
             }
           ],
           "default": null,
-          "description": "Optional list of relevant files for architectural context / 可选重点参考文件列表。"
+          "description": "Optional list of relevant files for architectural context."
         },
         "reason": {
-          "description": "Escalation rationale and core challenges / 申请升级的核心理由与技术痛点。",
+          "description": "Escalation rationale and core challenges.",
           "type": "string"
         },
         "task_file": {
-          "description": "Task file name or path / 任务单文件名或相对路径。",
+          "description": "Task file name or relative path.",
           "type": "string"
         },
         "task_id": {
-          "description": "Task ID being escalated / 待升级的任务ID。",
+          "description": "Task ID being escalated.",
           "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -355,21 +355,21 @@
     }
   },
   "dev_tasks_export_handoff_card": {
-    "description": "Export standard GFM handoff card for a task to facilitate seamless handover to a Reviewer model.\nSupports optional <details> collapsible context embedding.\n\n[中文对照] 导出指定任务的标准 GFM 架构交接卡，以便转交高阶架构审查模型。支持可选折叠任务上下文。",
+    "description": "Export standard GFM handoff card for a task for Reviewer handoff.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "include_context": {
           "default": false,
-          "description": "Whether to inject collapsible task context details / 是否折叠注入任务单上下文（涉及文件、缺陷根因、类型契约、DoD命令）。",
+          "description": "Inject collapsible task context details.",
           "type": "boolean"
         },
         "task_id": {
-          "description": "Target task ID / 目标任务编号。",
+          "description": "Target task ID.",
           "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -381,7 +381,7 @@
     }
   },
   "dev_tasks_heartbeat": {
-    "description": "Refresh active lease heartbeat for current or specified task, supporting multi-session isolation.\n\n[中文对照] 刷新当前检出任务或指定任务的存活心跳租约，支持多会话隔离。",
+    "description": "Refresh active lease heartbeat for current or specified task.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -395,7 +395,7 @@
             }
           ],
           "default": null,
-          "description": "Optional fencing lease holder token / 可选独占持有者令牌校验。"
+          "description": "Optional fencing lease holder token."
         },
         "session_id": {
           "anyOf": [
@@ -407,7 +407,7 @@
             }
           ],
           "default": null,
-          "description": "Optional session UUID for multi-session disambiguation / 可选用于跨会话防歧义鉴权的会话ID。"
+          "description": "Optional session UUID for multi-session disambiguation."
         },
         "task_id": {
           "anyOf": [
@@ -419,11 +419,11 @@
             }
           ],
           "default": null,
-          "description": "Optional task ID (e.g. '2.1' or 'spec::2.1') / 可选指定任务ID，缺省自动解析当前执行中任务。"
+          "description": "Optional task ID (e.g. '2.1' or 'spec::2.1')."
         },
         "workspace_root": {
           "default": ".",
-          "description": "Root path of the target workspace / 项目根目录路径（默认当前目录）。",
+          "description": "Root path of the target workspace (default '.').",
           "type": "string"
         }
       },
@@ -431,20 +431,20 @@
     }
   },
   "dev_tasks_promote_draft": {
-    "description": "Validate physical feasibility of a draft task and promote it to formal [Pending] state.\n\n[中文对照] 运行物理可行性 Lint 闸门校验任务草案。通过后抹除草案标记晋升为正式 ⬜ 待确认 待领任务；未通过则拦截并列出物理冲突。",
+    "description": "Validate physical feasibility of a draft task and promote it to pending status.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "task_file": {
-          "description": "Task file name or path / 任务单文件名或相对路径。",
+          "description": "Task file name or relative path.",
           "type": "string"
         },
         "task_id": {
-          "description": "Task ID to promote (e.g. '3.1') / 待晋升的草案任务ID。",
+          "description": "Task ID to promote (e.g. '3.1').",
           "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -457,13 +457,13 @@
     }
   },
   "dev_tasks_propose": {
-    "description": "Create or append standard development task items. Each task item must adhere to the six-core-field contract.\n\n[中文对照] 创建或追加标准开发任务单。每条任务必须符合六大字段契约。",
+    "description": "Create or append development tasks conforming to the six-core-field contract.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "mode": {
           "default": "append",
-          "description": "Writing mode ('append', 'overwrite', 'upsert') / 写入模式。",
+          "description": "Writing mode ('append', 'overwrite', 'upsert').",
           "enum": [
             "append",
             "overwrite",
@@ -472,11 +472,11 @@
           "type": "string"
         },
         "task_file_name": {
-          "description": "Target task file name (e.g., '2026-09-13_feature.md') / 任务单文件名。",
+          "description": "Target task file name (e.g., '2026-09-13_feature.md').",
           "type": "string"
         },
         "tasks": {
-          "description": "List of task specifications conforming to the six core fields / 符合六大核心字段的任务字典列表。",
+          "description": "Task specifications conforming to the six core fields.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -484,7 +484,7 @@
           "type": "array"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Root path of the target workspace.",
           "type": "string"
         }
       },
@@ -497,33 +497,33 @@
     }
   },
   "dev_tasks_reclaim": {
-    "description": "CAS 幂等回收疑似僵尸任务并重置为已确认待执行状态。\n\n[中文对照] 针对疑似假死或心跳超时的僵尸任务执行 CAS 幂等回收。验证预期代际与持有者令牌，在双锁保护下复核健康探针，回收成功后递增代际作废旧令牌并将任务重置为已确认待执行状态。",
+    "description": "CAS idempotent task lease reclaim resetting zombie tasks to confirmed status.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "expected_generation": {
           "default": 0,
-          "description": "Expected lease generation for CAS verification / 用于 CAS 比对的预期代际。",
+          "description": "Expected lease generation for CAS comparison.",
           "type": "integer"
         },
         "expected_holder_token": {
           "default": "",
-          "description": "Expected holder token for CAS verification / 用于 CAS 比对的预期持有者令牌。",
+          "description": "Expected holder token for CAS comparison.",
           "type": "string"
         },
         "force": {
           "default": false,
-          "description": "Force reclaim even if health probes judge target as healthy / 是否无视探针健康度判定强制回收。",
+          "description": "Force reclaim ignoring health probe verdict.",
           "type": "boolean"
         },
         "task_id": {
           "default": "",
-          "description": "Target task ID (e.g. '2.1' or 'spec::2.1') / 目标任务ID。",
+          "description": "Target task ID (e.g. '2.1' or 'spec::2.1').",
           "type": "string"
         },
         "workspace_root": {
           "default": ".",
-          "description": "Root path of the target workspace / 项目根目录路径（默认当前目录）。",
+          "description": "Root path of the target workspace (default '.').",
           "type": "string"
         }
       },
@@ -531,7 +531,7 @@
     }
   },
   "dev_tasks_refine_spec": {
-    "description": "Refine and reinforce a draft development task using ReviewerEngine and AST code exploration.\nEnsures complete Six Core Fields, proportional boundary checks, and executable DoD assertions.\n\n[中文对照] 结合 AST 代码切片探索与 ReviewerEngine 审查引擎，对开发任务草案进行红队挑刺与规约强化。\n补齐六大核心字段、成比例的边界校验与硬性 DoD 断言。",
+    "description": "Refine a draft task with proportional boundary checks (成比例的边界校验).",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -548,21 +548,21 @@
             }
           ],
           "default": null,
-          "description": "Optional seed files for AST exploration / 可选用于代码探索的种子文件列表。"
+          "description": "Seed files."
         },
         "draft_task": {
           "additionalProperties": true,
-          "description": "Draft task dict containing at least id/title and rough description / 包含任务ID、标题与草案内容的字典。",
+          "description": "Draft task dict.",
           "type": "object"
         },
         "max_hops": {
           "default": 1,
-          "description": "Exploration depth (clamped to 0..3) / 拓扑探索跳数（最大为3）。",
+          "description": "Exploration depth (0 to 3).",
           "type": "integer"
         },
         "persist": {
           "default": false,
-          "description": "If True, atomically updates the task in the markdown file (Pending tasks only) / 是否将规约强化写回待确认任务单。",
+          "description": "If True, updates task in markdown file.",
           "type": "boolean"
         },
         "task_file": {
@@ -575,10 +575,10 @@
             }
           ],
           "default": null,
-          "description": "Optional target task file name or path when persist=True / 可选目标任务单文件名或路径。"
+          "description": "Target task file name."
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Project root.",
           "type": "string"
         }
       },
@@ -590,18 +590,18 @@
     }
   },
   "dev_tasks_set_bypass": {
-    "description": "Configure session-locked fast-track bypass for lightweight edits (e.g. UI styling, documentation typo fixes).\n\n[中文对照] 【用户专属快速旁路配置】在当前会话中临时开启特定类别的轻量修改旁路（如 UI 样式微调、文档排版）。\n\n⚠️ ANTI-ABUSE GUARD / 纪律红线警告:\nAgent MUST NOT invoke this tool autonomously to bypass governance!\nOnly invoke when the human user explicitly instructs in chat (e.g. 'tweak styles, skip task governance').\nMust pass user_authorized=True and record the user's explicit reason.",
+    "description": "Configure session bypass.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "action": {
           "default": "enable",
-          "description": "\"enable\" to activate bypass, \"disable\" to clear bypass / \"enable\" 开启，\"disable\" 关闭。",
+          "description": "'enable' or 'disable'.",
           "type": "string"
         },
         "category": {
           "default": "ui_styling",
-          "description": "Bypass category ('ui_styling', 'docs_only', 'tests_only', 'custom', 'all') / 旁路类别。",
+          "description": "Bypass category.",
           "type": "string"
         },
         "custom_patterns": {
@@ -617,16 +617,16 @@
             }
           ],
           "default": null,
-          "description": "Glob patterns when category is 'custom' / 自定义 Glob 规则列表。"
+          "description": "Glob patterns."
         },
         "duration_hours": {
           "default": 4,
-          "description": "Bypass validity in hours (default 4, max 8) / 旁路有效时长（小时）。",
+          "description": "Validity hours (1-8).",
           "type": "integer"
         },
         "reason": {
           "default": "",
-          "description": "Required. Explicit reason or verbatim quote from user (>= 5 chars) / 用户授权原由或指令（不少于5字）。",
+          "description": "Authorization reason.",
           "type": "string"
         },
         "session_id": {
@@ -639,15 +639,15 @@
             }
           ],
           "default": null,
-          "description": "Session UUID for physical single-session isolation / 会话唯一标识符。"
+          "description": "Session ID."
         },
         "user_authorized": {
           "default": false,
-          "description": "Required. Must be True, representing explicit human consent / 必须为 True，代表用户明确授权。",
+          "description": "Consent boolean.",
           "type": "boolean"
         },
         "workspace_root": {
-          "description": "Root path of the project / 项目根目录。",
+          "description": "Project root.",
           "type": "string"
         }
       },
@@ -658,13 +658,13 @@
     }
   },
   "dev_tasks_status": {
-    "description": "Inspect development tasks status in the workspace. Returns active files, task status breakdown, and currently in-progress tasks. Supports runtime orchestration mode switching and autopilot breakpoint configuration.\n\n[中文对照] 探查工作区的开发任务状态。返回活跃文件、任务状态分布与当前执行中的任务。支持隔离或包含草案任务，支持双模运行时切换与 Autopilot 断点配置。",
+    "description": "Task status.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
         "include_drafts": {
           "default": false,
-          "description": "Whether to include draft tasks in pending queue (default False) / 是否在待领队列中包含草案任务（默认隔离）。",
+          "description": "Drafts ok.",
           "type": "boolean"
         },
         "stop_at": {
@@ -685,7 +685,7 @@
             }
           ],
           "default": null,
-          "description": "Autopilot breakpoint stage ('none', 'after_propose', 'after_review', 'after_confirm', 'before_archive', 'after_batch') / Autopilot 停靠断点阶段。"
+          "description": "Stop at."
         },
         "switch_mode": {
           "anyOf": [
@@ -701,7 +701,7 @@
             }
           ],
           "default": null,
-          "description": "Target orchestration mode ('standard', 'inverted') / 目标编排模式。"
+          "description": "Mode set."
         },
         "switch_reviewer_channel": {
           "anyOf": [
@@ -717,7 +717,7 @@
             }
           ],
           "default": null,
-          "description": "Target reviewer channel ('external_api', 'host_subagent') / 目标审查通信渠道。"
+          "description": "Channel."
         },
         "task_file": {
           "anyOf": [
@@ -729,10 +729,19 @@
             }
           ],
           "default": null,
-          "description": "Optional target task file name to bind / 可选绑定的任务单文件名。"
+          "description": "Task doc."
+        },
+        "verbosity": {
+          "default": "compact",
+          "description": "Full/min.",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "type": "string"
         },
         "workspace_root": {
-          "description": "Root path of the target workspace / 项目根目录绝对路径。",
+          "description": "Workspace.",
           "type": "string"
         }
       },

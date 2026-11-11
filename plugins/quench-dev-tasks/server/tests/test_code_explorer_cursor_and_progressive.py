@@ -264,7 +264,7 @@ def test_a9_external_budget_and_hint(tmp_path: Path):
 
 
 def test_a10_grep_contract(tmp_path: Path):
-    """A-10 正则卫生：len(pattern)>200 被拒；非法正则抛 CodeExplorerError；单行仅扫描前 4096 字符；每文件<=5 行，全局<=200。"""
+    """A-10 正则卫生：len(pattern)>1024 被拒；非法正则抛 CodeExplorerError；单行仅扫描前 4096 字符；每文件<=20 行，全局<=200。"""
     ws = tmp_path / "ws"
     ws.mkdir()
 
@@ -272,22 +272,22 @@ def test_a10_grep_contract(tmp_path: Path):
     with pytest.raises(CodeExplorerError):
         grep(str(ws), "[unclosed-bracket")
 
-    # 长度超过 200
+    # 长度超过 MAX_GREP_PATTERN_CHARS (1024)
     with pytest.raises(CodeExplorerError):
-        grep(str(ws), "a" * 201)
+        grep(str(ws), "a" * (MAX_GREP_PATTERN_CHARS + 1))
 
     # 空模式
     with pytest.raises(CodeExplorerError):
         grep(str(ws), "")
 
-    # 构造单个文件 7 处命中
+    # 构造单个文件 25 处命中
     f1 = ws / "many_hits.py"
-    f1.write_text("\n".join(f"target_marker_{i}" for i in range(7)), encoding="utf-8")
+    f1.write_text("\n".join(f"target_marker_{i}" for i in range(25)), encoding="utf-8")
 
     res = grep(str(ws), r"target_marker_\d+")
     assert len(res.histogram) == 1
-    assert res.histogram[0].count == 7  # 真实命中数不受 per-file 行上限影响
-    assert len(res.matches) == 5       # 每文件 matches 最多 5 条
+    assert res.histogram[0].count == 25  # 真实命中数不受 per-file 行上限影响
+    assert len(res.matches) == 20       # 每文件 matches 最多 20 条 (MAX_GREP_HITS_PER_FILE)
 
     # 构造超长行：匹配在 4096 之后应漏检，在 4096 之前命中
     f2 = ws / "long_line.py"
@@ -363,3 +363,103 @@ def test_a12_encoding_binary_and_list_dir(tmp_path: Path):
     assert is_path_safe(str(ws), "text.txt") is True
     assert is_path_safe(str(ws), "../outside") is False
     assert (resolve_within_roots(str(ws), "text.txt") is not None) == is_path_safe(str(ws), "text.txt")
+
+
+def test_a13_constants_evolution_and_long_regex(tmp_path: Path):
+    """A-13 常量演进与长正则支持：MAX_GREP_HITS_PER_FILE=20, MAX_GREP_PATTERN_CHARS=1024。"""
+    assert MAX_GREP_HITS_PER_FILE == 20
+    assert MAX_GREP_PATTERN_CHARS == 1024
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "sample.py").write_text("class TestServiceStateEngine:\n    pass\n", encoding="utf-8")
+
+    # 超过旧上限 200 字符但 <= 1024 字符的合法联合长正则
+    long_pattern = "class Test" + "(?:Service|Client|Engine|State)*" * 20
+    assert 200 < len(long_pattern) <= 1024
+
+    res = grep(str(ws), long_pattern)
+    assert len(res.matches) == 1
+    assert res.matches[0].rel_path == "sample.py"
+    assert "class TestServiceStateEngine" in res.matches[0].text
+
+    # 超过 1024 字符触发 CodeExplorerError
+    too_long_pattern = "a" * (MAX_GREP_PATTERN_CHARS + 1)
+    with pytest.raises(CodeExplorerError):
+        grep(str(ws), too_long_pattern)
+
+
+def test_a14_list_dir_cursor_pagination_and_equivalence(tmp_path: Path):
+    """A-14 list_dir 游标分页遍历与全集等价性。"""
+    ws = tmp_path / "ws_pagination"
+    ws.mkdir()
+
+    # 创建 5 个子目录与 20 个文件
+    for d in range(5):
+        (ws / f"dir_{d:02d}").mkdir()
+    for f in range(20):
+        (ws / f"file_{f:02d}.txt").write_text(f"content {f}", encoding="utf-8")
+
+    # 1. 一次性获取全量
+    full_listing = list_dir(str(ws), max_entries=100)
+    assert full_listing.total_entries == 25
+    assert len(full_listing.entries) == 25
+    assert full_listing.omitted == 0
+    assert full_listing.offset == 0
+    assert full_listing.next_offset is None
+
+    # 2. 分页遍历（每页 7 条）
+    paged_entries = []
+    current_offset: int | None = 0
+    page_count = 0
+
+    while current_offset is not None:
+        page = list_dir(str(ws), max_entries=7, offset=current_offset)
+        page_count += 1
+        assert page.offset == current_offset
+        paged_entries.extend(page.entries)
+        if current_offset + len(page.entries) < page.total_entries:
+            assert page.next_offset == current_offset + len(page.entries)
+        else:
+            assert page.next_offset is None
+        current_offset = page.next_offset
+
+    # 3. 验证分页累积全集与一次性全集完全等价
+    assert page_count == 4  # 7 + 7 + 7 + 4 = 25
+    assert len(paged_entries) == len(full_listing.entries)
+    assert [e.name for e in paged_entries] == [e.name for e in full_listing.entries]
+    assert [e.kind for e in paged_entries] == [e.kind for e in full_listing.entries]
+
+    # 4. 边界防御断言
+    # offset < 0 自动钳位至 0
+    clamped_page = list_dir(str(ws), max_entries=5, offset=-10)
+    assert clamped_page.offset == 0
+    assert len(clamped_page.entries) == 5
+
+    # offset >= total_entries 返回空 entries 且 next_offset 为 None
+    overflow_page = list_dir(str(ws), max_entries=5, offset=30)
+    assert overflow_page.offset == 30
+    assert len(overflow_page.entries) == 0
+    assert overflow_page.next_offset is None
+    assert overflow_page.omitted == 25
+
+
+def test_a15_grep_histogram_and_hits_decoupling(tmp_path: Path):
+    """A-15 grep matches 截断与直方图统计解耦：单文件超 20 行时，matches 截断而 histogram 保留真实总数。"""
+    ws = tmp_path / "ws_grep"
+    ws.mkdir()
+
+    # 构造一个包含 35 行匹配的文件
+    lines = [f"LOG_LINE_{i:02d}: error_detected in subsystem" for i in range(35)]
+    (ws / "heavy.log").write_text("\n".join(lines), encoding="utf-8")
+
+    res = grep(str(ws), "error_detected")
+    # 验证 matches 严格受 MAX_GREP_HITS_PER_FILE (20) 截断
+    assert len(res.matches) == 20
+    assert res.matches[0].rel_path == "heavy.log"
+    assert res.matches[19].rel_path == "heavy.log"
+
+    # 验证 histogram 真实记录了全部 35 处命中，不受 matches 截断污染
+    assert len(res.histogram) == 1
+    assert res.histogram[0].rel_path == "heavy.log"
+    assert res.histogram[0].count == 35

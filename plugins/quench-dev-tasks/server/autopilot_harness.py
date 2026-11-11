@@ -233,6 +233,33 @@ class HarnessNextAction:
             "consume_for": self.consume_for,
         }
 
+    def to_compact_dict(self) -> Dict[str, Any]:
+        """Compact serialization: omit keys with None or empty collection, action must be present."""
+        if not self.action:
+            raise ValueError("HarnessNextAction.action cannot be empty in compact mode")
+        raw = self.to_dict()
+        from response_compactor import compact_mapping
+        return compact_mapping(
+            raw,
+            always_keep=("action", "advisory"),
+            drop_if_empty=(
+                "task_ids",
+                "candidates",
+                "next_batch_tasks",
+                "reason",
+                "instruction",
+                "task_file",
+                "task_id",
+                "channel",
+                "model_hint",
+                "stage",
+                "roadmap_file",
+                "summary",
+                "expect_set_at",
+                "consume_for",
+            ),
+        )
+
 
 def compute_next_action(
     task_states: Sequence[TaskStateSnapshot],

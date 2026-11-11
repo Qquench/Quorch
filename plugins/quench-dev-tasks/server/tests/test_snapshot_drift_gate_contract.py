@@ -139,3 +139,221 @@ def test_antigravity_precedence_schema_drift_is_not_exempt(monkeypatch: pytest.M
 
     rc = guard_main()
     assert rc == 1, "Schema drift MUST block commit even under Antigravity environment"
+
+
+def test_tool_schema_physical_size_hard_gate() -> None:
+    """Verify that every tool schema in snapshot strictly adheres to MAX_TOOL_SCHEMA_BYTES (1000B)
+    and total eager schema strictly adheres to MAX_TOTAL_SCHEMA_BYTES (12000B).
+    """
+    import json
+    from ide_schema_export import SNAPSHOT_FILENAME, validate_schema_size_budget
+    from tool_surface_constants import (
+        MAX_TOOL_SCHEMA_BYTES,
+        MAX_TOTAL_SCHEMA_BYTES,
+        TOOL_COUNT,
+        measure_tool_schema_bytes,
+    )
+
+    # F-2: Trinary inequality constant assertion
+    assert (
+        MAX_TOOL_SCHEMA_BYTES < MAX_TOTAL_SCHEMA_BYTES < TOOL_COUNT * MAX_TOOL_SCHEMA_BYTES
+    ), "Trinary invariant broken: MAX_TOOL_SCHEMA_BYTES < MAX_TOTAL_SCHEMA_BYTES < TOOL_COUNT * MAX_TOOL_SCHEMA_BYTES"
+
+    snapshot_path = REPO_ROOT / "docs" / "architecture" / SNAPSHOT_FILENAME
+    assert snapshot_path.is_file(), f"Snapshot file not found: {snapshot_path}"
+
+    with open(snapshot_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    tools = {k: v for k, v in data.items() if k != "_meta"}
+    assert len(tools) == TOOL_COUNT, f"Expected {TOOL_COUNT} tools, got {len(tools)}"
+
+    total_bytes = 0
+    for name, schema in tools.items():
+        sz = measure_tool_schema_bytes(schema)
+        assert sz <= MAX_TOOL_SCHEMA_BYTES, (
+            f"Tool '{name}' schema size {sz}B exceeds physical ceiling {MAX_TOOL_SCHEMA_BYTES}B"
+        )
+        total_bytes += sz
+
+    assert total_bytes <= MAX_TOTAL_SCHEMA_BYTES, (
+        f"Total schema size {total_bytes}B exceeds cumulative ceiling {MAX_TOTAL_SCHEMA_BYTES}B"
+    )
+
+    # P-4: Validate snapshot through production validator
+    assert validate_schema_size_budget(data) == [], "Snapshot has size budget violations"
+
+
+def test_validate_schema_size_budget_pure_aggregation() -> None:
+    """P-1: Pure validator deterministic aggregation with overridden small thresholds."""
+    from ide_schema_export import SizeViolation, format_size_violations, validate_schema_size_budget
+    from tool_surface_constants import measure_tool_schema_bytes
+
+    # Tool A (120B > 100B), Tool B (110B > 100B), Tool C (50B <= 100B)
+    # Total = 120 + 110 + 50 = 280B > 150B
+    fixture = {
+        "a": {"name": "a", "description": "A" * 90},
+        "b": {"name": "b", "description": "B" * 80},
+        "c": {"name": "c", "description": "C" * 20},
+    }
+    sz_a = measure_tool_schema_bytes(fixture["a"])
+    sz_b = measure_tool_schema_bytes(fixture["b"])
+    sz_c = measure_tool_schema_bytes(fixture["c"])
+    assert sz_a > 100
+    assert sz_b > 100
+    assert sz_c <= 100
+    assert (sz_a + sz_b + sz_c) > 150
+
+    vs = validate_schema_size_budget(fixture, max_tool_bytes=100, max_total_bytes=150)
+    assert len(vs) == 3
+    assert sorted((v.kind, v.tool_name) for v in vs) == [("tool", "a"), ("tool", "b"), ("total", "")]
+
+    # Assert exact fields
+    by_key = {(v.kind, v.tool_name): v for v in vs}
+    assert by_key[("tool", "a")].measured_bytes == sz_a
+    assert by_key[("tool", "a")].limit_bytes == 100
+    assert by_key[("tool", "b")].measured_bytes == sz_b
+    assert by_key[("tool", "b")].limit_bytes == 100
+    assert by_key[("total", "")].measured_bytes == (sz_a + sz_b + sz_c)
+    assert by_key[("total", "")].limit_bytes == 150
+
+    lines = format_size_violations(vs)
+    assert len(lines) == 3
+    for line in lines:
+        assert line.startswith("SCHEMA_SIZE_VIOLATION: ")
+
+
+def test_validate_schema_size_budget_boundary_helper() -> None:
+    """P-2: Convergent pad helper for exact == pass and +1 fail boundaries."""
+    import copy
+    from ide_schema_export import validate_schema_size_budget
+    from tool_surface_constants import MAX_TOOL_SCHEMA_BYTES, SCHEMA_META_KEY, measure_tool_schema_bytes
+
+    def _pad_to_exact_bytes(base_tool: dict, target: int) -> dict:
+        t = copy.deepcopy(base_tool)
+        for _ in range(10):
+            d = target - measure_tool_schema_bytes(t)
+            if d == 0:
+                break
+            if d > 0:
+                t["description"] = t.get("description", "") + ("x" * d)
+            else:
+                t["description"] = t["description"][:d]
+        assert measure_tool_schema_bytes(t) == target, f"Failed to pad to {target}"
+        return t
+
+    base = {"type": "object", "properties": {}, "description": "base"}
+
+    # == MAX_TOOL_SCHEMA_BYTES passes
+    tool_exact = _pad_to_exact_bytes(base, MAX_TOOL_SCHEMA_BYTES)
+    assert validate_schema_size_budget({"tool1": tool_exact}) == []
+
+    # == MAX_TOOL_SCHEMA_BYTES + 1 fails with exactly 1 tool violation
+    tool_plus_one = _pad_to_exact_bytes(base, MAX_TOOL_SCHEMA_BYTES + 1)
+    vs_plus_one = validate_schema_size_budget(
+        {"tool1": tool_plus_one}, max_total_bytes=MAX_TOOL_SCHEMA_BYTES + 100
+    )
+    assert len(vs_plus_one) == 1
+    assert vs_plus_one[0].kind == "tool"
+    assert vs_plus_one[0].measured_bytes == MAX_TOOL_SCHEMA_BYTES + 1
+
+    # Total boundary
+    # 2 tools of 50 bytes = 100 bytes
+    t1 = _pad_to_exact_bytes(base, 50)
+    t2 = _pad_to_exact_bytes(base, 50)
+    assert validate_schema_size_budget({"t1": t1, "t2": t2}, max_total_bytes=100) == []
+    vs_total_plus = validate_schema_size_budget({"t1": t1, "t2": t2}, max_total_bytes=99)
+    assert len(vs_total_plus) == 1
+    assert vs_total_plus[0].kind == "total"
+    assert vs_total_plus[0].measured_bytes == 100
+
+    # Empty snapshot and _meta-only return []
+    assert validate_schema_size_budget({}) == []
+    assert validate_schema_size_budget({SCHEMA_META_KEY: {"schema_version": 1}}) == []
+
+
+def test_validate_schema_size_budget_idempotent_volatile_strip() -> None:
+    """P-5: Volatile keys ($schema, title) are stripped internally without mutating inputs."""
+    import copy
+    from ide_schema_export import _strip_volatile_keys, validate_schema_size_budget
+
+    raw = {
+        "tool_with_volatile": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "VolatileTitle",
+            "type": "object",
+            "description": "Clean description",
+            "properties": {
+                "param1": {"title": "ParamTitle", "type": "string"},
+            },
+        }
+    }
+    raw_copy = copy.deepcopy(raw)
+
+    vs1 = validate_schema_size_budget(raw)
+    vs2 = validate_schema_size_budget(_strip_volatile_keys(raw))
+    assert vs1 == vs2, "validate_schema_size_budget must produce identical result on raw vs pre-stripped schema"
+    assert raw == raw_copy, "validate_schema_size_budget must not mutate input dictionary"
+
+
+def test_run_cli_size_gate_positive_and_negative_direct(capsys: pytest.CaptureFixture) -> None:
+    """P-3: run_cli direct test verifying positive pass and negative fail-closed without side effects."""
+    import copy
+    import shutil
+    from ide_schema_export import (
+        EXIT_INVALID,
+        EXIT_OK,
+        SNAPSHOT_FILENAME,
+        run_cli,
+    )
+    from tool_surface_constants import (
+        EXPECTED_TOOL_NAMES,
+        MAX_TOOL_SCHEMA_BYTES,
+        SCHEMA_META_KEY,
+        SNAPSHOT_SCHEMA_VERSION,
+    )
+
+    test_cache_dir = REPO_ROOT / ".agents" / "_test_cache_run_cli"
+    if test_cache_dir.exists():
+        shutil.rmtree(test_cache_dir, ignore_errors=True)
+    test_cache_dir.mkdir(parents=True, exist_ok=True)
+    target_snapshot = test_cache_dir / SNAPSHOT_FILENAME
+
+    try:
+        # 1. Construct valid live schemas
+        valid_live = {
+            tool_name: {"description": f"Tool {tool_name}", "parameters": {"type": "object", "properties": {}}}
+            for tool_name in EXPECTED_TOOL_NAMES
+        }
+        valid_live[SCHEMA_META_KEY] = {"schema_version": SNAPSHOT_SCHEMA_VERSION}
+
+        # Positive test: --write
+        rc_write = run_cli(["--write", "--cache-dir", str(test_cache_dir)], introspect=lambda: valid_live)
+        assert rc_write == EXIT_OK, "Valid live schema must succeed on --write"
+        assert target_snapshot.is_file(), "Snapshot file must be generated"
+        valid_snapshot_bytes = target_snapshot.read_bytes()
+        initial_dir_entries = sorted(p.name for p in test_cache_dir.iterdir())
+
+        # Positive test: --check
+        rc_check = run_cli(["--check", "--cache-dir", str(test_cache_dir)], introspect=lambda: valid_live)
+        assert rc_check == EXIT_OK, "Matching snapshot must succeed on --check"
+
+        # Negative test: Oversized tool schema
+        oversized_live = copy.deepcopy(valid_live)
+        first_tool = sorted(EXPECTED_TOOL_NAMES)[0]
+        oversized_live[first_tool]["description"] = "X" * (MAX_TOOL_SCHEMA_BYTES + 50)
+
+        capsys.readouterr()  # clear buffer
+        rc_neg_write = run_cli(["--write", "--cache-dir", str(test_cache_dir)], introspect=lambda: oversized_live)
+        assert rc_neg_write == EXIT_INVALID, "Oversized schema must fail with EXIT_INVALID on --write"
+
+        captured = capsys.readouterr()
+        assert "SCHEMA_SIZE_VIOLATION:" in captured.err, "stderr must contain SCHEMA_SIZE_VIOLATION prefix"
+        assert "SCHEMA_SIZE_VIOLATION:" not in captured.out, "stdout must remain clean of size violations"
+
+        # Verify zero side-effects on target file and directory
+        assert target_snapshot.read_bytes() == valid_snapshot_bytes, "Target snapshot must remain untouched on violation"
+        assert sorted(p.name for p in test_cache_dir.iterdir()) == initial_dir_entries, "No temporary files may remain in target directory"
+    finally:
+        if test_cache_dir.exists():
+            shutil.rmtree(test_cache_dir, ignore_errors=True)

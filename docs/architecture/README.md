@@ -278,7 +278,7 @@ To permanently guard against model prompt surface drift, IDE schema divergence, 
 
 ---
 
-## 4. Architectural Invariants (9 Core — All Test-Anchored)
+## 4. Architectural Invariants (10 Core — All Test-Anchored)
 
 > These invariants are non-negotiable. Each has at least one automated test asserting its physical enforcement.
 
@@ -293,6 +293,7 @@ To permanently guard against model prompt surface drift, IDE schema divergence, 
 | **INV-7** | Physical feasibility gate (path + pytest dry-run before promotion) | `dev_tasks_promote_draft` enforces checks; lint gate blocks invalid paths | `test_draft_lint.py` |
 | **INV-8** | Context budget cap (`max_total_injection_chars`) | `project_config.py` enforces cap before injection; truncation tested | `test_consultation_context_guard.py` |
 | **INV-9** | Single Provider Egress (no raw API bypass) | CI & test static AST scanner (`check_no_api_bypass.py`) asserts all Reviewer model calls transit through `ReviewerClient` | `test_architecture_hygiene.py`, `test_no_api_bypass.py` |
+| **INV-10** | Response Budget SSOT (Declared & Test-Anchored) | Leaf SSOT (`tool_surface_constants.py`) declares response byte budgets for all 16 tools; runtime clamp enforced from 33.1; asserted in `test_response_compactor.py` | `test_response_budget_ssot.py`, `test_response_compactor.py` |
 
 ---
 
@@ -321,6 +322,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `project_config.py` | T2/T3 | `quench_stack.yaml` loading, validation, migration | Single parse per session; cached after first load |
 | `observability_policy.py` | T4 | Verdict sink policy (`FileVerdictAuditSink`), consultation telemetry sink (`FileConsultationTelemetrySink`, `ConsultationTelemetryRecord`), cache management (`reset_consultation_telemetry_sink_cache`) | Append-only verdicts and telemetry; FileLock cross-process concurrency; GC immune |
 | `reporting.py` | T2/T3 | Consolidated delivery artifacts and status reporting: pure handoff card rendering (T2) & atomic CHANGELOG append (T3) | Pure rendering for handoff card; non-destructive header-preserving updates for CHANGELOG |
+| `response_compactor.py` | T2/T3 | 确定性钳制 + 封闭码分类，零模型介入（INV-3）；`compact_mapping`、`fit_to_budget`、`canonical_json`、`classify_hook_log_entry` | Pure function; zero I/O; deterministic single-pass clamping |
 | `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`, `reviewer debug`) | Interactive ANSI formatting; non-AI operator gateway |
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement for mutating tools (`write_file`, `edit_file`, `run_command`) & task status tamper guard | Must respond in < 50ms; no heavy imports |
 | `hooks/context_injector.py` | T1 | PreInvocation relay guidance injection & Stop Hook 1-shot circuit-breaker (`.quench_stop_guard.json`) | Read-only injection; non-blocking fail-safe |
@@ -352,6 +354,7 @@ server.py → manifest.py        (task CRUD)
 server.py → code_explorer.py   (AST slice for refine_spec)
 server.py → reporting.py       (handoff card rendering & CHANGELOG append)
 server.py → tool_surface_constants.py (SSOT tool constants)
+server.py → response_compactor.py     (deterministic response clamping & compaction)
 server.py → progress_bridge.py (ProgressBridge.from_context & emit)
 
 progress_bridge.py → reviewer_jobs.py (read PollSnapshot, SnapshotContractViolation)

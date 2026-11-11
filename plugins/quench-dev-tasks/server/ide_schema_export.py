@@ -12,17 +12,20 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Final
+from typing import Any, Callable, Final, NamedTuple
 
 from path_guard import PathTraversalError, assert_dir_contained
 from tool_surface_constants import (
     EXPECTED_TOOL_NAMES,
+    MAX_TOOL_SCHEMA_BYTES,
+    MAX_TOTAL_SCHEMA_BYTES,
     META_ALLOWED_KEYS,
     MISSING,
     SCHEMA_META_KEY,
     SNAPSHOT_SCHEMA_VERSION,
     TOOL_COUNT,
     _MissingSentinel,
+    measure_tool_schema_bytes,
 )
 
 CR: Final[bytes] = bytes([13])
@@ -84,6 +87,72 @@ def _strip_volatile_keys(obj: Any) -> Any:
     if isinstance(obj, tuple):
         return tuple(_strip_volatile_keys(item) for item in obj)
     return obj
+
+
+class SizeViolation(NamedTuple):
+    kind: str  # "tool" | "total"
+    tool_name: str  # "" for total
+    measured_bytes: int
+    limit_bytes: int
+
+
+def validate_schema_size_budget(
+    snapshot: dict[str, Any],
+    *,
+    max_tool_bytes: int = MAX_TOOL_SCHEMA_BYTES,
+    max_total_bytes: int = MAX_TOTAL_SCHEMA_BYTES,
+) -> list[SizeViolation]:
+    """Pure validator. Skips SCHEMA_META_KEY; strips volatile keys internally; measures via measure_tool_schema_bytes (SSOT).
+
+    判据严格为 >：单工具 > max_tool_bytes 违规；累计 > max_total_bytes 违规；
+    == 上限放行；空快照 / 仅 _meta 返回 []。不写盘、无副作用。
+    """
+    violations: list[SizeViolation] = []
+    total_bytes = 0
+
+    for tool_name, tool_data in snapshot.items():
+        if tool_name == SCHEMA_META_KEY:
+            continue
+        stripped_tool = _strip_volatile_keys(tool_data)
+        sz = measure_tool_schema_bytes(stripped_tool)
+        total_bytes += sz
+        if sz > max_tool_bytes:
+            violations.append(
+                SizeViolation(
+                    kind="tool",
+                    tool_name=str(tool_name),
+                    measured_bytes=sz,
+                    limit_bytes=max_tool_bytes,
+                )
+            )
+
+    if total_bytes > max_total_bytes:
+        violations.append(
+            SizeViolation(
+                kind="total",
+                tool_name="",
+                measured_bytes=total_bytes,
+                limit_bytes=max_total_bytes,
+            )
+        )
+
+    return violations
+
+
+def format_size_violations(violations: list[SizeViolation]) -> list[str]:
+    """Format violations sorted by (kind, tool_name) with stable prefix for deterministic assertions."""
+    sorted_v = sorted(violations, key=lambda v: (v.kind, v.tool_name))
+    lines: list[str] = []
+    for v in sorted_v:
+        if v.kind == "tool":
+            lines.append(
+                f"SCHEMA_SIZE_VIOLATION: tool '{v.tool_name}' {v.measured_bytes} bytes > limit {v.limit_bytes}"
+            )
+        else:
+            lines.append(
+                f"SCHEMA_SIZE_VIOLATION: total {v.measured_bytes} bytes > limit {v.limit_bytes}"
+            )
+    return lines
 
 
 def validate_schema_doc(schemas: dict[str, Any]) -> None:
@@ -320,6 +389,12 @@ def run_cli(
             sys.stderr.write(f"Error: Snapshot file is corrupted or fails schema contract: {e}\n")
             return EXIT_INVALID
 
+        violations = validate_schema_size_budget(disk_data)
+        if violations:
+            for line in format_size_violations(violations):
+                sys.stderr.write(f"{line}\n")
+            return EXIT_INVALID
+
         try:
             live_schemas = introspect()
             validate_schema_doc(live_schemas)
@@ -339,6 +414,11 @@ def run_cli(
         try:
             live_schemas = introspect()
             validate_schema_doc(live_schemas)
+            violations = validate_schema_size_budget(live_schemas)
+            if violations:
+                for line in format_size_violations(violations):
+                    sys.stderr.write(f"{line}\n")
+                return EXIT_INVALID
             export_ide_schemas(dest_dir, live_schemas, dry_run=False)
             return EXIT_OK
         except Exception as e:

@@ -1,0 +1,119 @@
+# Milestone v1.33 — MCP Tool Response Slimming & Compact Contract Roadmap
+
+> **Status**: 🚀 Roadmap Finalized & In Review  
+> **Target Version**: `v1.33`  
+> **Preceding Milestone**: `v1.32` (Code Explorer Constants Evolution & Architecture Hardening)  
+> **Succeeding Milestone**: `v1.34` (Cross-Session Coordination & Dual-Mode Orchestration)
+
+---
+
+## 1. Executive Summary & Root Cause (背景与根因)
+
+### 1.1 背景与上下文污染 (Context Dilution Problem)
+在长交互开发会话中，主模型与 Quench 16 个 FastMCP 工具频繁交互。虽然在 `v1.31` 中完成了 MCP Tool Schema（工具定义 docstring）的硬上限瘦身，并在 `v1.24` 中为 `dev_reviewer_poll` 制定了 1KB 快照契约，但**工具的运行期响应体（Runtime Response Payloads）**依然存在严重膨胀：
+* `dev_tasks_status` 单次返回体积高达 **3,500 ~ 5,300 字节**；
+* `dev_tasks_checkout` 在无任务可检出路径下拼接了数十行双语教学提示；
+* `dev_tasks_refine_spec` 在 `persist=True` 写入磁盘后，依然将几千字符的 Markdown 正文全量回吐；
+* `harness_next_action` 数据类序列化时输出大量为 `null` 的键。
+
+这导致核心工具链在日常流水线流转中吃掉巨额 Token，并在上下文窗口中快速堆积大量装饰性噪音（Context Dilution），稀释了模型对代码变更、测试断言和架构约束的注意力。
+
+### 1.2 根因解构与读侧折叠策略 (Root Cause & Read-Side Compaction Strategy)
+1. **读侧折叠保护诊断资产**：`ASK_MODAL` 等拦截弹窗多段原文在 Hook 写侧原样落盘于 `.quench_hook.log`，保持完整的运维取证诊断能力；在 `server.py` 读侧通过确定性规则分类器将其折叠为封闭码（`HOOK_LOG_CODES`）与磁盘引用（`log_ref`），杜绝直接回吐大段模板；
+2. **静态不可变配置重复重发（无 ETag 机制）**：`session_role_contract` 与 `governance_scope` 为会话级静态配置，每次调用都全量重发数百字节；
+3. **空集合与 Null 值全量展开**：空队列与空状态在每个任务单中全量展开；
+4. **缺乏全局响应体预算契约（No Response Budget）**：缺乏类似 `MAX_NONTERMINAL_SNAPSHOT_BYTES` 的全局性响应体尺寸规范与门禁保护。
+
+---
+
+## 2. Objectives & Non-Goals (目标与非目标)
+
+### 2.1 核心目标 (Goals)
+1. **建立单一不可变的响应预算 SSOT 与 INV-10 不变量**：
+   - 在 `tool_surface_constants.py` 以 `MappingProxyType` 冻结 `RESPONSE_BUDGET_BYTES`（键集严格等于 `EXPECTED_TOOL_NAMES`）；
+   - 在 `docs/architecture/README.md` 正式登记 INV-10，测试锚点定为同期单测 `test_response_budget_ssot.py`。
+2. **建立统一的 Slim Response Contract**：
+   - 引入确定性轻量压缩管道 `response_compactor.py`（纯函数、保序、三档空值语义、Zero I/O、无模型伪装介入，遵守 INV-3/INV-9）；
+   - 共享单一 payload fixture 语料模块 `plugins/quench-dev-tasks/server/tests/fixtures/response_payloads.py`，杜绝双源漂移；
+   - 在关键工具中引入可选 `verbosity: Literal["compact", "full"] = "compact"`，默认载荷形态自 v1.33 起为 `compact`；
+   - 引入 `entitlements_hash`（短哈希 ETag 化），默认省略重复的静态配置；
+   - `harness_next_action` 紧凑序列化，省略为 `null` 的键。
+3. **`dev_tasks_status` 深度降压 (80%+ 缩减)**：
+   - 响应体硬上限控制在 **≤ 2,048 字节**，冷启动软目标 **≤ 1,024 字节**；
+   - 折叠 Hook 日志为结构体（采用封闭词汇表 `HOOK_LOG_CODES`，保留磁盘 `log_ref`）；
+   - 空队列与全 0 状态稀疏化。
+4. **交互工具回显剥离**：
+   - `dev_tasks_checkout` 场景 3 移除冗长指引，仅保留结构化 `reason_code`（登记在 `CHECKOUT_REASON_CODES`）与 `harness_next_action`；
+   - `dev_tasks_refine_spec` 写盘后剥离正文回显，返回包含 `content_sha256`、`bytes_written` 与校验摘要。
+5. **严格保障向后兼容与测试门禁**：
+   - 保持 16 个工具的入参必填语义与错误处理语义不变；
+   - 保护存量单测（`test_observability.py`、`test_server_tools.py` 等）；
+   - 同步更新 `ide_tool_schemas.json` 快照并通过 drift gate。
+
+### 2.2 显式非目标 (Non-Goals)
+* 严禁通过 LLM 模型生成摘要代替确定性规则压缩（坚决守护 INV-3 反自我伪装红线）；
+* 不削减 `dev_reviewer_poll` 终态 `findings` 的 40KB 预算；
+* 不改动工具核心业务决策与状态机流转逻辑。
+
+---
+
+## 3. Architecture & Core Specifications (架构与契约规约)
+
+### 3.1 响应体预算规范 (Response Budget Table)
+```python
+RESPONSE_BUDGET_BYTES: Final[Mapping[str, int]] = MappingProxyType({
+    "dev_tasks_status": 2048,          # 硬上限；冷启动目标 ≤1024 由测试单独断言
+    "dev_tasks_checkout": 800,
+    "dev_tasks_refine_spec": 600,
+    "dev_tasks_promote_draft": 1200,
+    "dev_tasks_escalate": 1500,
+    "dev_reviewer_submit": 400,
+    "dev_reviewer_poll": MAX_NONTERMINAL_SNAPSHOT_BYTES,  # 仅非终态快照，引用叶子 SSOT 常量，终态预算由 reviewer_jobs SSOT 单独校验
+    "dev_reviewer_cancel": 512,
+    "dev_tasks_propose": 800,
+    "dev_tasks_confirm": 800,
+    "dev_tasks_complete": 800,
+    "dev_tasks_heartbeat": 512,
+    "dev_tasks_reclaim": 512,
+    "dev_tasks_archive": 800,
+    "dev_tasks_set_bypass": 800,
+    "dev_tasks_export_handoff_card": 2048,
+})
+
+HOOK_LOG_CODES: Final[frozenset[str]] = frozenset({
+    "ASK_MODAL_BLOCKED", "SCOPE_VIOLATION", "BYPASS_ACTIVE",
+    "TASK_STATUS_TAMPER", "PATH_OUT_OF_SCOPE", "OTHER",
+})
+
+CHECKOUT_REASON_CODES: Final[frozenset[str]] = frozenset({
+    "REWORK_REQUIRED", "PENDING_REVIEW", "NO_CONFIRMED_TASKS",
+})
+```
+
+### 3.2 紧凑管道核心抽象 (`response_compactor.py`)
+* `compact_mapping(data, *, always_keep=(), drop_if_empty=())`: 
+  1. `None` 默认剔除，除非键列入 `always_keep`；
+  2. `""` / `[]` / `{}` 仅当键列入 `drop_if_empty` 才剔除（禁止将整型 0 / 布尔 False 剔除）；
+  3. 单层保序（不修改原 mapping）。
+* `serialize_next_action(action, *, verbosity="compact")`: `action` 判别器永不省略，其余空字段省略；
+* `EntitlementsEnvelope`: `entitlements_hash = sha256(canonical_json(canonical_cfg).encode("utf-8")).hexdigest()[:16]`。
+
+---
+
+## 4. Phased Implementation Batches (分批演进计划)
+
+* **Batch 1 (基础度量、SSOT 与通用管道) ✔️ 已完成**：
+  - 任务 33.0: 响应预算 SSOT 与 INV-10 不变量登记（`tool_surface_constants.py`, `docs/architecture/README.md`）。
+  - 任务 33.1: 响应体积度量脚本 `measure_tool_response_sizes.py`、`response_compactor.py` 纯函数管道、共享 fixtures 及单测。
+* **Batch 2 (核心工具状态瘦身) ✔️ 已完成**：
+  - 任务 33.2: `dev_tasks_status` v2 改造（Hook 日志折叠、静态配置 ETag 化、空状态折叠、`harness_next_action` 压缩、Schema 快照同步、Batch 2 预算门禁断言）。
+* **Batch 3 (交互工具瘦身与全量门禁) ✔️ 已完成**：
+  - 任务 33.3: `dev_tasks_checkout`、`dev_tasks_refine_spec` 瘦身，全表面预算断言，跑通全量门禁。
+
+---
+
+## 5. Rollback Anchors (回滚锚点)
+* `git tag v1.33-b1-ssot` (Batch 1 任务 33.0/33.1 完成后打标)
+* `git tag v1.33-b2-status-slim` (Batch 2 完成后打标)
+* `git tag v1.33-b3-frozen` (Batch 3 验收完成后打标)
+* **Status**: 🏁 **Milestone v1.33 Fully Completed & Delivered (2026-11-11)**
