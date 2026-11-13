@@ -32,8 +32,10 @@ from context_injector import (
     _HALT_STATES,
     _RELAY_STATES,
     _STOP_HOOK_RELAY_STATES,
+    _atomic_write_json,
     _build_reminder,
     _handle_stop_event,
+    _is_external_api_available,
     _resolve_harness_baton,
     main,
 )
@@ -274,4 +276,119 @@ def test_main_routing_for_stop_event(tmp_path: Path, monkeypatch):
     output = json.loads(captured_stdout.getvalue())
     assert output["decision"] == "continue"
     assert "CONFIRM" in output["reason"]
+
+
+def test_external_api_available_when_configured(tmp_path: Path, monkeypatch):
+    """断言当正常配置外部 Reviewer 且 API Key 存在时，_is_external_api_available 返回 True。"""
+    ws = tmp_path / "ws_configured"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = """project_name: test_ext
+dev_tasks_dir: docs/dev_tasks
+reviewer_engine:
+  provider: deepseek
+  api_key_env: TEST_REVIEWER_KEY
+"""
+    (agents_dir / "quench_stack.yaml").write_text(stack_yaml, encoding="utf-8")
+    monkeypatch.setenv("TEST_REVIEWER_KEY", "sk-test-secret-12345")
+
+    assert _is_external_api_available(str(ws)) is True
+
+
+def test_external_api_unavailable_when_provider_none(tmp_path: Path, monkeypatch):
+    """断言未配置外部引擎（provider: 'none'）且无 Key 时，_is_external_api_available 返回 False。"""
+    ws = tmp_path / "ws_none"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = """project_name: test_none
+dev_tasks_dir: docs/dev_tasks
+reviewer_engine:
+  provider: none
+"""
+    (agents_dir / "quench_stack.yaml").write_text(stack_yaml, encoding="utf-8")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    assert _is_external_api_available(str(ws)) is False
+
+
+def test_external_api_unavailable_when_provider_none_despite_env_key(tmp_path: Path, monkeypatch):
+    """断言 provider: 'none' 时，即便环境中存在 DEEPSEEK_API_KEY / OPENAI_API_KEY，仍必须返回 False。"""
+    ws = tmp_path / "ws_none_env"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = """project_name: test_none_env
+dev_tasks_dir: docs/dev_tasks
+reviewer_engine:
+  provider: none
+"""
+    (agents_dir / "quench_stack.yaml").write_text(stack_yaml, encoding="utf-8")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-accidental-deepseek-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-accidental-openai-key")
+
+    assert _is_external_api_available(str(ws)) is False
+
+
+def test_external_api_check_does_no_network(tmp_path: Path, monkeypatch):
+    """断言 _is_external_api_available 纯本地判定，绝不发起 socket 网络建连。"""
+    import socket
+    ws = tmp_path / "ws_net"
+    ws.mkdir()
+    agents_dir = ws / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = """project_name: test_net
+dev_tasks_dir: docs/dev_tasks
+reviewer_engine:
+  provider: deepseek
+  api_key_env: TEST_REVIEWER_KEY
+"""
+    (agents_dir / "quench_stack.yaml").write_text(stack_yaml, encoding="utf-8")
+    monkeypatch.setenv("TEST_REVIEWER_KEY", "sk-valid-key")
+
+    def _forbidden_connect(*args, **kwargs):
+        raise AssertionError("Network connection forbidden in hook probe")
+
+    monkeypatch.setattr(socket.socket, "connect", _forbidden_connect)
+    res = _is_external_api_available(str(ws))
+    assert res is True
+
+
+def test_atomic_write_json_success(tmp_path: Path):
+    """断言 _atomic_write_json 正确原子写入格式化 JSON 且目录无临时文件残留。"""
+    target = tmp_path / "sub" / "test.json"
+    data = {"history": {"key1": 1, "key2": 2}}
+    _atomic_write_json(str(target), data)
+
+    assert target.is_file()
+    loaded = json.loads(target.read_text(encoding="utf-8"))
+    assert loaded == data
+
+    # 验证目录中只有目标文件，无临时文件残留
+    files = list(target.parent.iterdir())
+    assert files == [target]
+
+
+def test_atomic_write_json_cleanup_on_failure(tmp_path: Path, monkeypatch):
+    """断言当原子替换失败时，_atomic_write_json 抛出异常并清理临时文件。"""
+    target = tmp_path / "fail_sub" / "fail.json"
+    data = {"error": True}
+
+    def _mock_replace(src, dst):
+        raise OSError("Simulated disk write failure")
+
+    monkeypatch.setattr(os, "replace", _mock_replace)
+
+    with pytest.raises(OSError, match="Simulated disk write failure"):
+        _atomic_write_json(str(target), data)
+
+    # 目标文件不应存在
+    assert not target.exists()
+    # 临时文件必须被清理，目录中无残留文件
+    if target.parent.exists():
+        assert list(target.parent.iterdir()) == []
+
+
 

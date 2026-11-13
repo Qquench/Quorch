@@ -13,7 +13,7 @@
 
 ## Task List & Status / 任务清单与状态
 
-### 任务 1.1 ⬜ 待确认 — 修复 context_injector 中 ReviewerClient 幽灵模块导入导致外部 API 状态误判
+### 任务 1.1 ✔️ 已完成 — 修复 context_injector 中 ReviewerClient 幽灵模块导入导致外部 API 状态误判
 
 #### 【涉及文件】
 ```

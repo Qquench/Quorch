@@ -3,6 +3,14 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-13] 2026-11-13_fix_context_injector_config_sync_import.md
+
+- **Task 1.1**: 消除 context_injector 中 config_sync 静态导入缺失报错
+
+## [2026-11-13] 2026-11-13_fix_context_injector_reviewer_import.md
+
+- **Task 1.1**: 修复 context_injector 中 ReviewerClient 幽灵模块导入导致外部 API 状态误判
+
 ## [2026-11-11] 2026-11-11_ci_fix_engine_key.md
 
 - **Task 1.3**: 补全 refine_spec 压缩保全中的 engine 关键字段

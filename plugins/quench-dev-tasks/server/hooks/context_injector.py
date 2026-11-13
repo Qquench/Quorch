@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import sys
+import tempfile
 from typing import Any, Dict, Final, List, Optional, Tuple
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -49,15 +50,39 @@ _STOP_HOOK_RELAY_STATES: Final[frozenset[str]] = frozenset({
 })
 
 
+def _atomic_write_json(filepath: str, data: Any) -> None:
+    """原子化写入 JSON 文件：先写临时文件后原子替换，防御并发竞争与写入截断。"""
+    target_dir = os.path.dirname(filepath)
+    os.makedirs(target_dir, exist_ok=True)
+    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir, text=True)
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(temp_file, filepath)
+    except Exception:
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
+        raise
+
+
 def _is_external_api_available(workspace_root: str) -> bool:
     try:
         from project_config import load_project_config
-        from reviewer_client import ReviewerClient
+        from reviewer_engine import ReviewerClient
         config = load_project_config(workspace_root)
         re_cfg = getattr(config, "reviewer_engine", config)
+        provider = getattr(re_cfg, "provider", None)
+        if provider in (None, "", "none"):
+            return False
         client = ReviewerClient(re_cfg)
         return bool(client.resolve_api_key()) or client.is_available()
-    except Exception:
+    except Exception as exc:
+        if os.environ.get("QUENCH_HOOK_DEBUG"):
+            sys.stderr.write(f"[context_injector] _is_external_api_available error: {exc}\n")
         return False
 
 
@@ -207,8 +232,7 @@ def _handle_stop_event(payload: dict) -> dict:
 
         # 触发一次静默配置自愈
         try:
-            from config_sync import auto_heal_configs
-            auto_heal_configs(workspace_root=workspace_root, quiet=True)
+            __import__("config_sync").auto_heal_configs(workspace_root=workspace_root, quiet=True)
         except Exception:
             pass
 
@@ -283,11 +307,7 @@ def _handle_stop_event(payload: dict) -> dict:
                     oldest = next(iter(records))
                     del records[oldest]
 
-                from config_sync import atomic_write_file
-                atomic_write_file(
-                    guard_file,
-                    json.dumps({"history": records}, indent=2, ensure_ascii=False) + "\n"
-                )
+                _atomic_write_json(guard_file, {"history": records})
 
                 reason_msg = f"Autopilot relay '{harness_state}' active: {harness_instruction or 'Please continue next relay step in-band without stopping.'}"
                 return {
