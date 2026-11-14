@@ -3,6 +3,26 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-14] 2026-11-14_clean_all_pyrefly_diagnostics_and_test_hygiene.md
+
+- **Task 3.1**: 彻底清零 Pyrefly 全量诊断与测试架构类型报错
+
+## [2026-11-14] 2026-11-14_consolidate_micro_ast_and_doc_tests.md
+
+- **Task 2.1**: 精简整合历史碎片化 AST 与文档门禁测试脚本
+
+## [2026-11-14] 2026-11-14_fix_server_pyrefly_diagnostics.md
+
+- **Task 1.1**: 全面修复 server.py 中 Pyrefly 静态类型与命名空间报错
+
+## [2026-11-14] 2026-11-14_fix_pyrefly_bad_function_definition_ctx_context.md
+
+- **Task 1.1**: 修复 ctx 参数 bad-function-definition 并物理锚定 FastMCP Context 注入、空值守卫与 Schema 零漂移
+
+## [2026-11-14] 2026-11-14_fix_pyrefly_missing_import_check_prompt_surface.md
+
+- **Task 1.1**: 修复 pyrefly 对 check_prompt_surface 的 missing-import 报障（search-path 结构化修复 + 语义化配置契约守卫 + 静态验证闭环）
+
 ## [2026-11-13] 2026-11-13_fix_context_injector_config_sync_import.md
 
 - **Task 1.1**: 消除 context_injector 中 config_sync 静态导入缺失报错

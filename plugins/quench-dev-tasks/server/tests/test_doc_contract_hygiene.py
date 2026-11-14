@@ -102,3 +102,49 @@ def test_host_neutral_verbs_in_prompts():
             assert not match, (
                 f"Found forbidden host-specific tool '{tool}' in role contract/verb section of {rel_path}"
             )
+
+
+# --- Case 12 & CI Incident Guide Documentation Invariants (TP-1) ---
+
+def test_readme_w10_exclusion_domain_heading_invariants():
+    """Assert README contains exactly one ### 3.3.1 W10 Exclusion Domain immediately before ### 3.4."""
+    content = _read_doc("docs/architecture/README.md")
+
+    target_heading = "### 3.3.1 W10 Exclusion Domain (锁原语豁免域)"
+    occurrences = content.count(target_heading)
+    assert occurrences == 1, f"Expected exactly 1 occurrence of '{target_heading}', found {occurrences}"
+
+    # Extract all H3 headings in order
+    h3_headings = [
+        line.strip()
+        for line in content.splitlines()
+        if line.startswith("### ")
+    ]
+
+    assert target_heading in h3_headings, f"'{target_heading}' not in extracted H3 headings"
+    idx = h3_headings.index(target_heading)
+
+    # Must be after at least one previous H3 (e.g. 3.3 / 3.1)
+    assert idx > 0, f"'{target_heading}' cannot be the first H3 heading"
+
+    # Immediately following H3 must be ### 3.4 ...
+    assert idx + 1 < len(h3_headings), f"'{target_heading}' has no subsequent H3 heading"
+    next_heading = h3_headings[idx + 1]
+    assert next_heading.startswith("### 3.4"), (
+        f"Expected immediately following heading to start with '### 3.4', got '{next_heading}'"
+    )
+
+
+def test_ci_guide_dense_case_coverage_and_incident_ids():
+    """Assert CI incident guide covers Cases 1..12 densely and contains INC-\\d{8}-\\d{2}."""
+    content = _read_doc("docs/ci_incident_tracker_and_compatibility_guide.md")
+
+    # Dense case coverage 1..12
+    for case_num in range(1, 13):
+        pattern = rf"案例 {case_num}[:\s]"
+        assert re.search(pattern, content), f"Missing dense case coverage for Case {case_num} ('{pattern}')"
+
+    # Incident ID regex check
+    matches = re.findall(r"INC-\d{8}-\d{2}", content)
+    assert len(matches) >= 8, f"Expected at least 8 INC incident IDs, found {len(matches)}: {matches}"
+    assert "INC-20261022-01" in matches, "Expected 'INC-20261022-01' in CI incident guide matches"

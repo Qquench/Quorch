@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 from datetime import datetime, timezone, timedelta, date
 import glob
 import hashlib
@@ -153,7 +152,9 @@ def _is_external_api_available(workspace_root: str, config: Optional[Any] = None
     try:
         if config is None:
             config = load_project_config(workspace_root)
-        re_cfg = getattr(config, "reviewer_engine", config)
+        re_cfg = getattr(config, "reviewer_engine", None)
+        if re_cfg is None and isinstance(config, ReviewerEngineConfig):
+            re_cfg = config
         client = ReviewerClient(re_cfg)
         return bool(client.resolve_api_key()) or client.is_available()
     except Exception:
@@ -1866,7 +1867,7 @@ def _resolve_handoff_envelope(
     reason: str,
     context_files: Optional[List[str]] = None,
     host_capabilities: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+) -> ReviewerHandoff:
     """Pure, side-effect-free envelope builder with zero synchronous network I/O.
     Enforces R3 invariant: strategies[-1]['strategy'] == 'manual' and available == True.
     """
@@ -2999,6 +3000,7 @@ async def dev_tasks_refine_spec(
         persist_res = None
         resolved_tf = None
         if persist:
+            assert task_file is not None
             resolved_tf = _resolve_task_file_path(workspace_root, task_file)
             fallback_dict = dict(draft_task)
             if raw_spec.strip():
@@ -3127,6 +3129,7 @@ async def dev_tasks_refine_spec(
         persist_res = None
         resolved_tf = None
         if persist:
+            assert task_file is not None
             resolved_tf = _resolve_task_file_path(workspace_root, task_file)
             persist_res = await asyncio.to_thread(
                 write_task_file_guarded,
@@ -3246,7 +3249,10 @@ def dev_tasks_escalate(
     try:
         config = load_project_config(workspace_root)
     except Exception:
-        config = QuenchStackConfig()
+        config = QuenchStackConfig(
+            workspace_root=workspace_root,
+            project_name=os.path.basename(workspace_root) or "default",
+        )
 
     try:
         client = create_reviewer_client(config.reviewer_engine)
@@ -3745,6 +3751,12 @@ async def _poll_impl(
     elif len(args) == 5:
         workspace_root, job_id, session_id, wait_max_s, bridge = args
 
+    ws_root = str(workspace_root or ".")
+    s_id = str(session_id or "")
+    if not job_id or not isinstance(job_id, str):
+        return {"status": "error", "error": "Missing or invalid job_id parameter"}
+    j_id: str = job_id
+
     from reviewer_jobs import (
         TERMINAL_STATES,
         JobState,
@@ -3755,19 +3767,19 @@ async def _poll_impl(
     )
     from consultation import sanitize_session_id
 
-    supervisor = ReviewerJobSupervisor.for_workspace(workspace_root)
+    supervisor = ReviewerJobSupervisor.for_workspace(ws_root)
     terminal_names = {s.value for s in TERMINAL_STATES} | {"ORPHANED"}
-    val_sid = sanitize_session_id(session_id, max_len=128) if session_id else ""
+    val_sid = sanitize_session_id(s_id, max_len=128) if s_id else ""
 
     # wait_max_s <= 0.0: 快路径单次调用 read_snapshot (C.7 / K4)
     if wait_max_s <= 0.0:
         try:
-            snap = supervisor.read_snapshot(job_id)
+            snap = supervisor.read_snapshot(j_id)
             if snap.state in terminal_names:
-                return supervisor.poll(job_id, session_id=session_id)
+                return supervisor.poll(j_id, session_id=s_id)
             if not val_sid or snap.session_id != val_sid:
                 raise PermissionError(
-                    f"Access denied: caller session_id '{session_id}' does not match job session_id '{snap.session_id}'"
+                    f"Access denied: caller session_id '{s_id}' does not match job session_id '{snap.session_id}'"
                 )
             return project_nonterminal(snap)
         except SnapshotContractViolation:
@@ -3784,15 +3796,15 @@ async def _poll_impl(
     last_snap: Optional[PollSnapshot] = None
 
     try:
-        async for snap in supervisor.watch(job_id, deadline_monotonic=deadline):
+        async for snap in supervisor.watch(j_id, deadline_monotonic=deadline):
             last_snap = snap
             # 终态判定：立即返回终态结构化结果，且终态不发通知避免客户端 UI 闪烁
             if snap.state in terminal_names:
-                return supervisor.poll(job_id, session_id=session_id)
+                return supervisor.poll(j_id, session_id=s_id)
 
             if not val_sid or snap.session_id != val_sid:
                 raise PermissionError(
-                    f"Access denied: caller session_id '{session_id}' does not match job session_id '{snap.session_id}'"
+                    f"Access denied: caller session_id '{s_id}' does not match job session_id '{snap.session_id}'"
                 )
 
             # 非终态快照：通过 progress bridge 发送通知
@@ -3802,12 +3814,12 @@ async def _poll_impl(
         # 超时结束：返回末次快照投影
         if last_snap is not None:
             if last_snap.state in terminal_names:
-                return supervisor.poll(job_id, session_id=session_id)
+                return supervisor.poll(j_id, session_id=s_id)
             return project_nonterminal(last_snap)
 
-        fallback_snap = supervisor.read_snapshot(job_id)
+        fallback_snap = supervisor.read_snapshot(j_id)
         if fallback_snap.state in terminal_names:
-            return supervisor.poll(job_id, session_id=session_id)
+            return supervisor.poll(j_id, session_id=s_id)
         return project_nonterminal(fallback_snap)
     except SnapshotContractViolation:
         raise
@@ -3825,7 +3837,7 @@ async def dev_reviewer_poll(
     job_id: str,
     session_id: str,
     wait_max_s: int = 0,
-    ctx: Context = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Poll status or result of a background Reviewer task with 1KB snapshot contract.
 
@@ -3867,15 +3879,13 @@ async def dev_reviewer_poll(
     if isinstance(res, dict) and res.get("status") != "error":
         try:
             cfg = load_project_config(workspace_root)
-            snap = load_runtime_mode(workspace_root, _is_external_api_available(workspace_root, cfg))
-            if snap.autopilot.is_enabled:
-                _inject_harness_next_action(
-                    workspace_root,
-                    "dev_reviewer_poll",
-                    res,
-                    last_success=True,
-                    config=cfg,
-                )
+            _inject_harness_next_action(
+                workspace_root,
+                "dev_reviewer_poll",
+                res,
+                last_success=True,
+                config=cfg,
+            )
         except Exception:
             pass
     return res

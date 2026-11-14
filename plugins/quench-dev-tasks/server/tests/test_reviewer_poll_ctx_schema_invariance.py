@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, get_args, get_type_hints
 
 import pytest
 from fastmcp import Context, FastMCP
@@ -75,7 +75,7 @@ def test_synthetic_probe_ctx_schema_invariance() -> None:
         job_id: str,
         session_id: str,
         wait_max_s: int = 0,
-        ctx: Context = None,
+        ctx: Context | None = None,
     ) -> dict:
         """Tool with Context parameter."""
         return {}
@@ -113,7 +113,7 @@ def test_shadow_schema_matches_pending_poll_signature() -> None:
         job_id: str,
         session_id: str,
         wait_max_s: int = 0,
-        ctx: Context = None,
+        ctx: Context | None = None,
     ) -> dict:
         """Poll status or result of a background Reviewer task with 1KB snapshot contract.
 
@@ -131,9 +131,20 @@ def test_shadow_schema_matches_pending_poll_signature() -> None:
     assert param_names == {"workspace_root", "job_id", "session_id", "wait_max_s", "ctx"}, (
         f"Pending signature parameters mismatch: {param_names}"
     )
-    # Under 'from __future__ import annotations', parameter annotation can be 'Context' string or Context type
-    ctx_anno = sig.parameters["ctx"].annotation
-    assert ctx_anno is Context or ctx_anno == "Context", f"ctx annotation must be Context, got {ctx_anno}"
+
+    # Type hints and union detection (PEP 563 / PEP 604 safe)
+    dev_poll_fn = inspect.unwrap(server.dev_reviewer_poll.fn if hasattr(server.dev_reviewer_poll, "fn") else server.dev_reviewer_poll)
+    assert set(get_args(get_type_hints(dev_poll_fn)["ctx"])) == {Context, type(None)}
+    assert set(get_args(get_type_hints(pending_dev_reviewer_poll)["ctx"])) == {Context, type(None)}
+
+    # Direct invocation compatibility test (Fail-Open)
+    assert pending_dev_reviewer_poll(
+        workspace_root=".", job_id="job", session_id="sess", wait_max_s=0, ctx=None
+    ) == {}
+
+    # Runtime null-guard assertion (ProgressBridge fail-open on None)
+    from progress_bridge import ProgressBridge
+    assert ProgressBridge.from_context(None) is None
 
     # 2. Register on shadow FastMCP instance
     shadow_mcp = FastMCP("shadow_probe")
@@ -171,3 +182,48 @@ def test_prompt_surface_recognizes_injected_framework_params() -> None:
     """P1-3: Prompt surface static gate deterministically handles ctx."""
     assert "ctx" in check_prompt_surface.INJECTED_FRAMEWORK_PARAMS
     assert "self" in check_prompt_surface.INJECTED_FRAMEWORK_PARAMS
+
+
+def _load_pyrefly_search_path(config_path: Path) -> list[str]:
+    """Read [tool.pyrefly].search-path from pyproject.toml."""
+    import tomllib
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    return list(data.get("tool", {}).get("pyrefly", {}).get("search-path", []))
+
+
+def test_pyrefly_search_path_resolves_to_real_modules() -> None:
+    """Guard: [tool.pyrefly].search-path entries must resolve to existing directories containing target modules."""
+    root_cfg = REPO_ROOT / "pyproject.toml"
+    server_cfg = SERVER_DIR / "pyproject.toml"
+    assert root_cfg.is_file(), f"Root pyproject.toml missing: {root_cfg}"
+    assert server_cfg.is_file(), f"Server pyproject.toml missing: {server_cfg}"
+
+    # 1. Root search-path verification
+    root_paths = [
+        (root_cfg.parent / entry).resolve() for entry in _load_pyrefly_search_path(root_cfg)
+    ]
+    assert any((p / "check_prompt_surface.py").is_file() for p in root_paths), (
+        f"Root search-path entries {root_paths} do not resolve to a directory containing check_prompt_surface.py"
+    )
+    assert any((p / "server.py").is_file() for p in root_paths), (
+        f"Root search-path entries {root_paths} do not resolve to a directory containing server.py"
+    )
+
+    # 2. Server search-path verification
+    server_paths = [
+        (server_cfg.parent / entry).resolve() for entry in _load_pyrefly_search_path(server_cfg)
+    ]
+    assert any((p / "check_prompt_surface.py").is_file() for p in server_paths), (
+        f"Server search-path entries {server_paths} do not resolve to a directory containing check_prompt_surface.py"
+    )
+
+
+def test_no_type_ignore_on_static_gate_import() -> None:
+    """Guard: static gate imports must not be suppressed by # type: ignore or # pyrefly: ignore."""
+    source_lines = TEST_FILE.read_text(encoding="utf-8").splitlines()
+    for line in source_lines:
+        stripped = line.strip()
+        if stripped.startswith("import check_prompt_surface") or stripped.startswith("import server"):
+            assert "type: ignore" not in stripped, f"Static gate import line must not contain type: ignore: {line}"
+            assert "pyrefly: ignore" not in stripped, f"Static gate import line must not contain pyrefly: ignore: {line}"
+

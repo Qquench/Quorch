@@ -3,3 +3,10 @@ pythonpath = ["plugins/quench-dev-tasks/server"]
 markers = [
     "tier1_fast: fast unit and smoke tests for rapid inner-loop feedback (<=5s budget)",
 ]
+
+[tool.pyrefly]
+search-path = ["scripts", "plugins/quench-dev-tasks/server", "plugins/quench-dev-tasks/server/tests"]
+
+[tool.pyrefly.errors]
+unnecessary-type-conversion = "ignore"
+

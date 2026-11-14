@@ -17,3 +17,10 @@ dev = [
 [project.scripts]
 quench = "cli:main"
 quorch = "cli:main"
+
+[tool.pyrefly]
+search-path = ["../../../scripts", "tests"]
+
+[tool.pyrefly.errors]
+unnecessary-type-conversion = "ignore"
+

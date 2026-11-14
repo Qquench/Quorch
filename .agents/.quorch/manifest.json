@@ -1683,6 +1683,61 @@
       "git_head_sha": "a8f7b8975fa5959be3a38eb705674ea0b16293a5",
       "git_index_mtime": 1794538887.9691,
       "released": true
+    },
+    "2026-11-14_fix_pyrefly_missing_import_check_prompt_surface::1.1": {
+      "task_id": "2026-11-14_fix_pyrefly_missing_import_check_prompt_surface::1.1",
+      "md_sha256": "a3d3283cc069127f8dd8e50d1f5a9db49ab628672aa6b001a75e8a06c809a712",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 190857234000000,
+      "last_heartbeat_wall_utc": "2026-11-13T13:51:47.437833+00:00",
+      "git_head_sha": "bbda4c730a953e26f931b6db417d85aef6ab7938",
+      "git_index_mtime": 1794540020.063597,
+      "released": true
+    },
+    "2026-11-14_fix_pyrefly_bad_function_definition_ctx_context::1.1": {
+      "task_id": "2026-11-14_fix_pyrefly_bad_function_definition_ctx_context::1.1",
+      "md_sha256": "5b85d97c3aa854e47ca33dc3adb0d6821d5b5a24473a5fdaf8b671f5d672e323",
+      "generation": 1,
+      "holder_token": "",
+      "last_heartbeat_monotonic_ns": 196481734000000,
+      "last_heartbeat_wall_utc": "2026-11-13T15:25:31.944449+00:00",
+      "git_head_sha": "bbda4c730a953e26f931b6db417d85aef6ab7938",
+      "git_index_mtime": 1794540020.063597,
+      "released": true
+    },
+    "2026-11-14_fix_server_pyrefly_diagnostics::1.1": {
+      "task_id": "2026-11-14_fix_server_pyrefly_diagnostics::1.1",
+      "md_sha256": "abc6965c5eb35c099dad55d861634c547b461b32f3426b5b89e31645058a721e",
+      "generation": 1,
+      "holder_token": "token_4ef3476fdbc7_1794631328693_5976",
+      "last_heartbeat_monotonic_ns": 2611968000000,
+      "last_heartbeat_wall_utc": "2026-11-14T04:48:17.175639+00:00",
+      "git_head_sha": "bbda4c730a953e26f931b6db417d85aef6ab7938",
+      "git_index_mtime": 1794540020.063597,
+      "released": true
+    },
+    "2026-11-14_consolidate_micro_ast_and_doc_tests::2.1": {
+      "task_id": "2026-11-14_consolidate_micro_ast_and_doc_tests::2.1",
+      "md_sha256": "a32cd55c5610589342f4bb8a8ceaca11c1815433cc85b7f996a13920d550ea84",
+      "generation": 1,
+      "holder_token": "token_fb35777fc38a_1794631867484_5976",
+      "last_heartbeat_monotonic_ns": 3011046000000,
+      "last_heartbeat_wall_utc": "2026-11-14T04:54:56.262983+00:00",
+      "git_head_sha": "bbda4c730a953e26f931b6db417d85aef6ab7938",
+      "git_index_mtime": 1794540020.063597,
+      "released": true
+    },
+    "2026-11-14_clean_all_pyrefly_diagnostics_and_test_hygiene::3.1": {
+      "task_id": "2026-11-14_clean_all_pyrefly_diagnostics_and_test_hygiene::3.1",
+      "md_sha256": "becd0a28c0b77a4534c8d6c9d09cfa37996523e19ac8278f728103accb3051f3",
+      "generation": 1,
+      "holder_token": "token_b0a559f7bf5c_1794633416307_5976",
+      "last_heartbeat_monotonic_ns": 4590250000000,
+      "last_heartbeat_wall_utc": "2026-11-14T05:21:15.461396+00:00",
+      "git_head_sha": "bbda4c730a953e26f931b6db417d85aef6ab7938",
+      "git_index_mtime": 1794540020.063597,
+      "released": true
     }
   }
 }
