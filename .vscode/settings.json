@@ -1,0 +1,5 @@
+{
+  "search.exclude": {
+    "docs/dev_tasks/archive/**": true
+  }
+}

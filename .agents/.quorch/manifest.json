@@ -1738,6 +1738,17 @@
       "git_head_sha": "bbda4c730a953e26f931b6db417d85aef6ab7938",
       "git_index_mtime": 1794540020.063597,
       "released": true
+    },
+    "2026-11-14_exclude_archive_from_vscode_search::1": {
+      "task_id": "2026-11-14_exclude_archive_from_vscode_search::1",
+      "md_sha256": "06123a58cebe30e83990fc4e74e114c3ceaa91f83733e6fa3221d73919654ac2",
+      "generation": 1,
+      "holder_token": "token_1794636593989_5976",
+      "last_heartbeat_monotonic_ns": 7621921000000,
+      "last_heartbeat_wall_utc": "2026-11-14T06:11:47.133068+00:00",
+      "git_head_sha": "4b316fa58edf4945e2954c9ff8fb9a2a53479125",
+      "git_index_mtime": 1794635180.2589126,
+      "released": true
     }
   }
 }

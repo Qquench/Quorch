@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-14] 2026-11-14_exclude_archive_from_vscode_search.md
+
+- **Task 1**: 配置仓库级 VS Code 搜索排除规则并放行 settings.json（rev.3）
+
 ## [2026-11-14] 2026-11-14_clean_all_pyrefly_diagnostics_and_test_hygiene.md
 
 - **Task 3.1**: 彻底清零 Pyrefly 全量诊断与测试架构类型报错
