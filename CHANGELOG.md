@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-18] 2026-11-18_switch_license_to_apache2.md
+
+- **Task 1.1**: 将项目开源协议从 MPL-2.0 切换为 Apache-2.0
+
 ## [2026-11-14] 2026-11-14_exclude_archive_from_vscode_search.md
 
 - **Task 1**: 配置仓库级 VS Code 搜索排除规则并放行 settings.json（rev.3）

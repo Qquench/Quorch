@@ -4,7 +4,7 @@
 
 > 💡 **文档语言政策**：本项目技术规范、配置手册与变更日志以英文为唯一权威版本 (English as SSOT)。中文 Issue 与 PR 讨论完全欢迎；如需中文查阅，可使用 LLM 辅助按需翻译。
 
-[![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python: >=3.12](https://img.shields.io/badge/python-3.12+-brightgreen.svg)](https://www.python.org/)
 [![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
 [![CI](https://github.com/Qquench/Quorch/actions/workflows/ci.yml/badge.svg)](https://github.com/Qquench/Quorch/actions/workflows/ci.yml)
@@ -184,11 +184,11 @@ python <quorch路径>/plugins/quench-dev-tasks/scripts/init_project.py <目标�
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md)：开源贡献指南与本地测试规范。
 - ❓ [docs/FAQ.md](docs/FAQ.md)：常见环境问题、编码乱码、企业代理与 Hook 排查手册。
 - 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md)：FastMCP 工具与协议规格说明书（工具参数、字段 Schema、返回值类型）。
-- 📜 [LICENSE](LICENSE)：Mozilla Public License 2.0 (MPL-2.0)。
+- 📜 [LICENSE](LICENSE)：Apache License 2.0 (Apache-2.0)。
 
 ---
 
 ## 📄 开源许可证
 
-本项目采用 [Mozilla Public License 2.0 (MPL-2.0)](LICENSE) 许可协议。  
-对核心文件进行的修改必须保持开源回馈社区；同时允许免责、安全地进行商业集成与调用，绝不传染使用者的专有业务代码。
+自本版本起，本项目采用 [Apache License 2.0 (Apache-2.0)](LICENSE) 开源许可协议。  
+提供宽松的商用、修改与分发授权以及明确的专利授权保护，对下游专有业务代码不施加传染性限制。

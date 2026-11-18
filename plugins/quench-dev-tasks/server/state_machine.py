@@ -1,5 +1,5 @@
-# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
-# If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: Apache-2.0
+# Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 
 from __future__ import annotations
 
@@ -127,7 +127,13 @@ def extract_task_whitelist(task_file_content: str, task_id: str) -> list[str]:
             cleaned = re.sub(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*", "", line).strip()
             cleaned = cleaned.split("（")[0].split("(")[0].strip()
             if cleaned:
-                whitelist.append(cleaned.replace("\\", "/"))
+                if "->" in cleaned:
+                    for p in cleaned.split("->"):
+                        p = p.strip()
+                        if p:
+                            whitelist.append(p.replace("\\", "/"))
+                else:
+                    whitelist.append(cleaned.replace("\\", "/"))
     return whitelist
 
 

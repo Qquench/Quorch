@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README_zh.md)
 
-[![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python: >=3.12](https://img.shields.io/badge/python-3.12+-brightgreen.svg)](https://www.python.org/)
 [![FastMCP: >=2.0](https://img.shields.io/badge/FastMCP-2.0+-orange.svg)](https://github.com/jlowin/fastmcp)
 [![CI](https://github.com/Qquench/Quorch/actions/workflows/ci.yml/badge.svg)](https://github.com/Qquench/Quorch/actions/workflows/ci.yml)
@@ -181,11 +181,11 @@ The `quench-dev-tasks` MCP Server provides a comprehensive suite of 16 specializ
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines and testing instructions.
 - ❓ [docs/FAQ.md](docs/FAQ.md): Troubleshooting common environment, path, proxy, and encoding questions.
 - 📐 [dev_tasks_mcp_specification.md](dev_tasks_mcp_specification.md): FastMCP Tool & Protocol Specification (tool parameters, field schema, return types).
-- 📜 [LICENSE](LICENSE): Mozilla Public License 2.0 (MPL-2.0).
+- 📜 [LICENSE](LICENSE): Apache License 2.0 (Apache-2.0).
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE).  
-Modifications to covered core files must remain open-source, while allowing frictionless commercial use and integration with proprietary downstream codebases.
+As of this release, this project is licensed under the [Apache License 2.0 (Apache-2.0)](LICENSE).  
+It provides permissive commercial and private use, modification, distribution, and explicit patent grant protections, without copyleft restrictions on downstream proprietary codebases.

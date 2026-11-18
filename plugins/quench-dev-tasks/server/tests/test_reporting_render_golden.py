@@ -1,5 +1,5 @@
-# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
-# If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: Apache-2.0
+# Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 """Golden sample byte-fidelity assertions for reporting.py rendering and changelog appending."""
 
 from __future__ import annotations
@@ -24,13 +24,6 @@ GOLDEN_BASIC_CARD_SHA256 = "fcaf1e0611e85b15a3041ac9d4c74a26c30a497e817392bb389c
 GOLDEN_CONTEXT_CARD_SHA256 = "76419f2994449328b164be544b5024c652ea5c78f56dda5a8a2586434732d2f2"
 GOLDEN_CHANGELOG_NEW_SHA256 = "40ac922d577d1063baafd7e8403178ffa2648ccbc8a90127f0f8ce02ec18e197"
 GOLDEN_CHANGELOG_EXISTING_SHA256 = "98a4fe122dceb37db2dce546b11301f6d7ccfdfd159388cb40b71b1a6fba5591"
-
-
-def test_reporting_module_preserves_mpl2_license_header() -> None:
-    """[R4] 验证 reporting.py 源码头部忠实保留 MPL-2.0 开源许可证头。"""
-    src_content = Path(reporting.__file__).read_text(encoding="utf-8")
-    assert "Mozilla Public License, v. 2.0" in src_content
-    assert "http://mozilla.org/MPL/2.0/" in src_content
 
 
 def test_render_handoff_card_golden_byte_fidelity() -> None:

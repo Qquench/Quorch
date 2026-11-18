@@ -1749,6 +1749,17 @@
       "git_head_sha": "4b316fa58edf4945e2954c9ff8fb9a2a53479125",
       "git_index_mtime": 1794635180.2589126,
       "released": true
+    },
+    "2026-11-18_switch_license_to_apache2::1.1": {
+      "task_id": "2026-11-18_switch_license_to_apache2::1.1",
+      "md_sha256": "9e557c2909ad51bff1a9ca018bba58055143ed848291efdc05dd073f59fe1a5a",
+      "generation": 1,
+      "holder_token": "token_d7bdcba0-9b7c-4c41-b0b6-85f07be46f47_1794988254694_20804",
+      "last_heartbeat_monotonic_ns": 115256250000000,
+      "last_heartbeat_wall_utc": "2026-11-18T08:46:01.529158+00:00",
+      "git_head_sha": "f2f8f931cd14a1e7c918fce106bcf1a869077884",
+      "git_index_mtime": 1794991516.7153535,
+      "released": true
     }
   }
 }
