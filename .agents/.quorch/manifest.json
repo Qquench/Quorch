@@ -1760,6 +1760,17 @@
       "git_head_sha": "f2f8f931cd14a1e7c918fce106bcf1a869077884",
       "git_index_mtime": 1794991516.7153535,
       "released": true
+    },
+    "2026-11-18_fix_shell_bypass_false_positives_and_bilingual_guards::1.1": {
+      "task_id": "2026-11-18_fix_shell_bypass_false_positives_and_bilingual_guards::1.1",
+      "md_sha256": "bce64d4520071d3f02513ca2730f4fa22fc3a6f376c1709f5861a5a2312b4b23",
+      "generation": 1,
+      "holder_token": "token_1794994187351_6368",
+      "last_heartbeat_monotonic_ns": 118060890000000,
+      "last_heartbeat_wall_utc": "2026-11-18T09:32:46.170021+00:00",
+      "git_head_sha": "36ced7ff8682c232277b95b537604bb2eaaf116a",
+      "git_index_mtime": 1794991801.132022,
+      "released": true
     }
   }
 }

@@ -172,6 +172,7 @@ def test_tamper_heading_pending_to_in_progress_intercepted(tmp_path):
     res = check_task_status_guard(str(task_file), "replace_file_content", args)
     assert res is not None
     assert res["decision"] == "ask"
+    assert "Task Status & Boundary Guard Interception" in res["reason"]
     assert "dev_tasks_checkout" in res["reason"]
 
 
@@ -187,6 +188,7 @@ def test_new_task_file_with_confirmed_or_in_progress_intercepted(tmp_path):
     res = check_task_status_guard(str(task_file), "write_to_file", args)
     assert res is not None
     assert res["decision"] == "ask"
+    assert "Initial Task Status Blocked" in res["reason"]
     assert "物理阻断" in res["reason"] or "初稿一律必须从" in res["reason"]
 
 
@@ -206,6 +208,8 @@ def test_delete_existing_non_editable_task_intercepted(tmp_path):
     res = check_task_status_guard(str(task_file), "replace_file_content", args)
     assert res is not None
     assert res["decision"] == "ask"
+    assert "Task Status & Boundary Guard Interception" in res["reason"]
+    assert "Non-editable task" in res["reason"]
     assert "非可编辑任务" in res["reason"] or "审计台账" in res["reason"]
 
 
@@ -218,6 +222,7 @@ def test_delete_file_task_file_intercepted(tmp_path):
     res = check_task_status_guard(str(task_file), "delete_file", {})
     assert res is not None
     assert res["decision"] == "ask"
+    assert "Task File Deletion Blocked" in res["reason"]
     assert "物理删除阻断" in res["reason"]
     assert "revoke" in res["reason"]
 
@@ -301,6 +306,7 @@ def test_unknown_mutating_tool_intercepted(tmp_path):
     res = check_task_status_guard(task_file, "custom_editor_tool", {"patch": "..."})
     assert res is not None
     assert res["decision"] == "ask"
+    assert "Unknown Mutating Tool Blocked" in res["reason"]
     assert "未知" in res["reason"]
 
 
@@ -318,6 +324,7 @@ def test_undeterminable_post_image_intercepted(tmp_path):
     res = check_task_status_guard(str(task_file), "replace_file_content", args)
     assert res is not None
     assert res["decision"] == "ask"
+    assert "Undeterminable Post-Image" in res["reason"]
     assert "undeterminable_post_image" in res["reason"] or "无法确定" in res["reason"]
 
 

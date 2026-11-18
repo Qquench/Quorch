@@ -3,57 +3,61 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-18] 2026-11-18_fix_shell_bypass_false_positives_and_bilingual_guards.md
+
+- **Task 1.1**: Fix detect_shell_write_bypass false positives on Python inline scripts and add bilingual status guard messages
+
 ## [2026-11-18] 2026-11-18_switch_license_to_apache2.md
 
-- **Task 1.1**: 将项目开源协议从 MPL-2.0 切换为 Apache-2.0
+- **Task 1.1**: Switch project open-source license from MPL-2.0 to Apache-2.0
 
 ## [2026-11-14] 2026-11-14_exclude_archive_from_vscode_search.md
 
-- **Task 1**: 配置仓库级 VS Code 搜索排除规则并放行 settings.json（rev.3）
+- **Task 1**: Configure repo-level VS Code search exclusions and allowlist `settings.json` (rev.3)
 
 ## [2026-11-14] 2026-11-14_clean_all_pyrefly_diagnostics_and_test_hygiene.md
 
-- **Task 3.1**: 彻底清零 Pyrefly 全量诊断与测试架构类型报错
+- **Task 3.1**: Zero out all Pyrefly diagnostics and test architecture type errors
 
 ## [2026-11-14] 2026-11-14_consolidate_micro_ast_and_doc_tests.md
 
-- **Task 2.1**: 精简整合历史碎片化 AST 与文档门禁测试脚本
+- **Task 2.1**: Consolidate fragmented AST and documentation gate test scripts
 
 ## [2026-11-14] 2026-11-14_fix_server_pyrefly_diagnostics.md
 
-- **Task 1.1**: 全面修复 server.py 中 Pyrefly 静态类型与命名空间报错
+- **Task 1.1**: Fix static typing and namespace diagnostics in `server.py` for Pyrefly
 
 ## [2026-11-14] 2026-11-14_fix_pyrefly_bad_function_definition_ctx_context.md
 
-- **Task 1.1**: 修复 ctx 参数 bad-function-definition 并物理锚定 FastMCP Context 注入、空值守卫与 Schema 零漂移
+- **Task 1.1**: Fix `ctx` parameter `bad-function-definition` and anchor FastMCP Context injection, null guards, and zero schema drift
 
 ## [2026-11-14] 2026-11-14_fix_pyrefly_missing_import_check_prompt_surface.md
 
-- **Task 1.1**: 修复 pyrefly 对 check_prompt_surface 的 missing-import 报障（search-path 结构化修复 + 语义化配置契约守卫 + 静态验证闭环）
+- **Task 1.1**: Fix Pyrefly missing-import diagnostic for `check_prompt_surface` (structured search-path fix, semantic config contract guard, and static verification)
 
 ## [2026-11-13] 2026-11-13_fix_context_injector_config_sync_import.md
 
-- **Task 1.1**: 消除 context_injector 中 config_sync 静态导入缺失报错
+- **Task 1.1**: Resolve missing static `config_sync` import diagnostic in `context_injector`
 
 ## [2026-11-13] 2026-11-13_fix_context_injector_reviewer_import.md
 
-- **Task 1.1**: 修复 context_injector 中 ReviewerClient 幽灵模块导入导致外部 API 状态误判
+- **Task 1.1**: Fix phantom `ReviewerClient` import in `context_injector` causing false external API status detection
 
 ## [2026-11-11] 2026-11-11_ci_fix_engine_key.md
 
-- **Task 1.3**: 补全 refine_spec 压缩保全中的 engine 关键字段
+- **Task 1.3**: Preserve `engine` key during `refine_spec` payload compression
 
 ## [2026-11-11] 2026-11-11_ci_test_failures_fix.md
 
-- **Task 1.1**: 修复跨平台路径拒绝、安装模板键名、Poll测试签名及卫生审计白名单
-- **Task 1.2**: 修复响应压缩截断保留、RefineSpec核心键保全及可观测性测试鲁棒性
+- **Task 1.1**: Fix cross-platform path rejection, installer template key names, poll test signatures, and hygiene audit allowlist
+- **Task 1.2**: Fix response compression truncation retention, `RefineSpec` core key preservation, and observability test robustness
 
 ## [2026-11-11] 2026-11-11_v1_33_mcp_response_slimming.md
 
-- **Task 33.0**: 预算 SSOT 去重、溢出常量化与 INV-10 措辞对账 (Budget SSOT De-duplication & Overflow Constants)
-- **Task 33.1**: 运行时预算钳制管道与分类器可达性对账 (Runtime Budget Clamp & Classifier Reachability Reconciliation)
-- **Task 33.2**: dev_tasks_status 有界钳制接入、Hook 日志尾部读与 full 超集不变量
-- **Task 33.3**: 交互工具冻结词表对账、回显剥离与全表面预算回归
+- **Task 33.0**: Budget SSOT de-duplication, overflow constants, and INV-10 wording reconciliation
+- **Task 33.1**: Runtime budget clamp pipeline and classifier reachability reconciliation
+- **Task 33.2**: Bounded clamping in `dev_tasks_status`, tail-read hook logs, and `full` superset invariants
+- **Task 33.3**: Interactive tool frozen vocabulary reconciliation, echo stripping, and full-surface budget regression tests
 
 ## [2026-11-11] 2026-11-11_v1_32_code_explorer_constants_and_robustness.md
 

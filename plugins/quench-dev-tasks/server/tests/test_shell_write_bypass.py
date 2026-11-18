@@ -114,6 +114,34 @@ def test_detect_shell_write_bypass_fail_closed_heuristic():
     assert detected is not None
 
 
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "python -c \"with open('plugins/quench-dev-tasks/server/server.py', encoding='utf-8') as f:\\n    lines = f.readlines()\\ndef print_fn(name: str) -> list[str]:\\n    return [l for l in lines if 'dev_tasks_status' in l]\\nprint(print_fn('dev_tasks_status'))\"",
+        ".\\venv\\Scripts\\python.exe -c \"import json\\nasync def dev_reviewer_submit(workspace_root: str) -> dict:\\n    return {'tool': 'dev_tasks_status('}\\n\"",
+        "python -c \"x = 1 >= 0; y = 2 <= 3; z = lambda a: a => a; print('dev_tasks_status')\"",
+        "python -c \"def f(x: str) -> dict: return {'dir': 'docs/dev_tasks', 'ok': 1 >= 0 and 2 <= 3}\"",
+    ],
+)
+def test_detect_shell_write_bypass_python_inline_no_false_positive(cmd):
+    ws = "/workspace"
+    detected = detect_shell_write_bypass(cmd, ws, dev_tasks_dir="docs/dev_tasks")
+    assert detected is None, f"Python inline script was falsely flagged: {cmd} -> {detected}"
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "echo evil > dev_tasks/hack.md",
+        "python -c \"open('docs/dev_tasks/hack.md')\" > docs/dev_tasks/hack.md",
+    ],
+)
+def test_detect_shell_write_bypass_real_bypasses_caught(cmd):
+    ws = "/workspace"
+    detected = detect_shell_write_bypass(cmd, ws, dev_tasks_dir="docs/dev_tasks")
+    assert detected is not None
+
+
 def test_server_check_shell_write_isolation():
     ws = "/workspace"
     assert check_shell_write_isolation("echo 1 > docs/dev_tasks/fake.md", ws) is not None

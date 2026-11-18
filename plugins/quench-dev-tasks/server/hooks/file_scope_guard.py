@@ -301,8 +301,8 @@ SHELL_TOOL_NAMES: frozenset[str] = frozenset({
 
 SHELL_WRITE_PATTERN: Pattern[str] = re.compile(
     r"""
-    # 1. 重定向输出 (> 或 >>，含文件描述符 1> 2> &>)
-    (?:>{1,2}|[&12]>{1,2})\s*["']?(?P<redir_target>[^\s|;&"'>]+)["']?
+    # 1. 重定向输出 (> 或 >>，含文件描述符 1> 2> &>)；排除 -> / => / >= / <=
+    (?:(?<![-\w=])>{1,2}|[&12]>{1,2})(?!=)\s*["']?(?P<redir_target>[^\s|;&"'>]+)["']?
     |
     # 2. 管道传递至 tee
     \|\s*tee(?:\s+-[a-zA-Z]+)*\s+["']?(?P<tee_target>[^\s|;&"'>]+)["']?
@@ -322,6 +322,22 @@ SHELL_WRITE_PATTERN: Pattern[str] = re.compile(
 )
 
 
+def _is_task_dir_token(token: str, clean_dir: str) -> bool:
+    """Check if a command token refers to the governed dev_tasks directory (path-boundary safe)."""
+    if not token:
+        return False
+    norm_val = token.replace("\\", "/").strip("\"'").strip().lower()
+    if not norm_val:
+        return False
+    return (
+        norm_val == clean_dir
+        or norm_val.startswith(clean_dir + "/")
+        or f"/{clean_dir}/" in norm_val
+        or norm_val.endswith("/" + clean_dir)
+        or bool(re.search(r"(?:^|[/\\])dev_tasks(?:$|[/\\])", norm_val))
+    )
+
+
 def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: str = "docs/dev_tasks") -> Optional[str]:
     """保守检测 Shell 命令是否包含对受管任务目录的写入尝试（>、>>、tee、Out-File、Set-Content 等）。
     命中返回检测到的相对路径，未命中返回 None。
@@ -333,7 +349,7 @@ def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: 
     cmd_lower = command.replace("\\", "/").lower()
 
     # 快速短路：若命令中根本不包含任务目录关键字，平滑放行
-    if clean_dir not in cmd_lower and "dev_tasks" not in cmd_lower:
+    if clean_dir not in cmd_lower and not re.search(r"(?:^|[\s\"'/\\])dev_tasks(?:$|[\s\"'/\\])", cmd_lower):
         return None
 
     # 1. 正则精确提取与判定
@@ -342,24 +358,18 @@ def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: 
             if not val:
                 continue
             norm_val = val.replace("\\", "/").strip("\"'").strip()
-            norm_val_lower = norm_val.lower()
-            if (
-                norm_val_lower.startswith(clean_dir + "/")
-                or norm_val_lower == clean_dir
-                or f"/{clean_dir}/" in norm_val_lower
-                or norm_val_lower.endswith("/" + clean_dir)
-                or "dev_tasks" in norm_val_lower
-            ):
+            if _is_task_dir_token(norm_val, clean_dir):
                 return norm_val
 
     # 2. Fail-Closed 兜底判定：包含任务目录关键字，且包含明显的写入重定向/覆盖原语
-    write_indicators = (">", "tee", "out-file", "set-content", "add-content", "[io.file]::", "new-item")
-    has_write_indicator = any(ind in cmd_lower for ind in write_indicators)
+    has_write_indicator = bool(re.search(r"(?<![-\w=])>{1,2}(?!=)", cmd_lower)) or any(
+        ind in cmd_lower for ind in ("tee", "out-file", "set-content", "add-content", "[io.file]::", "new-item")
+    )
     if has_write_indicator:
         tokens = re.findall(r"[\"']?([^\s|;&\"'>]*dev_tasks[^\s|;&\"']*)[\"']?", command, re.IGNORECASE)
-        if tokens:
-            return tokens[0].strip("\"'")
-        return dev_tasks_dir
+        for tok in tokens:
+            if _is_task_dir_token(tok, clean_dir):
+                return tok.strip("\"'")
 
     return None
 
@@ -497,7 +507,10 @@ def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
             violations.append({
                 "type": "duplicate_task_id",
                 "task_id": tid,
-                "message": f"任务编号 {tid} 出现重复（出现次数由 {old_count} 次增至 {new_count} 次）",
+                "message": (
+                    f"Duplicate task ID {tid} (occurrences increased from {old_count} to {new_count}) / "
+                    f"任务编号 {tid} 出现重复（出现次数由 {old_count} 次增至 {new_count} 次）"
+                ),
             })
 
     # 2. Status smuggling and invalid transition via Counter
@@ -515,7 +528,10 @@ def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
                     violations.append({
                         "type": "status_smuggling",
                         "task_id": tid,
-                        "message": f"新增任务 {tid} 状态为【{new_status}】。初稿一律必须从【{STATUS_PENDING}】开始。",
+                        "message": (
+                            f"New task {tid} has status [{new_status}]. Initial drafts must start at [{STATUS_PENDING}]. / "
+                            f"新增任务 {tid} 状态为【{new_status}】。初稿一律必须从【{STATUS_PENDING}】开始。"
+                        ),
                     })
             else:
                 # Existing task: status changed
@@ -523,7 +539,10 @@ def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
                     violations.append({
                         "type": "invalid_transition",
                         "task_id": tid,
-                        "message": f"任务 {tid} 状态被直接修改：【{old_status}】➔【{new_status}】。请使用 FastMCP 工具（dev_tasks_checkout / dev_tasks_confirm）推进状态。",
+                        "message": (
+                            f"Task {tid} status modified directly: [{old_status}] -> [{new_status}]. Use FastMCP tools (dev_tasks_checkout / dev_tasks_confirm) instead. / "
+                            f"任务 {tid} 状态被直接修改：【{old_status}】➔【{new_status}】。请使用 FastMCP 工具（dev_tasks_checkout / dev_tasks_confirm）推进状态。"
+                        ),
                     })
 
     # 3. Deletion of non-editable tasks
@@ -535,7 +554,10 @@ def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
                 violations.append({
                     "type": "delete_non_editable",
                     "task_id": tid,
-                    "message": f"非可编辑任务 {tid}【{old_status}】被删除或清空，严禁删除已有审计台账。",
+                    "message": (
+                        f"Non-editable task {tid} [{old_status}] was deleted or cleared; removing audit records is prohibited. / "
+                        f"非可编辑任务 {tid}【{old_status}】被删除或清空，严禁删除已有审计台账。"
+                    ),
                 })
 
     # 4. Truncation / empty file
@@ -543,7 +565,7 @@ def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
         violations.append({
             "type": "file_truncated",
             "task_id": "",
-            "message": "任务单内容被截断清空，所有任务均丢失。",
+            "message": "Task file content was truncated/cleared and all tasks were lost. / 任务单内容被截断清空，所有任务均丢失。",
         })
 
     # 5. Newly introduced malformed headers (F2)
@@ -552,7 +574,7 @@ def diff_task_statuses(old: TaskHeaderScan, new: TaskHeaderScan) -> List[dict]:
         violations.append({
             "type": "malformed_header",
             "task_id": ", ".join(sorted(new_malformed)),
-            "message": f"新增畸形任务标题行: {', '.join(sorted(new_malformed))}",
+            "message": f"Malformed task header(s) introduced: {', '.join(sorted(new_malformed))} / 新增畸形任务标题行: {', '.join(sorted(new_malformed))}",
         })
 
     return violations
@@ -569,9 +591,9 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
         return {
             "decision": "ask",
             "reason": (
-                f"【未知变更工具拦截】\n"
-                f"检测到未在白名单中的变更工具 {tool_name} 试图操作任务单 {filename}。\n"
-                f"为防范未定义修改行为，请人工确认操作意图。"
+                f"[Unknown Mutating Tool Blocked / 未知变更工具拦截]\n"
+                f"Detected non-whitelisted mutating tool '{tool_name}' attempting to modify task file {filename}. / 检测到未在白名单中的变更工具 {tool_name} 试图操作任务单 {filename}。\n"
+                f"Please confirm intent manually. / 为防范未定义修改行为，请人工确认操作意图。"
             ),
         }
 
@@ -579,9 +601,8 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
         return {
             "decision": "ask",
             "reason": (
-                f"【任务单物理删除阻断】\n"
-                f"受管任务单 {filename} 禁止通过 delete_file 删除。\n"
-                f"若需作废或撤销任务，请使用标准命令 dev_tasks_confirm(action='revoke')。"
+                f"[Task File Deletion Blocked / 任务单物理删除阻断]\n"
+                f"Governed task file {filename} cannot be deleted via delete_file. Use dev_tasks_confirm(action='revoke') instead. / 受管任务单 {filename} 禁止通过 delete_file 删除。若需作废或撤销任务，请使用标准命令 dev_tasks_confirm(action='revoke')。"
             ),
         }
 
@@ -600,9 +621,9 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
         return {
             "decision": "ask",
             "reason": (
-                f"【无法确定后置快照】\n"
-                f"工具 {tool_name} 对任务单 {filename} 的修改参数无法确定性演算 (undeterminable_post_image)。\n"
-                f"请人工核查修改内容。"
+                f"[Undeterminable Post-Image / 无法确定后置快照]\n"
+                f"Tool {tool_name} arguments on task file {filename} cannot be deterministically evaluated (undeterminable_post_image). / 工具 {tool_name} 对任务单 {filename} 的修改参数无法确定性演算 (undeterminable_post_image)。\n"
+                f"Please review manually. / 请人工核查修改内容。"
             ),
         }
 
@@ -616,20 +637,19 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
                 return {
                     "decision": "ask",
                     "reason": (
-                        f"【任务单初始状态物理阻断】\n"
-                        f"新建任务单 {filename} 包含非【{STATUS_PENDING}】任务: {tid}【{st}】。\n"
-                        f"按照 Quench 治理规范，初稿一律必须从【{STATUS_PENDING}】开始。"
+                        f"[Initial Task Status Blocked / 任务单初始状态物理阻断]\n"
+                        f"New task file {filename} contains non-[{STATUS_PENDING}] task: {tid} [{st}]. Initial drafts must start at [{STATUS_PENDING}]. / 新建任务单 {filename} 包含非【{STATUS_PENDING}】任务: {tid}【{st}】。按照 Quench 治理规范，初稿一律必须从【{STATUS_PENDING}】开始。"
                     ),
                 }
         if new_scan.duplicates:
             return {
                 "decision": "ask",
-                "reason": f"【重复任务编号拦截】新建任务单包含重复任务编号: {', '.join(sorted(new_scan.duplicates))}",
+                "reason": f"[Duplicate Task ID Blocked / 重复任务编号拦截] New task file contains duplicate task IDs: {', '.join(sorted(new_scan.duplicates))} / 新建任务单包含重复任务编号: {', '.join(sorted(new_scan.duplicates))}",
             }
         if new_scan.malformed_ids:
             return {
                 "decision": "ask",
-                "reason": f"【畸形任务标题拦截】新建任务单包含无法解析的任务标题: {', '.join(sorted(new_scan.malformed_ids))}",
+                "reason": f"[Malformed Task Header Blocked / 畸形任务标题拦截] New task file contains unparsable task headers: {', '.join(sorted(new_scan.malformed_ids))} / 新建任务单包含无法解析的任务标题: {', '.join(sorted(new_scan.malformed_ids))}",
             }
         return None
 
@@ -640,10 +660,10 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
         return {
             "decision": "ask",
             "reason": (
-                f"【任务状态与边界守卫拦截】\n"
-                f"检测到对任务单 {filename} 的修改违反规范：\n"
+                f"[Task Status & Boundary Guard Interception / 任务状态与边界守卫拦截]\n"
+                f"Detected specification violations modifying task file {filename}: / 检测到对任务单 {filename} 的修改违反规范：\n"
                 f"{reasons_text}\n\n"
-                f"★ 核心防线：任务状态必须由 dev_tasks_checkout 或 dev_tasks_confirm 推进，严禁直接篡写。"
+                f"Core Invariant: Task status must only advance via dev_tasks_checkout or dev_tasks_confirm, never direct edits. / ★ 核心防线：任务状态必须由 dev_tasks_checkout 或 dev_tasks_confirm 推进，严禁直接篡写。"
             ),
         }
 
