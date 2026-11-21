@@ -180,6 +180,57 @@ def resolve_runner_dispatch_channel(
     return "spawn_fresh"
 
 
+def _format_runner_tier_guidance(runner_subagent_model_hint: Optional[str]) -> str:
+    """Format compact, vendor-neutral model tier guidance for runner subagent dispatch."""
+    normalized_hint = (runner_subagent_model_hint or "").strip()
+    if normalized_hint:
+        return f"model_hint={normalized_hint}"
+    return "prefer lightweight/fast tier, not inherit / 优先轻量快速档位，勿继承主模型"
+
+
+def _build_dispatch_runner_action(
+    *,
+    task_id: str,
+    reason: str,
+    task_file: Optional[str],
+    candidates: Sequence[str],
+    next_batch_tasks: Sequence[str],
+    roadmap_file: Optional[str],
+    runner_subagent_model_hint: Optional[str],
+    completed_in_batch: int,
+    is_rework: bool,
+    prev_batch_files: Sequence[str],
+    curr_batch_files: Sequence[str],
+    cumulative_runner_tasks: int,
+) -> HarnessNextAction:
+    """Construct a DISPATCH_RUNNER action with consistent strategy and tier guidance."""
+    dispatch_channel = resolve_runner_dispatch_channel(
+        completed_in_batch=completed_in_batch,
+        is_rework=is_rework,
+        prev_batch_files=prev_batch_files,
+        curr_batch_files=curr_batch_files,
+        cumulative_runner_tasks=cumulative_runner_tasks,
+    )
+    strategy_guidance = (
+        "reuse active runner subagent via send_message to retain hot context / 通过 send_message 复用当前 runner 子 Agent 以保全热文件上下文"
+        if dispatch_channel == "reuse_active"
+        else "spawn a fresh isolated runner subagent for this batch / 为本批次新建独立的 runner 子 Agent"
+    )
+    tier_guidance = _format_runner_tier_guidance(runner_subagent_model_hint)
+    return HarnessNextAction(
+        action="DISPATCH_RUNNER",
+        task_file=task_file,
+        task_id=task_id,
+        channel=dispatch_channel,
+        model_hint=runner_subagent_model_hint,
+        candidates=candidates,
+        reason=reason,
+        instruction=f"Dispatch task {task_id} execution to runner subagent ({strategy_guidance}) / 派发任务 {task_id} 给 runner 子 Agent 施工（{strategy_guidance}）; {tier_guidance}.",
+        next_batch_tasks=next_batch_tasks,
+        roadmap_file=roadmap_file,
+    )
+
+
 @dataclass(frozen=True)
 class TaskStateSnapshot:
     task_id: str
@@ -566,30 +617,20 @@ def compute_next_action(
     if in_progress_tasks:
         active = in_progress_tasks[0]
         if effective_mode == "inverted":
-            dispatch_channel = resolve_runner_dispatch_channel(
-                completed_in_batch=len(completed_tasks),
-                is_rework=(len(rework_tasks) > 0),
-                prev_batch_files=prev_batch_files,
-                curr_batch_files=curr_batch_files,
-                cumulative_runner_tasks=cumulative_runner_tasks,
-            )
-            strategy_guidance = (
-                "reuse active runner subagent via send_message to retain hot context / 通过 send_message 复用当前 runner 子 Agent 以保全热文件上下文"
-                if dispatch_channel == "reuse_active"
-                else "spawn a fresh isolated runner subagent for this batch / 为本批次新建独立的 runner 子 Agent"
-            )
             return (
-                HarnessNextAction(
-                    action="DISPATCH_RUNNER",
-                    task_file=task_file,
+                _build_dispatch_runner_action(
                     task_id=active.task_id,
-                    channel=dispatch_channel,
-                    model_hint=runner_subagent_model_hint,
-                    candidates=candidates,
                     reason=f"Task {active.task_id} is in progress under inverted mode",
-                    instruction=f"Dispatch task {active.task_id} execution to runner subagent ({strategy_guidance}) / 派发任务 {active.task_id} 给 runner 子 Agent 施工（{strategy_guidance}）。",
+                    task_file=task_file,
+                    candidates=candidates,
                     next_batch_tasks=next_batch_tasks,
                     roadmap_file=roadmap_file,
+                    runner_subagent_model_hint=runner_subagent_model_hint,
+                    completed_in_batch=len(completed_tasks),
+                    is_rework=(len(rework_tasks) > 0),
+                    prev_batch_files=prev_batch_files,
+                    curr_batch_files=curr_batch_files,
+                    cumulative_runner_tasks=cumulative_runner_tasks,
                 ),
                 False,
             )
@@ -611,30 +652,20 @@ def compute_next_action(
     if confirmed_tasks:
         target = confirmed_tasks[0]
         if effective_mode == "inverted":
-            dispatch_channel = resolve_runner_dispatch_channel(
-                completed_in_batch=len(completed_tasks),
-                is_rework=(len(rework_tasks) > 0),
-                prev_batch_files=prev_batch_files,
-                curr_batch_files=curr_batch_files,
-                cumulative_runner_tasks=cumulative_runner_tasks,
-            )
-            strategy_guidance = (
-                "reuse active runner subagent via send_message to retain hot context / 通过 send_message 复用当前 runner 子 Agent 以保全热文件上下文"
-                if dispatch_channel == "reuse_active"
-                else "spawn a fresh isolated runner subagent for this batch / 为本批次新建独立的 runner 子 Agent"
-            )
             return (
-                HarnessNextAction(
-                    action="DISPATCH_RUNNER",
-                    task_file=task_file,
+                _build_dispatch_runner_action(
                     task_id=target.task_id,
-                    channel=dispatch_channel,
-                    model_hint=runner_subagent_model_hint,
-                    candidates=candidates,
                     reason=f"Task {target.task_id} confirmed; dispatch to runner subagent under inverted mode",
-                    instruction=f"Dispatch task {target.task_id} execution to runner subagent ({strategy_guidance}) / 派发任务 {target.task_id} 给 runner 子 Agent 施工（{strategy_guidance}）。",
+                    task_file=task_file,
+                    candidates=candidates,
                     next_batch_tasks=next_batch_tasks,
                     roadmap_file=roadmap_file,
+                    runner_subagent_model_hint=runner_subagent_model_hint,
+                    completed_in_batch=len(completed_tasks),
+                    is_rework=(len(rework_tasks) > 0),
+                    prev_batch_files=prev_batch_files,
+                    curr_batch_files=curr_batch_files,
+                    cumulative_runner_tasks=cumulative_runner_tasks,
                 ),
                 False,
             )

@@ -46,6 +46,7 @@ Rules > Skills > `AGENTS.md`. Rules win on conflict.
 - **Status Call Ownership**: ONLY the main session invokes `dev_tasks_status` and is driven by `harness_next_action`. All Subagents are strictly exempt from calling `dev_tasks_status` (子代理免调 status).
 - **Fallback Notice Transfer**: If `dev_tasks_status` returns `fallback_notice`, the main session must verbatim relay it to the user in its first turn.
 - **Envelope Routing**: Structured delegation uses `[QUENCH-DISPATCH: RUNNER | REVIEWER | RESEARCH]` envelope routing with host-neutral abstract verbs.
+- **Delegation Tier**: For `[QUENCH-DISPATCH: RUNNER | RESEARCH]`, honor `runner_subagent_model_hint` if set; otherwise prefer a lightweight/fast tier over inheriting the main session model (escalate only if unavailable or failing). For `[QUENCH-DISPATCH: REVIEWER]`, prefer a strong-reasoning tier.
 
 <!-- QUENCH-CORE-INVARIANTS:BEGIN -->
 ## 5. Reminder: What You Must NOT Do

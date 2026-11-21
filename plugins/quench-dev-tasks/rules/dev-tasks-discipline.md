@@ -72,6 +72,12 @@ Upon reaching a stopping state or degraded fallback, halt and output a standard 
 2. Verify target task is `✅ 已确认` with all six core fields intact;
 3. Checkout task via `dev_tasks_checkout` to transition to `🔨 执行中`.
 
+### ④ Subagent Delegation Tier Routing (子代理委派档位路由纪律)
+- **零瞬态字面量原则**：严禁在规则、Skill 或核心模块中硬编码厂商或代际档位字面量，一律以语义能力/成本档位（lightweight/fast tier vs strong-reasoning tier）表述。
+- **Priority 1（显式 Hint 优先）**：若运行态下发非空的 `runner_subagent_model_hint`（含 `session_role_contract` 与 `DISPATCH_RUNNER.model_hint`），派发 `[QUENCH-DISPATCH: RUNNER]` 或 `[QUENCH-DISPATCH: RESEARCH]` 时优先匹配该 Hint。
+- **Priority 2（语义轻量档位兜底）**：当 `runner_subagent_model_hint` 未配置时，派发 `[QUENCH-DISPATCH: RUNNER]` 与 `[QUENCH-DISPATCH: RESEARCH]` 优先选用宿主当前可用的轻量/快速执行档位（prefer lightweight/fast tier over inheriting main session model），禁止无条件继承主会话模型（`inherit`）；仅当宿主无更轻档位可用，或轻量档位因复杂推理连续失败需升级重跑时，才允许回退 `inherit` 或更高档位。
+- **对称约束（Reviewer 强推理档位）**：在 `standard` 模式且通过 `host_subagent` 通道派发 `[QUENCH-DISPATCH: REVIEWER]` 时，优先选用前沿/强推理档位而非轻量档位。
+
 ---
 
 ## 5. Fast-Track & Anti-Abuse Discipline (快速通道与反滥用纪律)

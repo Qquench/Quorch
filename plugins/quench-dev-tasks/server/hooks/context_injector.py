@@ -148,6 +148,7 @@ def _resolve_harness_baton(
             consumed_for=snapshot.autopilot.consumed_for,
             current_task_id=None,
             task_file=target_file,
+            runner_subagent_model_hint=snapshot.runner_subagent_model_hint,
         )
         return action.action, action.instruction
     except Exception as exc:

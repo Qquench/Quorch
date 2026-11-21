@@ -752,5 +752,65 @@ def test_batch_overlap_ratio_drilldown_regression_dataset():
     )
 
 
+@pytest.mark.tier1_fast
+@pytest.mark.parametrize("status", ["in_progress", "confirmed"])
+def test_dispatch_runner_tier_guidance_and_compact_budget(status: str):
+    """Verify DISPATCH_RUNNER embeds vendor-neutral tier guidance across both branches within compact byte budget."""
+    from tool_surface_constants import measure_payload_bytes
+
+    # 1. None -> fallback lightweight/fast tier guidance
+    action_none, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="35.2", status=status)],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint=None,
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=["backend/b.py"],
+    )
+    assert action_none.action == "DISPATCH_RUNNER"
+    assert "prefer lightweight/fast tier" in action_none.instruction
+    assert "not inherit" in action_none.instruction
+    assert "reuse active runner subagent" in action_none.instruction
+    assert measure_payload_bytes(action_none.to_compact_dict()) < 700
+
+    # 2. Whitespace-only hint -> treated as empty, fallback lightweight/fast tier guidance
+    action_ws, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="35.2", status=status)],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint="   ",
+    )
+    assert action_ws.action == "DISPATCH_RUNNER"
+    assert "prefer lightweight/fast tier" in action_ws.instruction
+    assert "not inherit" in action_ws.instruction
+    assert "spawn a fresh isolated runner subagent" in action_ws.instruction
+    assert measure_payload_bytes(action_ws.to_compact_dict()) < 700
+
+    # 3. Non-empty hint -> explicit model_hint guidance
+    action_hint, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="35.2", status=status)],
+        effective_mode="inverted",
+        reviewer_channel=None,
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        runner_subagent_model_hint="custom-lightweight-tier",
+        prev_batch_files=["backend/a.py"],
+        curr_batch_files=["backend/b.py"],
+    )
+    assert action_hint.action == "DISPATCH_RUNNER"
+    assert action_hint.model_hint == "custom-lightweight-tier"
+    assert "model_hint=custom-lightweight-tier" in action_hint.instruction
+    assert "reuse active runner subagent" in action_hint.instruction
+    assert measure_payload_bytes(action_hint.to_compact_dict()) < 700
+
+
+
 
 

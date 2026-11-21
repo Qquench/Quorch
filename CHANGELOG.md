@@ -3,6 +3,11 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-21] 2026-11-21_v1_35_vendor_neutral_subagent_tier_routing.md
+
+- **Task 35.1**: 规则、Skill 与三端入口路由卡的厂商/档位中立路由契约补全
+- **Task 35.2**: Runtime Role Contract、Harness Instruction 与 Hook Baton 档位语义对齐及门禁测试
+
 ## [2026-11-21] 2026-11-21_full_ide_diagnostics_cleanup.md
 
 - **Task 1.1**: Pyrefly 配置对齐与根目录 scripts/ 静态诊断清零

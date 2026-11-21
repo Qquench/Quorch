@@ -35,6 +35,7 @@ from context_injector import (
     _build_reminder,
     _handle_stop_event,
     _is_external_api_available,
+    _resolve_harness_baton,
     main,
 )
 
@@ -387,6 +388,47 @@ def test_atomic_write_json_cleanup_on_failure(tmp_path: Path, monkeypatch):
     # 临时文件必须被清理，目录中无残留文件
     if target.parent.exists():
         assert list(target.parent.iterdir()) == []
+
+
+def test_resolve_harness_baton_forwards_runner_model_hint_e2e(tmp_path: Path):
+    """端到端校验 _resolve_harness_baton 在 inverted 模式下透传 runner_subagent_model_hint。"""
+    ws = tmp_path / "ws_hint_e2e"
+    agents_dir = ws / ".agents"
+    dev_tasks_dir = ws / "docs" / "dev_tasks"
+    agents_dir.mkdir(parents=True)
+    dev_tasks_dir.mkdir(parents=True)
+
+    (agents_dir / "quench_stack.yaml").write_text(
+        "project_name: test_hint\ndev_tasks_dir: docs/dev_tasks\n",
+        encoding="utf-8",
+    )
+    (dev_tasks_dir / "2026-11-21_batch.md").write_text(
+        "# Batch\n\n### 任务 1.1 ✅ 已确认 — Test Task\n\n#### 【涉及文件】\n```\n- [MODIFY] foo.py\n```\n",
+        encoding="utf-8",
+    )
+
+    mode_file = agents_dir / ".quench_runtime_mode.json"
+
+    # Case A: runner_subagent_model_hint is None
+    mode_file.write_text(
+        json.dumps({"orchestration_mode": "inverted", "runner_subagent_model_hint": None}),
+        encoding="utf-8",
+    )
+    action_a, inst_a = _resolve_harness_baton(str(ws), str(dev_tasks_dir))
+    assert action_a == "DISPATCH_RUNNER"
+    assert inst_a is not None
+    assert "prefer lightweight/fast tier" in inst_a
+
+    # Case B: runner_subagent_model_hint is "custom-fast-tier"
+    mode_file.write_text(
+        json.dumps({"orchestration_mode": "inverted", "runner_subagent_model_hint": "custom-fast-tier"}),
+        encoding="utf-8",
+    )
+    action_b, inst_b = _resolve_harness_baton(str(ws), str(dev_tasks_dir))
+    assert action_b == "DISPATCH_RUNNER"
+    assert inst_b is not None
+    assert "model_hint=custom-fast-tier" in inst_b
+
 
 
 

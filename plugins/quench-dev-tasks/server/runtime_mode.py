@@ -119,13 +119,20 @@ def generate_session_role_contract(
     effective_mode: OrchestrationMode,
     runner_subagent_model_hint: Optional[str] = None,
 ) -> SessionRoleContract:
+    normalized_hint = (runner_subagent_model_hint or "").strip() or None
     if effective_mode == "inverted":
+        tier_guideline = (
+            f"委派 Runner / Research 子代理优先使用指定档位提示: {normalized_hint}（若宿主不可用则回退轻量执行档位）。"
+            if normalized_hint
+            else "委派 Runner / Research 子代理时优先选用宿主可用的轻量/快速执行档位（prefer lightweight/fast tier over inheriting main session model），勿默认继承主会话模型。"
+        )
         return {
             "role": "reviewer_orchestrator",
             "primary_guidelines": [
                 "主模型作为审查编排者（Reviewer Orchestrator），负责架构规划、规约强化与任务分派。",
                 "执行施工委托给 Runner 子 Agent，通过标准信封派发并附带上下文。",
                 "主模型仅在规约/文档层操作，严禁直接篡改生产受管源码（INV-6）。",
+                tier_guideline,
             ],
             "dispatch_envelope": "[QUENCH-DISPATCH: RUNNER]",
             "review_dispatch_envelope": "[QUENCH-DISPATCH: REVIEWER]",

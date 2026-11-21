@@ -78,3 +78,9 @@ When any conflict arises, the **plugin rules files win**.
 - ❌ Write ad-hoc raw scripts calling LLM provider APIs bypassing ReviewerClient  
 - ❌ Bypass FastMCP tools via shell/CLI commands (e.g. running python scripts to mutate tasks) — always use MCP tool calls
 <!-- QUENCH-CORE-INVARIANTS:END -->
+
+---
+
+## 6. Subagent Delegation Tier
+
+- **Delegation Tier**: For `[QUENCH-DISPATCH: RUNNER | RESEARCH]`, honor `runner_subagent_model_hint` if set; otherwise prefer a lightweight/fast tier over inheriting the main session model (escalate only if unavailable or failing). For `[QUENCH-DISPATCH: REVIEWER]`, prefer a strong-reasoning tier.

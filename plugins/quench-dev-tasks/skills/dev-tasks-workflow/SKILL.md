@@ -47,7 +47,7 @@ At the beginning of each session or after completing a phase of development, the
 
 ### Inverted Dual-Layer Code Exploration (倒置双层代码探查流程)
 In dual-mode inverted orchestration:
-1. **Layer 1 (Subagent Isolation)**: Main session dispatches an isolated Subagent with `[QUENCH-DISPATCH: RESEARCH]` to perform AST code reading and symbol exploration. The Subagent strictly never calls `dev_tasks_status` or state transition tools.
+1. **Layer 1 (Subagent Isolation)**: Main session dispatches an isolated Subagent with `[QUENCH-DISPATCH: RESEARCH]` to perform AST code reading and symbol exploration. The Subagent strictly never calls `dev_tasks_status` or state transition tools. 发起 `[QUENCH-DISPATCH: RESEARCH]` 时遵循两级档位路由：存在非空 `runner_subagent_model_hint` 时优先匹配该 Hint；未显式配置时从宿主可用子代理选项中择优选择轻量/快速执行档位（lightweight/fast tier），避免直接继承主会话模型（`inherit`）。
 2. **Layer 2 (Baton Handoff)**: The Subagent returns structured seed files and context to the main session. The main session then calls `dev_tasks_refine_spec` / `dev_tasks_propose` or `dev_reviewer_submit`.
 
 ### Autopilot State Machine & Continuous Relay (Autopilot 接力棒状态机)
@@ -63,6 +63,7 @@ In dual-mode inverted orchestration, `DISPATCH_RUNNER` provides deterministic su
   - **High overlap (>= 30%) -> `reuse_active`**: Message the active Runner via `send_message` to retain hot file context. Name Runner `Role` by domain/module (e.g. `Backend Auth Runner`) rather than batch numbers (e.g. `Batch 1`).
   - **Low overlap (< 30%) or initial batch -> `spawn_fresh`**: Launch a fresh Runner subagent to prevent cross-domain context pollution.
   - **Safety Fuse**: If cumulative executed tasks on the active runner reach or exceed 12 tasks, force `spawn_fresh` at the batch boundary to purge token context bloat.
+- **Model Tier Selection (模型档位选择)**: 发起 `[QUENCH-DISPATCH: RUNNER]` 时优先使用非空 `model_hint`（即 `runner_subagent_model_hint`）；未显式配置时从宿主可用选项中择优选择轻量/快速执行档位（lightweight/fast tier），禁止直接继承主会话模型（`inherit`），仅在宿主无轻量档位可用或复杂推理连续失败时升级回退。同时，通过宿主子代理通道派发 `[QUENCH-DISPATCH: REVIEWER]` 时优先选用强推理档位（strong-reasoning tier）。
 
 ---
 

@@ -8,6 +8,7 @@ from filelock import FileLock
 from runtime_mode import (
     load_runtime_mode,
     update_runtime_mode,
+    generate_session_role_contract,
     get_runtime_mode_path,
     get_runtime_mode_lock_path,
 )
@@ -275,3 +276,30 @@ def test_gitignore_ignores_runtime_mode_files():
     assert proc.returncode == 0
     assert ".agents/.quench_runtime_mode.json" in proc.stdout
     assert ".agents/.quench_runtime_mode.json.lock" in proc.stdout
+
+
+def test_session_role_contract_vendor_neutral_tier_guidelines():
+    """Verify generate_session_role_contract appends neutral tier routing guidance in inverted mode."""
+    # 1. inverted + None -> lightweight/fast tier fallback
+    c_none = generate_session_role_contract("inverted", None)
+    assert c_none["runner_subagent_model_hint"] is None
+    assert len(c_none["primary_guidelines"]) == 4
+    assert "prefer lightweight/fast tier over inheriting main session model" in c_none["primary_guidelines"][3]
+
+    # 2. inverted + whitespace -> treated as empty for guideline text, preserves original field
+    c_ws = generate_session_role_contract("inverted", "   ")
+    assert c_ws["runner_subagent_model_hint"] == "   "
+    assert len(c_ws["primary_guidelines"]) == 4
+    assert "prefer lightweight/fast tier over inheriting main session model" in c_ws["primary_guidelines"][3]
+
+    # 3. inverted + non-empty hint -> prioritizes specified hint
+    c_hint = generate_session_role_contract("inverted", "custom-lightweight-tier")
+    assert c_hint["runner_subagent_model_hint"] == "custom-lightweight-tier"
+    assert len(c_hint["primary_guidelines"]) == 4
+    assert "custom-lightweight-tier" in c_hint["primary_guidelines"][3]
+    assert "回退轻量执行档位" in c_hint["primary_guidelines"][3]
+
+    # 4. standard + None -> unchanged 3 guidelines
+    c_std = generate_session_role_contract("standard", None)
+    assert c_std["role"] == "runner"
+    assert len(c_std["primary_guidelines"]) == 3

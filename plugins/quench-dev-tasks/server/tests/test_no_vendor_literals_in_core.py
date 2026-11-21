@@ -8,12 +8,14 @@ or single-line pragmas (# vendor-literal: allow).
 """
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+import re
+from typing import Iterable, Iterator
 
 import pytest
 
 # 规范契约常量
 SERVER_DIR: Path = Path(__file__).resolve().parent.parent
+REPO_ROOT: Path = SERVER_DIR.parents[2]
 SCAN_ROOT: Path = SERVER_DIR
 SCAN_GLOB: str = "*.py"                       # 仅顶层，不递归
 EXCLUDED_DIRS: tuple[str, ...] = ("tests", "adapters", "hooks", "__pycache__")
@@ -23,6 +25,10 @@ BANNED_VENDOR_TOKENS: tuple[str, ...] = (
 )
 BANNED_VENDOR_HOSTS: tuple[str, ...] = (
     "api.openai.com", "api.deepseek.com", "api.anthropic.com", "generativelanguage.googleapis.com",
+)
+TRANSIENT_TIER_PATTERN: re.Pattern[str] = re.compile(
+    r"\b(?:flash|flash_lite|pro|hydrogen)\b",
+    re.IGNORECASE,
 )
 
 PRESET_BLOCK_START: str = "# -- vendor-presets:start"
@@ -202,3 +208,102 @@ def test_preset_registry_is_only_exempted_region():
     # project_config.py 本身扫描必须 0 违规
     violations = find_vendor_violations(cfg_file)
     assert violations == [], f"Found unexpected violations in project_config.py: {violations}"
+
+
+def _iter_target_lines(target: Path) -> Iterator[tuple[Path, int, str]]:
+    """遍历目录（复用顶层 Python 扫描）或显式指定文件（含 hooks 与治理文档）的所有文本行。"""
+    target_path = Path(target)
+    if target_path.is_file():
+        with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+            for lineno, line in enumerate(f, 1):
+                yield (target_path, lineno, line)
+    else:
+        yield from iter_scannable_lines(target_path)
+
+
+def find_transient_tier_violations(targets: Iterable[Path]) -> list[VendorViolation]:
+    """扫描目标路径集合中是否存在未豁免的瞬态代际/档位字面量。"""
+    violations: list[VendorViolation] = []
+    for target in targets:
+        current_file: Path | None = None
+        in_preset_block: bool = False
+
+        for file_path, lineno, line in _iter_target_lines(target):
+            if file_path != current_file:
+                if current_file is not None and in_preset_block:
+                    raise AssertionError(f"Unclosed preset block in {current_file}")
+                current_file = file_path
+                in_preset_block = False
+
+            stripped = line.strip()
+            if stripped.startswith(PRESET_BLOCK_START):
+                if in_preset_block:
+                    raise AssertionError(f"Nested preset block start in {file_path}:{lineno}")
+                in_preset_block = True
+                continue
+
+            if stripped.startswith(PRESET_BLOCK_END):
+                if not in_preset_block:
+                    raise AssertionError(f"Unexpected preset block end without start in {file_path}:{lineno}")
+                in_preset_block = False
+                continue
+
+            if in_preset_block or LINE_PRAGMA in line:
+                continue
+
+            for m in TRANSIENT_TIER_PATTERN.finditer(line):
+                violations.append(
+                    VendorViolation(
+                        path=str(file_path),
+                        lineno=lineno,
+                        token=m.group(0).casefold(),
+                        snippet=line.strip()[:120],
+                    )
+                )
+
+        if current_file is not None and in_preset_block:
+            raise AssertionError(f"Unclosed preset block in {current_file}")
+
+    return violations
+
+
+def test_zero_transient_tier_literals_in_core_and_governance_docs():
+    """门禁断言：核心模块、context_injector 与 5 份治理文档 0 瞬态档位字面量违规。"""
+    governance_docs = [
+        REPO_ROOT / "AGENTS.md",
+        REPO_ROOT / "plugins" / "quench-dev-tasks" / "rules" / "AGENTS.md",
+        REPO_ROOT / "plugins" / "quench-dev-tasks" / "templates" / "AGENTS.md",
+        REPO_ROOT / "plugins" / "quench-dev-tasks" / "rules" / "dev-tasks-discipline.md",
+        REPO_ROOT / "plugins" / "quench-dev-tasks" / "skills" / "dev-tasks-workflow" / "SKILL.md",
+    ]
+    for doc in governance_docs:
+        assert doc.is_file(), f"Missing governance doc: {doc}"
+
+    targets = [
+        SERVER_DIR,
+        SERVER_DIR / "hooks" / "context_injector.py",
+        *governance_docs,
+    ]
+    violations = find_transient_tier_violations(targets)
+    assert violations == [], f"Found transient tier literal violations: {violations}"
+
+
+def test_transient_tier_scanner_positive_and_negative_word_boundaries(tmp_path: Path):
+    """正负向自证单测：独立瞬态档位词必命中，常规词汇（process/project/propose 等）0 误报。"""
+    planted = tmp_path / "planted_tier.py"
+    planted.write_text(
+        'TIER_A = "flash"\n'
+        'TIER_B = "flash_lite"\n'
+        'TIER_C = "pro"\n'
+        'TIER_D = "hydrogen"\n'
+        'SAFE_WORDS = "process project propose protocol profile prompt progress provide"\n'
+        'EXEMPTED = "flash"  # vendor-literal: allow\n',
+        encoding="utf-8",
+    )
+    violations = find_transient_tier_violations([planted])
+    assert [(v.lineno, v.token) for v in violations] == [
+        (1, "flash"),
+        (2, "flash_lite"),
+        (3, "pro"),
+        (4, "hydrogen"),
+    ]
