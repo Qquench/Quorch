@@ -508,4 +508,114 @@ def test_stop_hook_circuit_breaker_and_guardrails(tmp_path):
     assert res_subagent == {"decision": "allow"}
 
 
+def test_file_scope_guard_agent_brain_artifact_exempt_with_and_without_active_task(tmp_path):
+    """断言跨盘符/工作区外 Agent brain/<conv-id>/ 制品在无活跃任务（情形 B）和有活跃任务（情形 A）下均免拦截放行，且路径回溯逃逸被拦截。"""
+    ws_str = str(tmp_path)
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    stack_yaml = agents_dir / "quench_stack.yaml"
+    stack_yaml.write_text(
+        "project_name: 'TestProj'\ndev_tasks_dir: 'docs/dev_tasks'\nfast_track_rules:\n  allow_untracked_patterns: []\n",
+        encoding="utf-8",
+    )
+
+    external_brain_walkthrough = "C:/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/walkthrough.md"
+    external_brain_plan = "C:/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/implementation_plan.md"
+    external_brain_scratch = "C:/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/scratch/test_script.py"
+
+    # Case 1: No active task (Case B) with empty allow_untracked_patterns
+    res_walkthrough_write = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "write_file",
+            "args": {
+                "Path": external_brain_walkthrough,
+                "Content": "# Walkthrough\n",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_walkthrough_write["decision"] == "allow"
+
+    res_walkthrough_edit = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "edit_file",
+            "args": {
+                "Path": external_brain_walkthrough,
+                "Target": "# Walkthrough",
+                "Replacement": "# Updated Walkthrough",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_walkthrough_edit["decision"] == "allow"
+
+    res_scratch_write = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "write_file",
+            "args": {
+                "Path": external_brain_scratch,
+                "Content": "print('scratch')\n",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_scratch_write["decision"] == "allow"
+
+    # Case 2: Active task 1.1 in progress touching only src/core/main.py (Case A)
+    dev_tasks = tmp_path / "docs" / "dev_tasks"
+    dev_tasks.mkdir(parents=True)
+    task_file = dev_tasks / "2026-11-21_test_task.md"
+    task_file.write_text(
+        """# 测试任务集
+
+### 任务 1.1 🔨 执行中 — 核心功能开发
+
+#### 【涉及文件】
+```
+[MODIFY] src/core/main.py
+```
+""",
+        encoding="utf-8",
+    )
+
+    res_plan_active = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "write_file",
+            "args": {
+                "Path": external_brain_plan,
+                "Content": "# Implementation Plan\n",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_plan_active["decision"] == "allow"
+
+    # Non-brain external file must still trigger force_ask
+    res_other_repo = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "write_file",
+            "args": {
+                "Path": "C:/Users/user/other_repo/README.md",
+                "Content": "# Unauthorized external edit\n",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_other_repo["decision"] == "force_ask"
+
+    # Traversal escape out of brain directory must still trigger force_ask
+    res_traversal_escape = run_hook(FILE_GUARD, {
+        "toolCall": {
+            "name": "write_file",
+            "args": {
+                "Path": "C:/Users/user/app_data/brain/conv-id/../../other_repo/notes.md",
+                "Content": "# Escaped brain dir\n",
+            },
+        },
+        "workspacePaths": [ws_str],
+    })
+    assert res_traversal_escape["decision"] == "force_ask"
+
+
+
 

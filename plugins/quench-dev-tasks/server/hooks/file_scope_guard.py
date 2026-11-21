@@ -13,7 +13,7 @@ import logging.handlers
 import os
 import re
 import sys
-from typing import Optional, List, Tuple, Pattern, Final
+from typing import Any, Optional, List, Tuple, Pattern, Final
 from collections import Counter
 
 # 保证能加载上级 server 模块
@@ -135,8 +135,45 @@ def log_guard_event(
         pass
 
 
+def _match_segmented_glob(target_path: str, norm_pattern: str) -> bool:
+    """路径段感知的递归 Glob 匹配纯函数：'**' 匹配 0 个或多个完整路径段，非 '**' 段通过 fnmatchcase 匹配单段。"""
+    path_parts = [p for p in target_path.replace("\\", "/").lower().strip("/").split("/") if p]
+    raw_pat_parts = [p for p in norm_pattern.replace("\\", "/").lower().strip("/").split("/") if p]
+    if not raw_pat_parts:
+        return not path_parts
+
+    pat_parts: List[str] = []
+    for part in raw_pat_parts:
+        if part == "**" and pat_parts and pat_parts[-1] == "**":
+            continue
+        pat_parts.append(part)
+
+    n_pat = len(pat_parts)
+    n_path = len(path_parts)
+    memo: dict[Tuple[int, int], bool] = {}
+
+    def _dp(i: int, j: int) -> bool:
+        state = (i, j)
+        if state in memo:
+            return memo[state]
+        if i == n_pat:
+            res = j == n_path
+        elif pat_parts[i] == "**":
+            res = _dp(i + 1, j) or (j < n_path and _dp(i, j + 1))
+        else:
+            res = (
+                j < n_path
+                and fnmatch.fnmatchcase(path_parts[j], pat_parts[i])
+                and _dp(i + 1, j + 1)
+            )
+        memo[state] = res
+        return res
+
+    return _dp(0, 0)
+
+
 def matches_pattern(target_file: str, pattern: str, workspace_root: str) -> bool:
-    """检查文件是否符合 Glob 规则（支持文件名通配与路径前缀通配）。"""
+    """检查文件是否符合 Glob 规则（支持文件名通配、路径前缀通配与多段 ** 路径段递归通配）。"""
     if not target_file or not pattern:
         return False
     pattern_str = pattern.strip()
@@ -144,10 +181,11 @@ def matches_pattern(target_file: str, pattern: str, workspace_root: str) -> bool
         return True
 
     norm_target = os.path.normpath(target_file).replace("\\", "/").lower()
-    norm_root = os.path.normpath(workspace_root).replace("\\", "/").lower()
+    norm_root = os.path.normpath(workspace_root).replace("\\", "/").lower() if workspace_root else ""
 
-    if norm_target.startswith(norm_root):
-        rel_path = norm_target[len(norm_root):].lstrip("/")
+    norm_root_clean = norm_root.rstrip("/")
+    if norm_root_clean and (norm_target == norm_root_clean or norm_target.startswith(norm_root_clean + "/")):
+        rel_path = norm_target[len(norm_root_clean):].lstrip("/")
     else:
         rel_path = norm_target
 
@@ -161,23 +199,33 @@ def matches_pattern(target_file: str, pattern: str, workspace_root: str) -> bool
         if fnmatch.fnmatch(rel_path, norm_pattern):
             return True
 
-    # 路径匹配（如 docs/*, frontend/src/**/*.vue）
-    if fnmatch.fnmatch(rel_path, norm_pattern):
+    # 含 ** 的多段递归路径段匹配（如 **/brain/**/*.md, frontend/src/**/*.vue）
+    if "**" in norm_pattern:
+        if _match_segmented_glob(rel_path, norm_pattern):
+            return True
+    elif fnmatch.fnmatch(rel_path, norm_pattern):
         return True
 
-    # 目录递归通配（如 docs/**, frontend/src/assets/**）
+    # 目录递归通配（如 docs/**, **/brain/**, frontend/src/assets/**）
     if norm_pattern.endswith("/**"):
         prefix = norm_pattern[:-3].strip("/")
-        if rel_path.startswith(prefix + "/") or rel_path == prefix:
-            return True
-        if f"/{prefix}/" in f"/{rel_path}/":
-            return True
+        while prefix.startswith("**/"):
+            prefix = prefix[3:].strip("/")
+        rel_clean = rel_path.strip("/")
+        if prefix and "**" not in prefix:
+            if rel_clean.startswith(prefix + "/") or rel_clean == prefix:
+                return True
+            if f"/{prefix}/" in f"/{rel_clean}/":
+                return True
 
     # 目录单层通配（如 docs/*）
     if norm_pattern.endswith("/*"):
         prefix = norm_pattern[:-2].strip("/")
         if rel_path.startswith(prefix + "/"):
             return True
+
+    if _match_segmented_glob(rel_path, norm_pattern):
+        return True
 
     return False
 
@@ -199,11 +247,8 @@ def _strip_long_path_prefix(path: str) -> str:
     return path
 
 
-def resolve_realpath_under(workspace_root: str, target: str) -> Optional[str]:
-    """返回 realpath 绝对路径；必须严格位于 workspace_root 之下，且消解所有 symlink 与相对路径别名。
-    若目标文件尚未创建，对其父级目录执行 realpath 校验并规整。
-    捕获 ValueError（Windows 跨驱动器）与跨挂载点逃逸，统一安全返回 None。
-    """
+def resolve_physical_path(workspace_root: str, target: str) -> Optional[str]:
+    """解析目标路径的真实物理路径（消解 symlink、junction、.. 相对路径别名及未创建文件的父级目录 realpath）。"""
     if not workspace_root or not target:
         return None
 
@@ -233,6 +278,25 @@ def resolve_realpath_under(workspace_root: str, target: str) -> Optional[str]:
                 unresolved.reverse()
                 real_target = os.path.join(real_parent, *unresolved) if unresolved else real_parent
                 real_target = _strip_long_path_prefix(os.path.realpath(real_target))
+
+        return real_target
+    except Exception:
+        return None
+
+
+def resolve_realpath_under(workspace_root: str, target: str) -> Optional[str]:
+    """返回 realpath 绝对路径；必须严格位于 workspace_root 之下，且消解所有 symlink 与相对路径别名。
+    若目标文件尚未创建，对其父级目录执行 realpath 校验并规整。
+    捕获 ValueError（Windows 跨驱动器）与跨挂载点逃逸，统一安全返回 None。
+    """
+    if not workspace_root or not target:
+        return None
+
+    try:
+        real_root = _strip_long_path_prefix(os.path.realpath(workspace_root))
+        real_target = resolve_physical_path(workspace_root, target)
+        if not real_target:
+            return None
 
         try:
             common = os.path.commonpath([real_root, real_target])
@@ -288,6 +352,12 @@ def is_task_file(target_file: str, workspace_root: str, config) -> bool:
             dev_tasks_dir = config.dev_tasks_dir
     return is_governed_task_file(workspace_root, target_file, dev_tasks_dir=dev_tasks_dir)
 
+
+DEFAULT_AGENT_BRAIN_PATTERNS: Tuple[str, ...] = (
+    "**/brain/**/*.md",
+    "**/brain/**/scratch/**",
+    "**/brain/**/browser_sandbox/**",
+)
 
 SHELL_TOOL_NAMES: frozenset[str] = frozenset({
     "run_command",
@@ -702,11 +772,31 @@ def is_meta_file(target_file: str, workspace_root: str, config) -> bool:
     return False
 
 
-def is_whitelist_matched(config, target_file: str, workspace_root: str) -> bool:
-    """第一层：静态配置白名单匹配（quench_stack.yaml fast_track_rules.allow_untracked_patterns）。"""
-    patterns = config.get_fast_track_patterns()
+def is_agent_brain_artifact(target_file: str, workspace_root: str) -> bool:
+    """判定目标路径是否为 Agent 运行期 brain 会话制品（如 walkthrough.md、scratch/**、browser_sandbox/**）。
+    先通过 resolve_physical_path 消解软链接、junction 及 .. 路径回溯，再按严格路径段匹配 DEFAULT_AGENT_BRAIN_PATTERNS。
+    """
+    if not target_file or not workspace_root:
+        return False
+    physical_target = resolve_physical_path(workspace_root, target_file)
+    if not physical_target:
+        return False
+    for pat in DEFAULT_AGENT_BRAIN_PATTERNS:
+        if matches_pattern(physical_target, pat, workspace_root):
+            return True
+    return False
+
+
+def is_whitelist_matched(config: Any, target_file: str, workspace_root: str) -> bool:
+    """第一层：静态配置白名单匹配（quench_stack.yaml fast_track_rules.allow_untracked_patterns + 内置 brain 制品白名单）。"""
+    effective_file = resolve_physical_path(workspace_root, target_file) or target_file
+    raw_patterns = list(config.get_fast_track_patterns()) if config and hasattr(config, "get_fast_track_patterns") else []
+    patterns: List[str] = []
+    for pat in [*raw_patterns, *DEFAULT_AGENT_BRAIN_PATTERNS]:
+        if pat not in patterns:
+            patterns.append(pat)
     for pat in patterns:
-        if matches_pattern(target_file, pat, workspace_root):
+        if matches_pattern(effective_file, pat, workspace_root):
             return True
     return False
 
@@ -992,9 +1082,14 @@ def main():
             emit_decision("allow", "治理通用元数据文件豁免放行")
             return
 
-        effective_target = resolved_target or target_file
+        effective_target = resolved_target or resolve_physical_path(workspace_root, target_file) or target_file
 
-        # 0.1 生产代码靶向识别（Dual-Track Boundary Engine）：非受管的纯文档/规划/素材天然豁免
+        # 0.1b Agent 运行期 brain 会话制品白名单豁免（跨盘符/工作区外 brain/<conv-id>/*.md, scratch/**, browser_sandbox/**）
+        if is_agent_brain_artifact(effective_target, workspace_root):
+            emit_decision("allow", "Agent brain runtime artifact whitelist / Agent 运行期 brain 制品白名单豁免放行")
+            return
+
+        # 0.2 生产代码靶向识别（Dual-Track Boundary Engine）：非受管的纯文档/规划/素材天然豁免
         if hasattr(config, "is_path_governed") and not config.is_path_governed(effective_target):
             emit_decision("allow", "非受管路径（双轨边界）天然豁免放行")
             return

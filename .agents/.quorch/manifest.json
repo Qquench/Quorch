@@ -1771,6 +1771,17 @@
       "git_head_sha": "36ced7ff8682c232277b95b537604bb2eaaf116a",
       "git_index_mtime": 1794991801.132022,
       "released": true
+    },
+    "2026-11-21_v1_34_agent_brain_artifact_whitelist::34.1": {
+      "task_id": "2026-11-21_v1_34_agent_brain_artifact_whitelist::34.1",
+      "md_sha256": "c016e5e76fb8c63c267ae1f0fa2fd41292507db4432672d1777a3b5dec340c38",
+      "generation": 1,
+      "holder_token": "token_1795224371646_16788",
+      "last_heartbeat_monotonic_ns": 348487343000000,
+      "last_heartbeat_wall_utc": "2026-11-21T01:33:12.611821+00:00",
+      "git_head_sha": "8981ba2fc162886b7e595ff301e43212b73ae807",
+      "git_index_mtime": 1794997178.4545639,
+      "released": true
     }
   }
 }

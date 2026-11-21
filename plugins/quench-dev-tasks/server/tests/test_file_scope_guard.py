@@ -15,6 +15,10 @@ if hooks_dir not in sys.path:
     sys.path.insert(0, hooks_dir)
 
 from file_scope_guard import (
+    DEFAULT_AGENT_BRAIN_PATTERNS,
+    matches_pattern,
+    resolve_physical_path,
+    is_agent_brain_artifact,
     verify_session_integrity,
     safe_clean_corrupted_bypass,
     is_session_bypass_matched,
@@ -159,3 +163,67 @@ def test_concurrent_bypass_file_race(tmp_path):
         t.join()
 
     assert len(errors) == 0, f"Concurrent workers encountered errors: {errors}"
+
+
+def test_matches_pattern_multi_segment_double_star_and_segment_boundaries(tmp_path):
+    ws_str = str(tmp_path)
+
+    # 1. Multi-segment ** matching across 0 and multiple intermediate directories
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/walkthrough.md", "**/brain/**/*.md", ws_str) is True
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/sub/report.md", "**/brain/**/*.md", ws_str) is True
+    assert matches_pattern("C:/Users/user/app/brain/walkthrough.md", "**/brain/**/*.md", ws_str) is True
+    assert matches_pattern("/Users/user/app/brain/conv-123/implementation_plan.md", "**/brain/**/*.md", ws_str) is True
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/scratch/helper.py", "**/brain/**/scratch/**", ws_str) is True
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/browser_sandbox/uploads/sample.png", "**/brain/**/browser_sandbox/**", ws_str) is True
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/any_file.txt", "**/brain/**", ws_str) is True
+    assert matches_pattern(str(tmp_path / "frontend" / "src" / "App.vue"), "frontend/src/**/*.vue", ws_str) is True
+    assert matches_pattern(str(tmp_path / "frontend" / "src" / "components" / "deep" / "Button.vue"), "frontend/src/**/*.vue", ws_str) is True
+
+    # 2. Segment boundary isolation (my_brain_project must NOT match **/brain/**)
+    assert matches_pattern("C:/Users/user/my_brain_project/README.md", "**/brain/**/*.md", ws_str) is False
+    assert matches_pattern("C:/Users/user/my_brain_project/README.md", "**/brain/**", ws_str) is False
+
+    # 3. Path traversal collapse via normpath
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/../../outside_repo/README.md", "**/brain/**/*.md", ws_str) is False
+    assert matches_pattern("C:/Users/user/app/brain/conv-123/../../outside_repo/src/main.py", "**/brain/**", ws_str) is False
+
+
+def test_is_agent_brain_artifact_positive_and_escape_defense(tmp_path):
+    from unittest.mock import patch
+
+    ws_str = str(tmp_path)
+    assert "**/brain/**/*.md" in DEFAULT_AGENT_BRAIN_PATTERNS
+    assert "**/brain/**/scratch/**" in DEFAULT_AGENT_BRAIN_PATTERNS
+    assert "**/brain/**/browser_sandbox/**" in DEFAULT_AGENT_BRAIN_PATTERNS
+
+    # Positive cases: external Windows cross-drive & POSIX brain artifacts
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/walkthrough.md", ws_str) is True
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/implementation_plan.md", ws_str) is True
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/sub/report.md", ws_str) is True
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/walkthrough.md", ws_str) is True
+    assert is_agent_brain_artifact("/Users/user/app/brain/conv-123/walkthrough.md", ws_str) is True
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/scratch/helper.py", ws_str) is True
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/browser_sandbox/uploads/sample.png", ws_str) is True
+
+    # Negative case 1: Traversal attacks escaping brain directory
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/../../outside_repo/src/main.py", ws_str) is False
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/../../outside_repo/README.md", ws_str) is False
+
+    # Negative case 2: Substring directory trap
+    assert is_agent_brain_artifact("C:/Users/user/my_brain_project/README.md", ws_str) is False
+
+    # Negative case 3: Non-whitelisted code file directly inside brain/<conv-id>/
+    assert is_agent_brain_artifact("C:/Users/user/app/brain/conv-123/exploit.py", ws_str) is False
+
+    # Negative case 4: Symlink inside brain/<conv-id>/ pointing outside brain/
+    fake_brain_link = str(tmp_path.parent / "brain" / "conv-123" / "escaped_link.md")
+    outside_real_md = str(tmp_path.parent / "outside_repo" / "README.md")
+
+    def fake_realpath(p):
+        if "escaped_link.md" in str(p):
+            return outside_real_md
+        return p
+
+    with patch("os.path.realpath", side_effect=fake_realpath):
+        assert is_agent_brain_artifact(fake_brain_link, ws_str) is False
+

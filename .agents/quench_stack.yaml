@@ -33,7 +33,10 @@ constraints:
   - "All production-grade changes must achieve 100% test coverage under pytest suite with zero breaking regressions"
 
 fast_track_rules:
-  allow_untracked_patterns: []
+  allow_untracked_patterns:
+    - "**/brain/**/*.md"
+    - "**/brain/**/scratch/**"
+    - "**/brain/**/browser_sandbox/**"
 
 governance_scope:
   managed_paths:

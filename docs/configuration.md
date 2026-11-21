@@ -58,6 +58,9 @@ Quench employs a **3-tier defense** against unauthorized modifications:
 # Layer 1: Static Whitelist (Glob patterns exempt from task state-machine checks)
 fast_track_rules:
   allow_untracked_patterns:
+    - "**/brain/**/*.md"
+    - "**/brain/**/scratch/**"
+    - "**/brain/**/browser_sandbox/**"
     - "docs/**"
     - "*.md"
     - "notes/**"

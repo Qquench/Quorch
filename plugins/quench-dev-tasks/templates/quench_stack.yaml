@@ -76,7 +76,10 @@ constraints:
 # ⚠️ 维护原则：宁少勿多。默认为空单，由项目根据实际需求逐步添加。
 # ==============================================================================
 fast_track_rules:
-  allow_untracked_patterns: []
+  allow_untracked_patterns:
+    - "**/brain/**/*.md"
+    - "**/brain/**/scratch/**"
+    - "**/brain/**/browser_sandbox/**"
 
 # ==============================================================================
 # Governance Scope Boundaries (代码审计管控边界 - Optional / 可选)

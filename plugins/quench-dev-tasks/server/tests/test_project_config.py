@@ -391,4 +391,28 @@ def test_local_override_monotonic_tightening_and_baseline_lock(temp_workspace):
     assert cfg_tightened.audit_gate.on_missing_record == "block"
 
 
+def test_match_glob_multi_segment_double_star():
+    """验证 _match_glob 与 _match_segmented_glob 对多段 ** 递归 Glob（含 0 层与多层中间目录及路径段边界隔离）的匹配"""
+    from project_config import _match_glob
+
+    # 1. **/brain/** 与 **/brain/**/*.md (0 层与多层中间目录)
+    assert _match_glob("c:/users/user/app/brain/conv-1/walkthrough.md", "**/brain/**") is True
+    assert _match_glob("c:/users/user/app/brain/conv-1/walkthrough.md", "**/brain/**/*.md") is True
+    assert _match_glob("c:/users/user/app/brain/conv-1/sub/deep/report.md", "**/brain/**/*.md") is True
+    assert _match_glob("c:/users/user/app/brain/walkthrough.md", "**/brain/**/*.md") is True
+    assert _match_glob("brain/walkthrough.md", "**/brain/**/*.md") is True
+
+    # 2. frontend/src/**/*.vue (0 层与多层中间目录)
+    assert _match_glob("frontend/src/App.vue", "frontend/src/**/*.vue") is True
+    assert _match_glob("frontend/src/components/Button.vue", "frontend/src/**/*.vue") is True
+    assert _match_glob("frontend/src/views/admin/Dashboard.vue", "frontend/src/**/*.vue") is True
+
+    # 3. 路径段边界严格隔离（子串目录不误判，非匹配后缀不误判）
+    assert _match_glob("c:/users/user/my_brain_app/README.md", "**/brain/**") is False
+    assert _match_glob("c:/users/user/my_brain_app/README.md", "**/brain/**/*.md") is False
+    assert _match_glob("c:/users/user/app/brain/conv-1/script.py", "**/brain/**/*.md") is False
+    assert _match_glob("frontend/src_other/App.vue", "frontend/src/**/*.vue") is False
+
+
+
 

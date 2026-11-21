@@ -366,6 +366,43 @@ CRITICAL_CODE_MANIFEST_PATTERNS: list[str] = [
 CRITICAL_CODE_MANIFESTS = set(CRITICAL_CODE_MANIFEST_PATTERNS)
 
 
+def _match_segmented_glob(target_path: str, norm_pattern: str) -> bool:
+    """路径段感知的递归 Glob 匹配纯函数：'**' 匹配 0 个或多个完整路径段，非 '**' 段通过 fnmatchcase 匹配单段。"""
+    path_parts = [p for p in target_path.replace("\\", "/").lower().strip("/").split("/") if p]
+    raw_pat_parts = [p for p in norm_pattern.replace("\\", "/").lower().strip("/").split("/") if p]
+    if not raw_pat_parts:
+        return not path_parts
+
+    pat_parts: list[str] = []
+    for part in raw_pat_parts:
+        if part == "**" and pat_parts and pat_parts[-1] == "**":
+            continue
+        pat_parts.append(part)
+
+    n_pat = len(pat_parts)
+    n_path = len(path_parts)
+    memo: dict[tuple[int, int], bool] = {}
+
+    def _dp(i: int, j: int) -> bool:
+        state = (i, j)
+        if state in memo:
+            return memo[state]
+        if i == n_pat:
+            res = j == n_path
+        elif pat_parts[i] == "**":
+            res = _dp(i + 1, j) or (j < n_path and _dp(i, j + 1))
+        else:
+            res = (
+                j < n_path
+                and fnmatch.fnmatchcase(path_parts[j], pat_parts[i])
+                and _dp(i + 1, j + 1)
+            )
+        memo[state] = res
+        return res
+
+    return _dp(0, 0)
+
+
 def _match_glob(target_rel: str, pattern: str) -> bool:
     norm_pattern = pattern.replace("\\", "/").lower().strip()
     target_rel = target_rel.replace("\\", "/").lower().strip("/")
@@ -377,20 +414,29 @@ def _match_glob(target_rel: str, pattern: str) -> bool:
         if fnmatch.fnmatch(target_rel, norm_pattern):
             return True
 
-    if fnmatch.fnmatch(target_rel, norm_pattern):
+    if "**" in norm_pattern:
+        if _match_segmented_glob(target_rel, norm_pattern):
+            return True
+    elif fnmatch.fnmatch(target_rel, norm_pattern):
         return True
 
     if norm_pattern.endswith("/**"):
         prefix = norm_pattern[:-3].strip("/")
-        if target_rel.startswith(prefix + "/") or target_rel == prefix:
-            return True
-        if f"/{prefix}/" in f"/{target_rel}/":
-            return True
+        while prefix.startswith("**/"):
+            prefix = prefix[3:].strip("/")
+        if prefix and "**" not in prefix:
+            if target_rel.startswith(prefix + "/") or target_rel == prefix:
+                return True
+            if f"/{prefix}/" in f"/{target_rel}/":
+                return True
 
     if norm_pattern.endswith("/*"):
         prefix = norm_pattern[:-2].strip("/")
         if target_rel.startswith(prefix + "/"):
             return True
+
+    if _match_segmented_glob(target_rel, norm_pattern):
+        return True
 
     return False
 

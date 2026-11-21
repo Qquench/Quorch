@@ -324,7 +324,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `reporting.py` | T2/T3 | Consolidated delivery artifacts and status reporting: pure handoff card rendering (T2) & atomic CHANGELOG append (T3) | Pure rendering for handoff card; non-destructive header-preserving updates for CHANGELOG |
 | `response_compactor.py` | T2/T3 | 确定性钳制 + 封闭码分类，零模型介入（INV-3）；`compact_mapping`、`fit_to_budget`、`canonical_json`、`classify_hook_log_entry` | Pure function; zero I/O; deterministic single-pass clamping |
 | `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`, `reviewer debug`) | Interactive ANSI formatting; non-AI operator gateway |
-| `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement for mutating tools (`write_file`, `edit_file`, `run_command`) & task status tamper guard | Must respond in < 50ms; no heavy imports |
+| `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement for mutating tools (`write_file`, `edit_file`, `run_command`), built-in agent `brain/` runtime artifact whitelist (`DEFAULT_AGENT_BRAIN_PATTERNS`, `is_agent_brain_artifact`), segment-aware multi-level `**` glob matching & task status tamper guard | Must respond in < 50ms; no heavy imports |
 | `hooks/context_injector.py` | T1 | PreInvocation relay guidance injection & Stop Hook 1-shot circuit-breaker (`.quench_stop_guard.json`) | Read-only injection; non-blocking fail-safe |
 | `scripts/config_sync.py` | T1 | Cross-repository dynamic config sync, single-source plugin deduplication & self-healing | Zero network calls; atomic writes |
 | `scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |

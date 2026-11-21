@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-21] 2026-11-21_v1_34_agent_brain_artifact_whitelist.md
+
+- **Task 34.1**: Agent Brain 运行期制品白名单、多段 ** Glob 路径段匹配加固与配置模板对齐
+
 ## [2026-11-18] 2026-11-18_fix_shell_bypass_false_positives_and_bilingual_guards.md
 
 - **Task 1.1**: Fix detect_shell_write_bypass false positives on Python inline scripts and add bilingual status guard messages
