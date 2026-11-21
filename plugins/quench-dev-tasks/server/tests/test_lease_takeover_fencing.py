@@ -7,7 +7,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -18,7 +17,6 @@ if SERVER_DIR not in sys.path:
 from workspace_lease import (
     WorkspaceLeaseGuard,
     WorkspaceLeaseNotHeldError,
-    LeaseGenerationLostError,
     LeaseTouchOutcome,
 )
 

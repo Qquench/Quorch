@@ -14,11 +14,10 @@ import sys
 import tempfile
 import threading
 import time
-import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Dict, Final, Literal, Mapping, Optional, Sequence, Tuple, TypeVar
 import filelock
 
 T = TypeVar("T")  # TypeVar 兼容 Python < 3.12，非 PEP 695 [T]
@@ -876,7 +875,7 @@ def capture_baseline(
                     digest=digest,
                     inode=inode,
                 )
-            except (OSError, PermissionError):
+            except OSError:
                 continue
 
     head_commit = _get_git_head_commit(real_ws)
@@ -979,7 +978,7 @@ def reconcile_workspace_against_whitelist(
                     cur_digest = f"sha256:{h.hexdigest()}"
                     if cur_digest != fp.digest:
                         modified_files.add(rel_path)
-        except (OSError, PermissionError):
+        except OSError:
             modified_files.add(rel_path)
 
     # 2. Check for newly introduced files in workspace

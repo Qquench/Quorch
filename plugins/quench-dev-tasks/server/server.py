@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta
 import glob
 import hashlib
 import json
@@ -79,7 +79,6 @@ from project_config import (
     create_reviewer_client,
     canonical_artifact_ref,
     AuditGatePolicy,
-    AuditGateReason,
     AuditGateResult,
     most_restrictive_policy,
 )
@@ -92,8 +91,6 @@ from reviewer_engine import (
 from schema_validator import (
     validate_task_schema,
     lint_task_physical_feasibility,
-    LintIssue,
-    PhysicalLintResult,
     _parse_task_markdown_sections,
 )
 from state_machine import (
@@ -104,7 +101,6 @@ from state_machine import (
     STATUS_PENDING,
     STATUS_REWORK,
     STATUS_SKIPPED,
-    TASK_HEADER_PATTERN,
     TaskItem,
     get_status_summary,
     parse_task_file,
@@ -119,13 +115,9 @@ from manifest import (
     release_lease,
     load_manifest,
     touch_heartbeat,
-    FencedTokenError,
     ManifestIntegrityError,
     MANIFEST_REL_PATH,
-    register_proposal,
     reconcile_workspace,
-    ReconcileReport,
-    ReconcileClass,
     capture_baseline,
     get_baseline_path,
 )
@@ -133,16 +125,10 @@ from manifest_lease import reclaim_stale_task, probe_lease_health, HealthVerdict
 from runtime_mode import (
     load_runtime_mode,
     update_runtime_mode,
-    OrchestrationMode,
-    ReviewerChannel,
-    StopAtStage,
-    EffectiveModeSnapshot,
 )
 from dataclasses import replace
 from autopilot_harness import (
     compute_next_action,
-    HarnessNextAction,
-    HarnessActionType,
     TaskStateSnapshot,
     LastEventSnapshot,
 )
@@ -162,16 +148,7 @@ def _is_external_api_available(workspace_root: str, config: Optional[Any] = None
 
 from task_writer import (
     write_task_file_guarded,
-    split_task_document,
-    compose_task_document,
     _render_task_markdown,
-    InvalidTransitionError,
-    NonEditableTaskMutatedError,
-    NonEditableTaskMissingError,
-    DuplicateTaskIdError,
-    StatusSmugglingError,
-    StatusManifestMismatchError,
-    TaskFileLockTimeoutError,
     PersistTargetRequiredError,
     TaskNotFoundError,
 )
@@ -597,7 +574,6 @@ def _build_compact_status_sync(
             compact_hook_entries.append(f"[{code}] log_ref={rel_log_ref}")
 
     tasks_total = len(all_tasks)
-    compact_tasks = all_tasks[:STATUS_COMPACT_MAX_TASKS]
     truncated_sections: list[str] = []
     if tasks_total > STATUS_COMPACT_MAX_TASKS:
         truncated_sections.append("tasks")
@@ -1845,9 +1821,6 @@ def dev_tasks_confirm(
     return res_dict
 
 
-DispatchStrategy = Literal["subagent", "engine", "manual"]
-
-
 class ReviewerHandoff(TypedDict, total=False):
     contract_version: Literal["1.0"]
     task_id: str
@@ -2994,7 +2967,6 @@ async def dev_tasks_refine_spec(
             fallback_spec = f"### 任务 {task_id} ⬜ 待确认 — {title}\n\n{raw_spec}"
         else:
             fallback_spec = raw_spec if raw_spec.strip() else f"### 任务 {task_id} ⬜ 待确认 — {title}\n"
-        degraded_info = _degraded_card(reason="reviewer_not_configured", config=config)
 
         persisted = False
         persist_res = None
@@ -3437,7 +3409,7 @@ def dev_tasks_archive(workspace_root: str, task_file: str) -> Dict[str, Any]:
     try:
         append_changelog_entry(changelog_abs, target_path, completed)
         changelog_ok = True
-    except Exception as e:
+    except Exception:
         changelog_ok = False
 
     # 移动文件至 archive_dir
@@ -3523,7 +3495,6 @@ def dev_tasks_set_bypass(
         custom_patterns: Glob patterns.
     """
     bypass_file = os.path.join(workspace_root, ".agents", ".quench_bypass.json")
-    agents_dir = os.path.join(workspace_root, ".agents")
 
     if action.lower() in ("disable", "clear", "off"):
         if os.path.isfile(bypass_file):
@@ -3759,7 +3730,6 @@ async def _poll_impl(
 
     from reviewer_jobs import (
         TERMINAL_STATES,
-        JobState,
         PollSnapshot,
         ReviewerJobSupervisor,
         SnapshotContractViolation,

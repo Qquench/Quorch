@@ -7,7 +7,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -71,7 +70,7 @@ def test_acquire_and_release_lifecycle(temp_workspace):
 
     guard.release()
     assert guard.is_held() is False
-    assert guard.boot_nonce is None
+    assert guard.boot_nonce is None  # pyrefly: ignore[unnecessary-comparison]
     assert not guard.lease_file.exists()
 
 
@@ -189,7 +188,7 @@ def test_destructive_context_guard(temp_workspace):
     executed = False
     with guard.destructive_context():
         executed = True
-    assert executed is True
+    assert executed
 
 
 def test_renew_or_die(temp_workspace):

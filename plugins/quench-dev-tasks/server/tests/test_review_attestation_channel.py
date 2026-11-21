@@ -4,10 +4,9 @@
 import inspect
 import json
 import os
-import shutil
-import tempfile
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -30,8 +29,6 @@ from server import (
     dev_tasks_propose,
 )
 from runtime_mode import (
-    EffectiveModeSnapshot,
-    AutopilotRuntimeState,
     update_runtime_mode,
 )
 
@@ -152,7 +149,7 @@ def test_record_unparsable_routes_through_effective_on_degraded(tmp_path):
     })
 
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="### 任务 1.1")
-    task.affected_files = ["[MODIFY] src/core.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/core.py"])
 
     # 1. on_degraded == "block" 必须被拒绝
     gate_res_block = _check_audit_gate(ws, task_file, task, cfg)
@@ -193,7 +190,7 @@ def test_harness_cas_mismatch_recomputes_and_reenvelopes(tmp_path):
             return (fresh_snap, False, {"consume_mismatch": True})
         return orig_update(*args, **kwargs)
 
-    res_data = {"ok": True}
+    res_data: dict[str, Any] = {"ok": True}
     with patch("server.update_runtime_mode", side_effect=mock_update):
         _inject_harness_next_action(
             workspace_root=ws,

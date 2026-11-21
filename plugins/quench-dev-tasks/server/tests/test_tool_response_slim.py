@@ -11,12 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -30,7 +25,6 @@ from server import (
     dev_tasks_checkout,
     dev_tasks_complete,
     dev_tasks_confirm,
-    dev_tasks_export_handoff_card,
     dev_tasks_propose,
     dev_tasks_refine_spec,
 )

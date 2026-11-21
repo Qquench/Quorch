@@ -31,6 +31,7 @@ from log_naming import enforce_unified_log_quota
 from observability_policy import (
     ConsultationTelemetryRecord,
     FileConsultationTelemetrySink,
+    FileVerdictAuditSink,
     _get_consultation_telemetry_sink,
     make_consultation_telemetry_sink,
     make_verdict_sink,
@@ -266,6 +267,8 @@ def test_three_locks_paths_distinct(tmp_path: Path):
 
     v_sink = make_verdict_sink(v_path)
     t_sink = make_consultation_telemetry_sink(t_path)
+    assert isinstance(v_sink, FileVerdictAuditSink)
+    assert isinstance(t_sink, FileConsultationTelemetrySink)
 
     v_lock = v_sink.lock_path
     t_lock = t_sink.lock_path
@@ -317,6 +320,8 @@ def test_get_consultation_telemetry_sink_lru_cache_keyed_by_path(tmp_path: Path)
 
     assert s1 is s2, "Same path must return cached singleton"
     assert s1 is not s3, "Different paths must return distinct instances"
+    assert isinstance(s1, FileConsultationTelemetrySink)
+    assert isinstance(s3, FileConsultationTelemetrySink)
     assert s1.path == os.path.abspath(path_a)
     assert s3.path == os.path.abspath(path_b)
 

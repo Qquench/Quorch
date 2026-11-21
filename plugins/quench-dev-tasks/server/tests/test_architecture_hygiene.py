@@ -24,7 +24,6 @@ from _hygiene.rules import (
 )
 from _hygiene.scanner import (
     ArchitectureHygieneScanner,
-    HygieneFinding,
     HygieneScanError,
     finding_sort_key,
 )

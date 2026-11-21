@@ -11,7 +11,6 @@ from reviewer_jobs import (
     POLL_NONTERMINAL_FIELDS,
     POLL_TERMINAL_FIELDS,
     TERMINAL_RESULT_ALLOWED_FIELDS,
-    JobState,
     PathFlavor,
     PollSnapshot,
     SnapshotContractViolation,

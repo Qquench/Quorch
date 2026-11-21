@@ -9,15 +9,16 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import sys
 
 # Windows UTF-8 console defense
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -264,7 +265,7 @@ def main():
             discipline_path=args.discipline_path,
         )
 
-    results = RulesExporter.export_all(
+    RulesExporter.export_all(
         project_root=args.project_root,
         discipline_path=args.discipline_path,
         force=args.force,

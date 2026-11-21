@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import io
 import json
 import os
-import subprocess
 import sys
-from typing import Any
 from unittest.mock import MagicMock, patch
 import urllib.error
-
-import pytest
 
 # Ensure scripts directory is in path
 SCRIPTS_DIR = os.path.abspath(

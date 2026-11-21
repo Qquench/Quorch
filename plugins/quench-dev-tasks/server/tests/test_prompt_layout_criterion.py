@@ -13,9 +13,7 @@ Verifies:
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import sys
-from typing import Sequence
 
 import pytest
 
@@ -23,7 +21,6 @@ from reviewer_engine import (
     AssembledPrompt,
     CodeSlice,
     CONSULT_MODE_INSTRUCTIONS,
-    OUTPUT_PROTOCOLS,
     PromptAssembler,
     mode_anchor_token_budget_proxy,
 )

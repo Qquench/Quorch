@@ -18,12 +18,11 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Iterable, Mapping, Sequence
+from typing import Final, Mapping, Sequence
 
 EXIT_OK: Final[int] = 0
 EXIT_VIOLATION: Final[int] = 1
@@ -388,7 +387,7 @@ def check_example_call_keywords(
                             tree = ast.parse(code_str)
                         except SyntaxError:
                             try:
-                                indented = "\n".join("    " + l for l in fence_lines)
+                                indented = "\n".join("    " + fence_line for fence_line in fence_lines)
                                 wrapped = f"async def _quench_dummy():\n{indented}"
                                 tree = ast.parse(wrapped)
                             except SyntaxError:
@@ -456,7 +455,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         repo_root = Path(args.workspace).resolve() if args.workspace else Path.cwd().resolve()
         _ensure_tool_surface_constants(repo_root)
-        from tool_surface_constants import EXPECTED_TOOL_NAMES, TOOL_COUNT
+        from tool_surface_constants import EXPECTED_TOOL_NAMES
 
         server_py = repo_root / "plugins" / "quench-dev-tasks" / "server" / "server.py"
         snapshot_json = repo_root / "docs" / "architecture" / "ide_tool_schemas.json"

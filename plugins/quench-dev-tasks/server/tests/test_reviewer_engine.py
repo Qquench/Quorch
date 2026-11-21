@@ -3,6 +3,7 @@
 Protocol-neutral test suite covering happy path, failure modes, async offload, deadline budgets,
 malformed corporate proxy responses, and Prompt Cache stability.
 """
+from email.message import Message
 import io
 import json
 import os
@@ -12,7 +13,6 @@ import urllib.error
 import warnings
 from unittest.mock import MagicMock, patch
 
-import anyio
 import pytest
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
@@ -24,7 +24,6 @@ from reviewer_engine import (
     ReviewerClient,
     ReviewerEngineError,
     ReviewerEngineUnavailableError,
-    _read_windows_env_var,
 )
 
 
@@ -165,7 +164,7 @@ def test_reviewer_client_401_no_retry_even_with_retries_configured(mock_ws):
         url="https://reviewer.internal.net/v1/chat/completions",
         code=401,
         msg="Unauthorized",
-        hdrs={},
+        hdrs=Message(),
         fp=err_fp,
     )
 
@@ -194,7 +193,7 @@ def test_reviewer_client_400_and_422_bad_request_fast_fail(mock_ws):
             url="https://reviewer.internal.net/v1/chat/completions",
             code=code,
             msg="Bad Request",
-            hdrs={},
+            hdrs=Message(),
             fp=err_fp,
         )
 
@@ -265,11 +264,13 @@ def test_reviewer_client_429_retry_and_succeed_with_retry_after(mock_ws):
     client = ReviewerClient(cfg.reviewer_engine)
 
     err_fp = io.BytesIO(b'{"error": "rate limit exceeded"}')
+    hdrs_429 = Message()
+    hdrs_429["Retry-After"] = "2"
     http_err_429 = urllib.error.HTTPError(
         url="https://reviewer.internal.net/v1/chat/completions",
         code=429,
         msg="Too Many Requests",
-        hdrs={"Retry-After": "2"},
+        hdrs=hdrs_429,
         fp=err_fp,
     )
 

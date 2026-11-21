@@ -2,7 +2,6 @@ import json
 import os
 import subprocess
 import sys
-import pytest
 
 # Ensure scripts directory is in sys.path
 SCRIPTS_DIR = os.path.normpath(

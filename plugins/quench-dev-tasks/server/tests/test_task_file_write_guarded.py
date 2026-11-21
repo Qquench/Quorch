@@ -22,10 +22,8 @@ import json
 import os
 import shutil
 import tempfile
-import threading
 import time
 from pathlib import Path
-from typing import Mapping
 import pytest
 import yaml
 
@@ -34,14 +32,8 @@ from task_status import (
     STATUS_CONFIRMED,
     STATUS_IN_PROGRESS,
     STATUS_COMPLETED,
-    STATUS_SKIPPED,
-    STATUS_REWORK,
-    STATUS_UNKNOWN,
 )
 from task_writer import (
-    EDITABLE_STATES,
-    RawTaskBlock,
-    TaskDocument,
     split_task_document,
     compose_task_document,
     write_task_file_guarded,
@@ -53,16 +45,13 @@ from task_writer import (
     StatusManifestMismatchError,
     TaskFileLockTimeoutError,
     PersistTargetRequiredError,
-    TaskNotFoundError,
 )
 from path_guard import PathTraversalError
 from tool_surface_constants import TOOL_COUNT, EXPECTED_TOOL_NAMES
 from hooks.file_scope_guard import check_task_status_guard
-import server
 from server import (
     dev_tasks_propose,
     dev_tasks_refine_spec,
-    dev_tasks_status,
 )
 
 
@@ -620,8 +609,6 @@ def test_hook_guard_roundtrip_allow(mock_workspace):
     write_task_file_guarded(ws, task_file, [SAMPLE_VALID_TASK_1], mode="append")
 
     abs_path = os.path.join(ws, "docs", "dev_tasks", task_file)
-    with open(abs_path, "r", encoding="utf-8") as f:
-        old_content = f.read()
 
     # Append Task 1.2
     write_task_file_guarded(ws, task_file, [SAMPLE_VALID_TASK_2], mode="append")

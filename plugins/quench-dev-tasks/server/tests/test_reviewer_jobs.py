@@ -2,14 +2,13 @@
 # Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 
 import asyncio
+from dataclasses import asdict
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 import sys
 import threading
 import time
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -80,6 +79,7 @@ def test_i1_terminal_cas_single_writer_wins(tmp_path):
     assert len(failures) == 1
 
     final_rec = supervisor._load_job_record(rec.session_id, rec.job_id)
+    assert final_rec is not None
     assert final_rec.state in (JobState.COMPLETED, JobState.CANCELLED)
     expected_state = JobState.COMPLETED if successes[0][0] == "COMPLETED" else JobState.CANCELLED
     assert final_rec.state == expected_state
@@ -132,6 +132,7 @@ def test_i3_reconcile_marks_foreign_jobs_orphaned(tmp_path):
     orphaned = supervisor.reconcile_on_load()
     assert "dead_job_1" in orphaned
     updated = supervisor._load_job_record("dead_sess_1", "dead_job_1")
+    assert updated is not None
     assert updated.state == JobState.ORPHANED
     assert updated.degraded_reason == "orphaned"
     assert not supervisor.registry.is_pinned(dead_rec.log_path)
@@ -178,7 +179,9 @@ def test_i7_result_durable_before_completed_state(tmp_path):
     )
     assert success is True
     loaded = supervisor._load_job_record(rec.session_id, rec.job_id)
+    assert loaded is not None
     assert loaded.state == JobState.COMPLETED
+    assert loaded.result_ref is not None
     assert Path(loaded.result_ref).is_file()
 
 
@@ -320,7 +323,7 @@ def test_poll_structured_nonterminal_projection(tmp_path):
 
     # 2. 显式传入 raw_text=True 抛出 TypeError
     with pytest.raises(TypeError) as excinfo:
-        supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)
+        supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)  # pyrefly: ignore[unexpected-keyword]
     assert "unexpected keyword argument" in str(excinfo.value) or "raw_text" in str(excinfo.value)
 
 
@@ -458,11 +461,13 @@ def test_heartbeat_single_line_projection_format():
         state=JobState.RUNNING,
         retry_after_seconds=2,
         log_ref="20260925_001_sess_abc.log",
-        progress=JobProgress(
-            phase=ReviewerPhase.STREAMING,
-            elapsed_s=12.4,
-            idle_s=1.0,
-            approx_reasoning_tokens=120,
+        progress=asdict(
+            JobProgress(
+                phase=ReviewerPhase.STREAMING,
+                elapsed_s=12.4,
+                idle_s=1.0,
+                approx_reasoning_tokens=120,
+            )
         ),
     )
     structured = project_poll_result(snapshot)
@@ -470,7 +475,7 @@ def test_heartbeat_single_line_projection_format():
     assert structured["state"] == "RUNNING"
 
     with pytest.raises(TypeError):
-        project_poll_result(snapshot, raw_text=True)
+        project_poll_result(snapshot, raw_text=True)  # pyrefly: ignore[unexpected-keyword]
 
 
 def test_progress_snapshot_and_no_is_terminal_state(tmp_path):
@@ -504,7 +509,7 @@ def test_progress_snapshot_and_no_is_terminal_state(tmp_path):
 def test_no_ctx_leak_into_reviewer_jobs():
     """静态断言 ctx 绝不泄露入 reviewer_jobs 标识符，且 JobRecord asdict 键集合纯净 (E1 / R2)。"""
     import inspect, dataclasses
-    from reviewer_jobs import JobRecord, ReviewerJobSupervisor
+    from reviewer_jobs import JobRecord
     import reviewer_jobs
 
     source = inspect.getsource(reviewer_jobs)

@@ -15,7 +15,6 @@ if hooks_dir not in sys.path:
 
 from file_scope_guard import (
     SHELL_TOOL_NAMES,
-    SHELL_WRITE_PATTERN,
     detect_shell_write_bypass,
 )
 from server import check_shell_write_isolation

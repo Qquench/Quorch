@@ -18,7 +18,6 @@ if SERVER_DIR not in sys.path:
 from workspace_lease import (
     WorkspaceLeaseGuard,
     WorkspaceLeaseNotHeldError,
-    LeaseGenerationLostError,
     LeaseTouchOutcome,
 )
 

@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 import ide_schema_export
 import test_spec_param_defaults_contract

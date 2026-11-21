@@ -14,13 +14,9 @@ Covers:
 6. Pre-flight fail-closed sandbox defense (INV-6) blocks escaping paths before allocating logs;
 7. dev_reviewer_consult strict non-blocking guidance card contract.
 """
-from dataclasses import asdict
-import json
 import os
 from pathlib import Path
 import time
-from typing import Any
-from unittest.mock import MagicMock
 import pytest
 
 from consultation import (
@@ -38,7 +34,6 @@ from reviewer_jobs import (
     POLL_TERMINAL_STATES,
     ReviewerJobSupervisor,
     ReviewerPhase,
-    SnapshotContractViolation,
     TERMINAL_STATES,
     project_terminal,
 )
@@ -174,7 +169,6 @@ def test_submit_authoritative_sequence_and_idempotency_skip_assembly(tmp_path: P
     3. 全新提交时 fail-closed 沙箱检查与上下文组装前置于 allocate_log_file
     """
     supervisor = ReviewerJobSupervisor(tmp_path)
-    ws = str(tmp_path)
 
     # 创建沙箱内测试文件
     f_ok = tmp_path / "valid.py"
@@ -217,7 +211,6 @@ def test_submit_authoritative_sequence_and_idempotency_skip_assembly(tmp_path: P
 def test_submit_preflight_fail_closed_sandbox_blocks_before_allocation(tmp_path: Path):
     """断言沙箱阻断（INV-6）：当 context_files 包含逃逸路径时，在 allocate_log 之前 fail-closed 拦截，零残留日志。"""
     supervisor = ReviewerJobSupervisor(tmp_path)
-    ws = str(tmp_path)
 
     initial_files = set(tmp_path.glob("**/*"))
 

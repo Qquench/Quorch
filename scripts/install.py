@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import errno
+import io
 import json
 import os
 import subprocess
@@ -31,9 +32,9 @@ from typing import Dict, Final, List, Literal, Optional, Tuple
 # 跨平台控制台 UTF-8 编码防御
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 

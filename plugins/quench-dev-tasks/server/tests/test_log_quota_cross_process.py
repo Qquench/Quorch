@@ -6,17 +6,15 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
-import pytest
-
-from log_naming import ActiveLogRegistry, enforce_unified_log_quota, norm_registry_key
+from log_naming import ActiveLogRegistry, norm_registry_key
 from reviewer_jobs import (
     JobProgress,
     JobRecord,
     JobState,
     ReviewerPhase,
     build_peer_liveness_probe,
-    compute_protected_logs,
 )
 
 
@@ -52,8 +50,9 @@ def _create_mock_job_record(
         result_ref=None,
     )
     from dataclasses import asdict
-    d = asdict(rec)
+    d: dict[str, Any] = asdict(rec)
     d["state"] = rec.state.value
+    assert rec.progress is not None
     d["progress"]["phase"] = rec.progress.phase.value
     with open(r_path, "w", encoding="utf-8") as f:
         json.dump(d, f)

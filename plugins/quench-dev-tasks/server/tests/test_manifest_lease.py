@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 
-import json
 import os
 import shutil
 import tempfile
-import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +11,6 @@ import yaml
 
 from manifest import (
     FencedTokenError,
-    Manifest,
     ManifestIntegrityError,
     TaskRecord,
     MANIFEST_REL_PATH,

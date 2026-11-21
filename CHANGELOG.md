@@ -3,6 +3,15 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-21] 2026-11-21_full_ide_diagnostics_cleanup.md
+
+- **Task 1.1**: Pyrefly 配置对齐与根目录 scripts/ 静态诊断清零
+- **Task 1.2**: 插件脚本与 Hook 层 Pyrefly/Ruff 诊断修复
+- **Task 1.3**: 核心服务端基础模块 Pyrefly 与 Ruff 诊断清零
+- **Task 1.4**: consultation / reviewer_engine / reviewer_jobs 运行时隐患与静态诊断修复
+- **Task 1.5**: 测试套件 Pyrefly 静态类型诊断全量清零
+- **Task 1.6**: 测试套件 Ruff 卫生清理与全仓零诊断终态验收
+
 ## [2026-11-21] 2026-11-21_v1_34_agent_brain_artifact_whitelist.md
 
 - **Task 34.1**: Agent Brain 运行期制品白名单、多段 ** Glob 路径段匹配加固与配置模板对齐

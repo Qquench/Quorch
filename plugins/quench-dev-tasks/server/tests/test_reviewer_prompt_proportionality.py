@@ -17,7 +17,6 @@ and boilerplate-free step guidelines across:
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -33,7 +32,6 @@ if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
-import reviewer_engine
 from reviewer_engine import PromptAssembler
 import server
 

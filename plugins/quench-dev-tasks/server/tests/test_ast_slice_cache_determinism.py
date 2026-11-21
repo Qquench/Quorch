@@ -14,11 +14,8 @@ Addresses Task 26.3:
 from __future__ import annotations
 
 import concurrent.futures
-import os
 from pathlib import Path
-from typing import List
 
-import pytest
 
 from code_explorer import explore_code_slices
 from consultation import resolve_context_files

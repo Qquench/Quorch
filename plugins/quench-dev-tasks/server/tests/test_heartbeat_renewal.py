@@ -8,26 +8,18 @@ import shutil
 import tempfile
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-import anyio
 import pytest
 import yaml
 
 from manifest import (
-    FencedTokenError,
-    Manifest,
     ManifestIntegrityError,
-    TaskRecord,
     MANIFEST_REL_PATH,
-    atomic_replace_manifest,
-    commit_lease,
     load_manifest,
     release_lease,
     touch_heartbeat,
 )
 from server import (
     dev_tasks_checkout,
-    dev_tasks_complete,
     dev_tasks_heartbeat,
 )
 
@@ -86,7 +78,6 @@ def test_touch_heartbeat_valid_renewal(mock_workspace):
     m1 = load_manifest(ws)
     rec1 = m1.records["2026-09-24_feature::1.1"]
     initial_monotonic = rec1.last_heartbeat_monotonic_ns
-    initial_wall = rec1.last_heartbeat_wall_utc
 
     # 显式注入未来时钟
     future_monotonic = initial_monotonic + 5_000_000_000

@@ -10,7 +10,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, NamedTuple, Optional, Union
+from typing import Any, Dict, List, Literal, NamedTuple, Union
 
 from path_guard import sanitize_workspace_path, PathTraversalError
 
@@ -134,12 +134,12 @@ def _parse_task_markdown_sections(text: str) -> Dict[str, Any]:
                 sec_content = "\n".join(inner[1:-1]).strip()
 
         if field_name == "affected_files":
-            files = [l.strip() for l in sec_content.splitlines() if l.strip() and not l.strip().startswith("```")]
+            files = [line.strip() for line in sec_content.splitlines() if line.strip() and not line.strip().startswith("```")]
             result["affected_files"] = files
         elif field_name == "steps":
-            result["steps"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
+            result["steps"] = [line.strip() for line in sec_content.splitlines() if line.strip()]
         elif field_name == "defensive_checks":
-            result["defensive_checks"] = [l.strip() for l in sec_content.splitlines() if l.strip()]
+            result["defensive_checks"] = [line.strip() for line in sec_content.splitlines() if line.strip()]
         else:
             result[field_name] = sec_content
 
@@ -282,7 +282,7 @@ def lint_task_physical_feasibility(
     # 1. 扫描受影响文件
     affected = task_dict.get("affected_files") or []
     if isinstance(affected, str):
-        affected = [l.strip() for l in affected.splitlines() if l.strip()]
+        affected = [line.strip() for line in affected.splitlines() if line.strip()]
 
     new_declared_files: List[str] = []
 
@@ -393,9 +393,9 @@ def lint_task_physical_feasibility(
     # 2. 校验 DoD 验证命令 (单测 dry-run 与命令注入防线)
     dod = task_dict.get("dod_commands") or []
     if isinstance(dod, str):
-        dod_lines = [l.strip() for l in dod.splitlines() if l.strip()]
+        dod_lines = [line.strip() for line in dod.splitlines() if line.strip()]
     elif isinstance(dod, list):
-        dod_lines = [str(l).strip() for l in dod if str(l).strip()]
+        dod_lines = [str(item).strip() for item in dod if str(item).strip()]
     else:
         dod_lines = []
 

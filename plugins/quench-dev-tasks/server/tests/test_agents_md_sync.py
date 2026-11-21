@@ -10,9 +10,7 @@ Guards:
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
-import pytest
 
 SERVER_DIR = Path(__file__).resolve().parent.parent
 PLUGIN_DIR = SERVER_DIR.parent

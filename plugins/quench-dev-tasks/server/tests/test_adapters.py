@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from adapters import (
-    EnvironmentAdapter,
     EnvironmentDetector,
     EnvironmentType,
     AntigravityAdapter,
@@ -119,7 +118,7 @@ def test_generic_cli_adapter(temp_workspace):
 
     # 降级生成工作区标识
     sid = adapter.extract_session_id({})
-    assert sid.startswith("cli-ws-")
+    assert sid is not None and sid.startswith("cli-ws-")
 
     # 决策格式化
     allow_text = adapter.format_decision("allow")

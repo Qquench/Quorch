@@ -23,8 +23,6 @@ from typing import Any, Final
 
 from tool_surface_constants import (
     HOOK_LOG_CODES,
-    HOOK_LOG_TAIL_BYTES,
-    MAX_NONTERMINAL_SNAPSHOT_BYTES,
     RESPONSE_BUDGET_BYTES,
     STATUS_COMPACT_MAX_HOOK_ENTRIES,
     STATUS_COMPACT_MAX_TASKS,

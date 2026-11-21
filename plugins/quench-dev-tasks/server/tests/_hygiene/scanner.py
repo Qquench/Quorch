@@ -6,10 +6,9 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Sequence
+from typing import Final
 
 from _hygiene.rules import (
-    MERGED_EXPANSION_ALLOWLIST,
     RULE_IDS,
     RULE_SCOPE,
     SCAN_ROOTS,

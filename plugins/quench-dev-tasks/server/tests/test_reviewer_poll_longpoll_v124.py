@@ -18,10 +18,8 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import anyio
 import pytest
 
 SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,22 +28,17 @@ if SERVER_DIR not in sys.path:
 
 from fastmcp import Context
 from tool_surface_constants import POLL_WAIT_MAX_S_HARD_CEILING
-from progress_bridge import ProgressBridge
 from reviewer_engine import _REVIEWER_LIMITER
 from reviewer_jobs import (
     POLL_TERMINAL_FIELDS,
-    JobProgress,
-    JobRecord,
     JobState,
     ReviewerJobSupervisor,
-    ReviewerPhase,
     _durable_write_json,
     _inode_key,
     _new_tracker_for_poll,
     _snapshot_business_state_scandir,
 )
-import server
-from server import _clamp_wait, _poll_impl, dev_reviewer_poll
+from server import _clamp_wait, dev_reviewer_poll
 
 
 @pytest.fixture(autouse=True)

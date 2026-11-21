@@ -11,7 +11,6 @@ import os
 import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -159,7 +158,7 @@ def test_cli_cache_dir_reparse_point_rejected(tmp_path: Path) -> None:
             _winapi.CreateJunction(str(target_dir), str(link_dir))
         else:
             link_dir.symlink_to(target_dir, target_is_directory=True)
-    except (OSError, PermissionError, NotImplementedError, AttributeError):
+    except (OSError, NotImplementedError, AttributeError):
         pytest.skip("Creating symlink / junction not supported in this test environment")
 
     try:

@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 
-import os
 import pytest
 import yaml
 from project_config import (
     load_project_config,
-    resolve_global_config_path,
     ConfigError,
     ConfigFault,
     ReviewerEngineConfig,

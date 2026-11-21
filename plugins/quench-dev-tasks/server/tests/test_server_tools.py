@@ -16,9 +16,6 @@ from server import (
     dev_tasks_archive,
     dev_tasks_set_bypass,
     dev_tasks_export_handoff_card,
-    dev_reviewer_submit,
-    dev_reviewer_poll,
-    dev_reviewer_cancel,
 )
 from tool_surface_constants import CHECKOUT_REASON_CODES
 
@@ -436,7 +433,7 @@ async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
             workspace_root=ws,
             job_id=rec.job_id,
             session_id="poll_tool_test",
-            raw_text=True,
+            raw_text=True,  # pyrefly: ignore[unexpected-keyword]
         )
     err_msg = str(excinfo.value)
     assert "raw_text" in err_msg or "unexpected keyword argument" in err_msg
@@ -471,6 +468,7 @@ async def test_dev_reviewer_poll_terminal_direct_output_and_dict(tmp_path):
 async def test_reviewer_poll_schema_unchanged():
     """断言 dev_reviewer_poll 参数 schema 中 raw_text 已移除，其余属性完备 (K1 / B4)。"""
     tool = await server.mcp.get_tool("dev_reviewer_poll")
+    assert tool is not None
     params = tool.parameters
     assert params["type"] == "object"
     assert params["additionalProperties"] is False
@@ -505,7 +503,7 @@ async def test_reviewer_poll_dirty_wait_max_s(tmp_path):
     """断言非法 wait_max_s 安全规整或返回结构化 error dict，绝无未捕获异常 (E9)。"""
     ws = str(tmp_path)
     # 1. 非法字符串
-    res_bad = await server.dev_reviewer_poll(ws, "job_123", "sid", wait_max_s="not_a_number")
+    res_bad = await server.dev_reviewer_poll(ws, "job_123", "sid", wait_max_s="not_a_number")  # pyrefly: ignore[bad-argument-type]
     assert isinstance(res_bad, dict)
     assert res_bad["status"] == "error"
     assert "must be an integer" in res_bad["error"]
@@ -514,7 +512,7 @@ async def test_reviewer_poll_dirty_wait_max_s(tmp_path):
     from reviewer_jobs import ReviewerJobSupervisor
     supervisor = ReviewerJobSupervisor.for_workspace(ws)
     rec = supervisor.submit({"query": "q", "session_id": "none_test"})
-    res_none = await server.dev_reviewer_poll(ws, rec.job_id, "none_test", wait_max_s=None)
+    res_none = await server.dev_reviewer_poll(ws, rec.job_id, "none_test", wait_max_s=None)  # pyrefly: ignore[bad-argument-type]
     assert isinstance(res_none, dict)
     assert res_none["state"] == "QUEUED"
 

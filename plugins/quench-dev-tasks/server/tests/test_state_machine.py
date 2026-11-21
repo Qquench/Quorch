@@ -9,8 +9,6 @@ from state_machine import (
     STATUS_CONFIRMED,
     STATUS_IN_PROGRESS,
     STATUS_COMPLETED,
-    STATUS_SKIPPED,
-    STATUS_REWORK,
     InvalidTransitionError,
     TaskNotFoundError,
 )

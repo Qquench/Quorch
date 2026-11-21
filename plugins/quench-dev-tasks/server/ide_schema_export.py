@@ -23,7 +23,6 @@ from tool_surface_constants import (
     MISSING,
     SCHEMA_META_KEY,
     SNAPSHOT_SCHEMA_VERSION,
-    TOOL_COUNT,
     _MissingSentinel,
     measure_tool_schema_bytes,
 )

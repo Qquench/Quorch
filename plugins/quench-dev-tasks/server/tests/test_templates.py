@@ -63,7 +63,7 @@ def test_template_required_placeholders():
     assert "{{FILE_GUARD_SCRIPT_PATH}}" in hooks_content
     assert "{{CONTEXT_INJECTOR_SCRIPT_PATH}}" in hooks_content
     # hooks.json 中的命令占位符（为避免 Antigravity 2.x Windows Go 进程转义 \" 导致崩溃，不加内层双引号）
-    assert f"{{{{PYTHON_EXECUTABLE}}}} {{{{FILE_GUARD_SCRIPT_PATH}}}}" in hooks_content
+    assert "{{PYTHON_EXECUTABLE}} {{FILE_GUARD_SCRIPT_PATH}}" in hooks_content
 
 
 def test_render_with_unix_paths():

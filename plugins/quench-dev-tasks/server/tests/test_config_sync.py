@@ -3,13 +3,12 @@ import os
 from pathlib import Path
 import sys
 import time
-import pytest
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from config_sync import auto_heal_configs, is_workspace_plugin_mounted, render_plugin_configs
+from config_sync import auto_heal_configs, is_workspace_plugin_mounted
 
 
 def test_auto_heal_noop_when_fresh(tmp_path):

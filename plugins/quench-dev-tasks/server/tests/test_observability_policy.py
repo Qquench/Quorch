@@ -23,7 +23,6 @@ import json
 import os
 from pathlib import Path
 import threading
-from typing import List
 
 import pytest
 
@@ -31,7 +30,6 @@ from observability_policy import (
     MAX_RECORD_BYTES,
     ObservabilityDecision,
     SinkMode,
-    VerdictAuditSink,
     make_verdict_sink,
     resolve_observability_policy,
 )
@@ -55,7 +53,7 @@ def test_observability_decision_immutability():
     )
     assert dec.max_record_bytes == 16 * 1024
     with pytest.raises(Exception):
-        dec.stream_enabled = False  # frozen dataclass
+        setattr(dec, "stream_enabled", False)  # frozen dataclass
 
 
 def test_resolve_observability_policy_matrix(tmp_path: Path):

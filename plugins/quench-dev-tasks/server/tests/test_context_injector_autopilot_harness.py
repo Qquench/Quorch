@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,12 +31,10 @@ import context_injector
 from context_injector import (
     _HALT_STATES,
     _RELAY_STATES,
-    _STOP_HOOK_RELAY_STATES,
     _atomic_write_json,
     _build_reminder,
     _handle_stop_event,
     _is_external_api_available,
-    _resolve_harness_baton,
     main,
 )
 

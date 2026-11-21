@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Final, Any, Mapping, Callable
+from typing import Final, Any, Callable
 
 # 全仓库唯一 SESSION_ID_PATTERN SSOT (128位，叶子节点防环形导入)
 SESSION_ID_PATTERN: Final[re.Pattern] = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")

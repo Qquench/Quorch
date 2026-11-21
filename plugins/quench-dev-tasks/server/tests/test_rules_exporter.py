@@ -14,7 +14,7 @@ SCRIPTS_DIR = os.path.normpath(
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-from rules_exporter import RulesExporter, DEFAULT_FALLBACK_RULES
+from rules_exporter import RulesExporter
 
 PYTHON_EXE = sys.executable
 EXPORTER_SCRIPT = os.path.join(SCRIPTS_DIR, "rules_exporter.py")

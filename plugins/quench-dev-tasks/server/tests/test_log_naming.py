@@ -30,7 +30,6 @@ from log_naming import (
     enforce_unified_log_quota,
     _LOG_FILENAME_REGEX,
     norm_registry_key,
-    _ROTATION_SUFFIX_REGEX,
 )
 
 

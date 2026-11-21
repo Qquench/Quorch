@@ -4,7 +4,6 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
-import pytest
 
 # Ensure hook and server modules can be imported
 server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,12 +16,10 @@ if hooks_dir not in sys.path:
 from file_scope_guard import (
     DEFAULT_AGENT_BRAIN_PATTERNS,
     matches_pattern,
-    resolve_physical_path,
     is_agent_brain_artifact,
     verify_session_integrity,
     safe_clean_corrupted_bypass,
     is_session_bypass_matched,
-    SESSION_ID_PATTERN,
 )
 
 
@@ -151,7 +148,7 @@ def test_concurrent_bypass_file_race(tmp_path):
         try:
             for _ in range(20):
                 # Concurrently read/check bypass
-                matched = is_session_bypass_matched(ws_str, f"file_{worker_id}.py", "concurrent-sess")
+                is_session_bypass_matched(ws_str, f"file_{worker_id}.py", "concurrent-sess")
                 time.sleep(0.005)
         except Exception as e:
             errors.append(e)

@@ -6,12 +6,10 @@ import shutil
 import tempfile
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 import pytest
 import yaml
 
 from manifest import (
-    load_manifest,
     touch_heartbeat,
     commit_lease,
     release_lease,

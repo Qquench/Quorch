@@ -10,7 +10,6 @@ Locks in:
 - B7: Zero wait (wait_max_s=0) immediate return without sleep
 """
 import asyncio
-import inspect
 import os
 import sys
 import time
@@ -21,7 +20,6 @@ if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
 from reviewer_jobs import ReviewerJobSupervisor, JobState, POLL_TERMINAL_STATES, _durable_write_json
-from reviewer_engine import format_heartbeat_line
 import server
 
 

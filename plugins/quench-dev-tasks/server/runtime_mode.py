@@ -11,7 +11,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple, TypedDict
+from typing import Any, Dict, Literal, Optional, Tuple, TypedDict
 
 from filelock import FileLock, Timeout
 
@@ -184,7 +184,7 @@ def load_runtime_mode(workspace_root: str, external_api_available: bool) -> Effe
     runner_subagent_model_hint = raw_data.get("runner_subagent_model_hint")
     autopilot_dict = raw_data.get("autopilot", {})
 
-    if explicit_mode in VALID_ORCHESTRATION_MODES:
+    if explicit_mode == "standard" or explicit_mode == "inverted":
         effective_mode: OrchestrationMode = explicit_mode
         mode_source: ModeSource = "explicit"
         fallback_notice = None

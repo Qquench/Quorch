@@ -5,9 +5,7 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
+from typing import Any
 
 from log_naming import (
     REVIEWER_LOG_QUOTA_KEEP,
@@ -53,8 +51,9 @@ def _create_job_record(
         result_ref=None,
     )
     from dataclasses import asdict
-    d = asdict(rec)
+    d: dict[str, Any] = asdict(rec)
     d["state"] = rec.state.value
+    assert rec.progress is not None
     d["progress"]["phase"] = rec.progress.phase.value
     with open(r_path, "w", encoding="utf-8") as f:
         json.dump(d, f)

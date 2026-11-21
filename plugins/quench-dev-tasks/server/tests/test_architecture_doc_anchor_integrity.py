@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-import pytest
 
 SERVER_DIR = Path(__file__).resolve().parent.parent
 PLUGIN_DIR = SERVER_DIR.parent
@@ -72,7 +71,7 @@ def test_architecture_inv_table_anchors_exist() -> None:
 
     for row in rows:
         assert len(row) >= 4, f"Malformed invariant row: {row}"
-        inv_id_raw, inv_name, enforcement, test_file_cell = row[0], row[1], row[2], row[3]
+        inv_id_raw, test_file_cell = row[0], row[3]
 
         id_match = re.search(r"INV-\d+", inv_id_raw)
         assert id_match, f"Failed to extract INV ID from: {inv_id_raw}"

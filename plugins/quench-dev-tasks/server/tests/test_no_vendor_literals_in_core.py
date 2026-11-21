@@ -8,7 +8,6 @@ or single-line pragmas (# vendor-literal: allow).
 """
 from dataclasses import dataclass
 from pathlib import Path
-import time
 from typing import Iterator
 
 import pytest

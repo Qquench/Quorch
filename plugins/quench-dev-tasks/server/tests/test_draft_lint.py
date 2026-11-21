@@ -8,7 +8,6 @@ from schema_validator import lint_task_physical_feasibility
 from server import (
     dev_tasks_status,
     dev_tasks_promote_draft,
-    dev_tasks_propose,
 )
 
 

@@ -2,8 +2,8 @@
 """Unit tests for ReviewerEngine generic probes, vendor-neutral ReviewerClient,
 and backward-compatible DeepSeekClient alias.
 """
+from email.message import Message
 import io
-import json
 import urllib.error
 from unittest.mock import MagicMock, patch
 
@@ -14,12 +14,7 @@ from reviewer_engine import (
     ReviewerAuthError,
     ReviewerAuthenticationError,
     ReviewerClient,
-    ReviewerEngineUnavailableError,
-    ReviewerError,
-    ReviewerNotConfiguredError,
-    StreamChunk,
     UsageSnapshot,
-    _dig,
     extract_cached_tokens,
     extract_reasoning_text,
     extract_usage,
@@ -128,7 +123,7 @@ def test_client_401_error_message_vendor_neutrality():
         url="http://localhost:11434/v1/chat/completions",
         code=401,
         msg="Unauthorized",
-        hdrs={},
+        hdrs=Message(),
         fp=err_fp,
     )
 

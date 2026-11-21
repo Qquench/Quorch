@@ -8,41 +8,38 @@ real-time reasoning stream persistence, and strict anti-roleplaying degradation 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import inspect
 import json
 import os
 from pathlib import Path
 import re
+import sys
 import threading
 import time
-from typing import Any, Dict, Final, List, Literal, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Final, Literal, Mapping, Optional, Sequence
 from uuid import uuid4
 import weakref
 
+import filelock
 from filelock import FileLock
 from path_guard import sanitize_workspace_path, PathTraversalError
 from project_config import (
     QuenchStackConfig,
-    ReviewerEngineConfig,
-    RunnerProfile,
     check_self_verification_warning,
     create_reviewer_client,
 )
 from reviewer_engine import (
     AdaptiveHeartbeatSink,
-    AssembledPrompt,
     CacheTelemetryRecord,
     CodeSlice,
     CoalescingTextSink,
     CONSULT_MODE_INSTRUCTIONS,
-    OUTPUT_PROTOCOLS,
     PromptAssembler,
     ReviewerBadRequestError,
     ReviewerClient,
     ReviewerEngineError,
-    ReviewerEngineUnavailableError,
     RollingJsonlTelemetrySink,
     RotatingFileSink,
     compute_prompt_hash,
@@ -53,7 +50,6 @@ from reviewer_engine import (
 from log_naming import (
     allocate_log_file,
     enforce_unified_log_quota,
-    gc_by_filename_order,
     SESSION_ID_PATTERN,
 )
 
@@ -448,7 +444,6 @@ async def _emit_consultation_audit(
     # 3. 咨询遥测账本 consultation_telemetry.jsonl
     if telemetry_enabled:
         try:
-            import filelock
             from observability_policy import (
                 ConsultationTelemetryRecord,
                 _get_consultation_telemetry_sink,
@@ -690,7 +685,7 @@ def resolve_context_files(
                 skipped_files.append(p_str)
                 continue
             start_line = explicit_start
-            req_end = explicit_end
+            req_end = explicit_end if explicit_end is not None else total_file_lines
             if req_end - start_line + 1 > max_lines_per_slice:
                 req_end = start_line + max_lines_per_slice - 1
             end_line = min(total_file_lines, req_end)
@@ -1063,7 +1058,7 @@ async def _execute_consultation(
                 clean_messages = strip_reasoning_from_history(messages)
                 timeout_s = getattr(re_cfg, "timeout_seconds", 60)
 
-                async def _call_engine(engine_messages: list[dict[str, Any]]):
+                async def _call_engine(engine_messages: list[dict[str, Any]]) -> dict[str, Any]:
                     content_parts: list[str] = []
                     last_flush_t = time.monotonic()
                     coalescer = CoalescingTextSink(sink.write_chunk_text, tag="reasoning")
@@ -1292,7 +1287,8 @@ async def _execute_consultation(
                         self_verification_warning=self_verification_warning,
                     )
 
-                findings_text = raw_result.get("content", "")
+                raw_content = raw_result.get("content", "") if isinstance(raw_result, Mapping) else ""
+                findings_text: str = raw_content if isinstance(raw_content, str) else str(raw_content or "")
                 all_findings = findings_text
                 usage_snap = extract_usage(raw_result)
                 total_usage["prompt_tokens"] += usage_snap.prompt_tokens

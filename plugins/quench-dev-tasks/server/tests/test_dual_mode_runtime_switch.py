@@ -1,20 +1,15 @@
 """Tests for dual-mode runtime persistence, hot switching, CAS re-arm, and backward compatibility."""
 
 import os
-import json
 import time
 import subprocess
 from filelock import FileLock
-import pytest
 
 from runtime_mode import (
     load_runtime_mode,
     update_runtime_mode,
     get_runtime_mode_path,
     get_runtime_mode_lock_path,
-    generate_session_role_contract,
-    AutopilotRuntimeState,
-    EffectiveModeSnapshot,
 )
 from server import dev_tasks_status
 

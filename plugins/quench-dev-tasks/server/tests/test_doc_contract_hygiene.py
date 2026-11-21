@@ -6,7 +6,6 @@ subagent status call bans, C3 delivery card triggers, and deprecation notices re
 
 from pathlib import Path
 import re
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 

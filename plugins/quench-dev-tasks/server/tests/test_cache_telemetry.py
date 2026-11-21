@@ -169,7 +169,7 @@ async def test_async_aemit_concurrency(tmp_path: Path) -> None:
     await asyncio.gather(*tasks)
 
     assert telemetry_path.exists()
-    lines = [l.strip() for l in telemetry_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [line_str.strip() for line_str in telemetry_path.read_text(encoding="utf-8").splitlines() if line_str.strip()]
     assert len(lines) == 20
     for line in lines:
         data = json.loads(line)

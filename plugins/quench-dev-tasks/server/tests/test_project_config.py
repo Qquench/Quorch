@@ -5,6 +5,7 @@ import os
 import tempfile
 import pytest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from project_config import (
@@ -224,7 +225,7 @@ def test_config_credentials_security_rejections(temp_workspace):
     yaml_file = agents_dir / "quench_stack.yaml"
 
     # 1. 尝试在 api_key_env 中直接填入明文 sk- 密钥
-    base_data = {
+    base_data: dict[str, Any] = {
         "project_name": "test_sec",
         "reviewer_engine": {
             "provider": "custom",

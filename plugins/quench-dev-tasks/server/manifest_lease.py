@@ -19,9 +19,7 @@ import filelock
 from manifest import (
     load_manifest,
     touch_heartbeat,
-    Manifest,
     TaskRecord,
-    ManifestIntegrityError,
     MANIFEST_REL_PATH,
     atomic_replace_manifest,
     _get_git_metadata,

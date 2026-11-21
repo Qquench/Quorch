@@ -1,6 +1,5 @@
 import os
 import sys
-import pytest
 
 SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SERVER_DIR not in sys.path:

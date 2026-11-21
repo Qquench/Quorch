@@ -12,6 +12,7 @@ import codecs
 import functools
 import hashlib
 import inspect
+import io
 import json
 import os
 import queue
@@ -30,6 +31,7 @@ from datetime import datetime, timezone
 from typing import (
     Any,
     AsyncIterator,
+    Awaitable,
     Callable,
     ClassVar,
     Dict,
@@ -45,14 +47,12 @@ from typing import (
     TextIO,
     Tuple,
     TypedDict,
-    Union,
 )
 
 import anyio
 from filelock import FileLock
 
 from project_config import QuenchStackConfig, ReviewerEngineConfig
-from log_naming import ActiveLogRegistry, norm_registry_key
 from observability_policy import (
     MAX_RECORD_BYTES,
     ObservabilityDecision,
@@ -65,9 +65,9 @@ from observability_policy import (
 # Windows UTF-8 控制台设防
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -921,6 +921,7 @@ class AdaptiveHeartbeatSink:
 
     def on_heartbeat(self, tokens_so_far: int, elapsed_s: float) -> None:
         should_send = False
+        file_msg = ""
         with self._lock:
             now = self._clock()
             if self._should_emit(tokens_so_far, now):
@@ -944,9 +945,12 @@ class AdaptiveHeartbeatSink:
             try:
                 res = self.progress_emit(tokens_so_far, elapsed_s)
                 if inspect.isawaitable(res):
+                    async def _run_awaitable(awaitable: Awaitable[Any]) -> Any:
+                        return await awaitable
                     try:
                         loop = asyncio.get_running_loop()
-                        loop.create_task(res)
+                        coro = res if asyncio.iscoroutine(res) else _run_awaitable(res)
+                        loop.create_task(coro)
                     except RuntimeError:
                         pass
             except Exception:
@@ -954,6 +958,7 @@ class AdaptiveHeartbeatSink:
 
     async def apulse(self, *, tokens_so_far: int, elapsed_s: float, step: str = "thinking") -> None:
         should_send = False
+        file_msg = ""
         with self._lock:
             now = self._clock()
             if self._should_emit(tokens_so_far, now):
@@ -2152,7 +2157,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "ReviewerClient",
-    "DeepSeekClient",  # vendor-literal: allow
+    "DeepSeekClient",  # vendor-literal: allow  # noqa: F822
     "UsageSnapshot",
     "StreamChunk",
     "TELEMETRY_RECORD_BYTES",

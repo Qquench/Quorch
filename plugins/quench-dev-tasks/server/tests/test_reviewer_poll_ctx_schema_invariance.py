@@ -13,12 +13,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Any, Mapping, get_args, get_type_hints
+from typing import get_args, get_type_hints
 
-import pytest
 from fastmcp import Context, FastMCP
 
 TEST_FILE = Path(__file__).resolve()

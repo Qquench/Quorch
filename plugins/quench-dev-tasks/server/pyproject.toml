@@ -19,8 +19,9 @@ quench = "cli:main"
 quorch = "cli:main"
 
 [tool.pyrefly]
-search-path = ["../../../scripts", "tests"]
+search-path = ["../../../scripts", "../scripts", "hooks", "tests"]
 
 [tool.pyrefly.errors]
 unnecessary-type-conversion = "ignore"
+untyped-import = "ignore"
 

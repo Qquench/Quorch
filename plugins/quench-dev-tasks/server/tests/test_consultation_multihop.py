@@ -10,19 +10,14 @@ Verifies:
 6. Native multi-turn loop and ReviewerBadRequestError (400/422) fallback to single-turn delivery.
 """
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 import json
 import threading
 import pytest
 
 from consultation import (
-    CodeSlice,
     ConsultRequest,
     HopBudget,
-    MAX_TOTAL_INJECTION_CHARS,
-    MIN_TELEMETRY_SAMPLES,
-    MULTI_HOP_DEMAND_PERCENT,
-    MULTI_HOP_DEMAND_THRESHOLD,
     _emit_consultation_audit,
     _read_telemetry_demand_sync,
     evaluate_multi_hop_gate,
@@ -290,8 +285,8 @@ async def test_emit_consultation_audit_idempotent_latch(tmp_path: Path):
     assert t_file.is_file()
     assert v_file.is_file()
 
-    t_lines = [l for l in t_file.read_text(encoding="utf-8").splitlines() if l.strip()]
-    v_lines = [l for l in v_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    t_lines = [line_str for line_str in t_file.read_text(encoding="utf-8").splitlines() if line_str.strip()]
+    v_lines = [line_str for line_str in v_file.read_text(encoding="utf-8").splitlines() if line_str.strip()]
 
     assert len(t_lines) == 1
     assert len(v_lines) == 1
@@ -402,13 +397,13 @@ async def test_run_consultation_multihop_turn_and_bad_request_fallback(tmp_path:
     assert "thought" not in assistant_msgs[0]
 
     # 5. 验证审计日志仅有一条落盘（落盘闩锁保证单次落盘）
-    t_lines = [l for l in t_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    t_lines = [line_str for line_str in t_file.read_text(encoding="utf-8").splitlines() if line_str.strip()]
     # 原有 25 条预置记录 + 1 条本次咨询落盘
     assert len(t_lines) == 26
     last_record = json.loads(t_lines[-1])
     assert last_record["session_id"] == "sess_fallback_test"
     assert last_record["mode"] == "critique"
-    v_lines = [l for l in (log_dir / "verdicts.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    v_lines = [line_str for line_str in (log_dir / "verdicts.jsonl").read_text(encoding="utf-8").splitlines() if line_str.strip()]
     assert len(v_lines) == 1
     v_last = json.loads(v_lines[-1])
     assert v_last["payload"]["status"] == "ok"

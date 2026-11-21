@@ -3,8 +3,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
-import pytest
 
 PYTHON_EXE = sys.executable
 HOOKS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")

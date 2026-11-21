@@ -9,9 +9,7 @@ from pathlib import Path
 
 from project_config import (
     CURRENT_SCHEMA_VERSION,
-    QuenchStackConfig,
     load_project_config,
-    migrate_config_if_needed,
 )
 
 

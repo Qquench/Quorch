@@ -6,7 +6,6 @@ Guarantees consistent security semantics across POSIX (Linux/macOS) and Windows 
 """
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 import stat

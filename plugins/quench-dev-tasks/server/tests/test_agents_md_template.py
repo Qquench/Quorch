@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import sys
 import types
 
 import pytest
@@ -49,8 +48,9 @@ def _import_init_project() -> types.ModuleType:
         "init_project",
         os.path.join(SCRIPTS_DIR, "init_project.py"),
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    spec.loader.exec_module(module)
     return module
 
 

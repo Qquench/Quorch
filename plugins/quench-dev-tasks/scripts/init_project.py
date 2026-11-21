@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
@@ -12,9 +13,9 @@ import sys
 # Ensure UTF-8 output on Windows
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 

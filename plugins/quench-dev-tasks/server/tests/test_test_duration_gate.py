@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 import sys
 from pathlib import Path
@@ -17,11 +16,8 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import check_test_duration_baselines as gate
 from check_test_duration_baselines import (
     TIER2_ABSOLUTE_FLOOR_S,
-    TIER2_WARN_MULTIPLIER,
-    TIER2_PANIC_MULTIPLIER,
     RATCHET_CONFIRM_ROUNDS,
     PANIC_DOWNGRADE_STREAK,
     TIER2_DEFAULT_BASELINE_S,
@@ -31,7 +27,6 @@ from check_test_duration_baselines import (
     save_tier2_baseline,
     classify_tier2,
     classify_tier2_samples,
-    Tier2Verdict,
 )
 
 

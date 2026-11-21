@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 from unittest.mock import patch
-import pytest
 
 # Ensure hook and server modules can be imported
 server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

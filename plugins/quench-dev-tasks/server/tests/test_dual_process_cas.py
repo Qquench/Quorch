@@ -3,13 +3,12 @@
 
 import hashlib
 import inspect
-import json
 import multiprocessing
+from multiprocessing.synchronize import Barrier
 import os
 import shutil
 import tempfile
-import time
-from pathlib import Path
+from typing import Any
 import pytest
 import yaml
 
@@ -251,7 +250,7 @@ def test_atomic_replace_manifest_same_directory(mock_cas_workspace, monkeypatch)
     m = load_manifest(ws)
     manifest_dir = os.path.dirname(os.path.join(ws, MANIFEST_REL_PATH))
 
-    captured_dirs = []
+    captured_dirs: list[Any] = []
     orig_mkstemp = tempfile.mkstemp
 
     def mock_mkstemp(*args, **kwargs):
@@ -262,6 +261,7 @@ def test_atomic_replace_manifest_same_directory(mock_cas_workspace, monkeypatch)
 
     atomic_replace_manifest(ws, m)
     assert len(captured_dirs) == 1
+    assert captured_dirs[0] is not None
     assert os.path.samefile(captured_dirs[0], manifest_dir)
     assert os.path.isdir(manifest_dir)
     assert os.path.isfile(os.path.join(ws, MANIFEST_REL_PATH))
@@ -271,7 +271,7 @@ def test_atomic_replace_manifest_same_directory(mock_cas_workspace, monkeypatch)
 # 4. 双进程 Barrier 强制交叠并发 CAS 零脏写测试
 # ==============================================================================
 
-def _worker_commit_lease(ws: str, task_file: str, token: str, barrier: multiprocessing.Barrier, queue: multiprocessing.Queue):
+def _worker_commit_lease(ws: str, task_file: str, token: str, barrier: Barrier, queue: multiprocessing.Queue):
     """子进程工作函数：在 Barrier 处同步对齐并发执行 commit_lease。"""
     try:
         barrier.wait(timeout=5.0)

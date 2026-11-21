@@ -1,4 +1,3 @@
-import pytest
 from schema_validator import validate_task_schema
 
 def test_valid_task_schema():

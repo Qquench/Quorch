@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Unit tests for AdaptiveHeartbeatSink, ladder backoff, event-gating and MCP progress channel."""
-import asyncio
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock

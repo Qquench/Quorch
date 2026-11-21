@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -97,7 +96,10 @@ async def test_emit_first_frame_not_over_coalesced():
     """
     ctx = FakeContext()
     cur_time = 100.0
-    clock = lambda: cur_time
+
+    def clock() -> float:
+        return cur_time
+
     bridge = ProgressBridge.from_context(ctx, min_interval_s=1.0, clock=clock)
     assert bridge is not None
 
@@ -127,8 +129,12 @@ async def test_penetration_on_state_change():
     """B-1: 任务状态发生变迁时（如 QUEUED -> RUNNING），强制穿透合流窗口。"""
     ctx = FakeContext()
     cur_time = 100.0
-    clock = lambda: cur_time
+
+    def clock() -> float:
+        return cur_time
+
     bridge = ProgressBridge.from_context(ctx, min_interval_s=1.0, clock=clock)
+    assert bridge is not None
 
     snap1 = make_snapshot(state="QUEUED", phase="QUEUED")
     await bridge.emit(snap1)
@@ -160,6 +166,7 @@ async def test_emit_raises_contract_violation():
     """
     ctx = FakeContext()
     bridge = ProgressBridge.from_context(ctx)
+    assert bridge is not None
 
     # 传入非 PollSnapshot 类型
     with pytest.raises(SnapshotContractViolation):
@@ -180,15 +187,16 @@ async def test_fail_open_on_network_exception():
 
     ctx.report_progress = buggy_report
     bridge = ProgressBridge.from_context(ctx)
+    assert bridge is not None
 
     snap = make_snapshot()
     # emit 绝不抛出 ConnectionResetError
     await bridge.emit(snap)
-    assert bridge._disabled is True
+    assert bridge._disabled
 
     # 后续 emit 直接静默跳过
     await bridge.emit(snap)
-    assert bridge._disabled is True
+    assert bridge._disabled
 
 
 @pytest.mark.tier1_fast
@@ -199,6 +207,7 @@ async def test_thinking_content_leak_defense():
     """
     ctx = FakeContext()
     bridge = ProgressBridge.from_context(ctx)
+    assert bridge is not None
 
     secret_findings = "CONFIDENTIAL_THINKING_COT_DATA_XYZ"
     snap = make_snapshot(
@@ -227,8 +236,9 @@ async def test_cancelled_error_passthrough():
     async def cancelled_report(*args, **kwargs):
         raise asyncio.CancelledError()
 
-    ctx.report_progress = cancelled_report
+    setattr(ctx, "report_progress", cancelled_report)
     bridge = ProgressBridge.from_context(ctx)
+    assert bridge is not None
 
     with pytest.raises(asyncio.CancelledError):
         await bridge.emit(make_snapshot())

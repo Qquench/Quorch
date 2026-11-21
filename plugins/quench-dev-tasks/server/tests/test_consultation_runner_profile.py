@@ -1,5 +1,3 @@
-import asyncio
-import os
 from pathlib import Path
 import sys
 from typing import Any, List, Optional
@@ -8,10 +6,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from consultation import ConsultRequest, ConsultResult, run_consultation
 from project_config import (
-    QuenchStackConfig,
-    ReviewerEngineConfig,
     RunnerProfile,
     check_self_verification_warning,
     load_project_config,

@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 
-import json
 import os
 import shutil
 import tempfile
-import time
 from datetime import datetime, timezone
 import pytest
 import yaml
@@ -15,14 +13,8 @@ from manifest import (
     release_lease,
     touch_heartbeat,
 )
-from project_config import (
-    load_project_config,
-    QuenchStackConfig,
-    ReaperPolicyConfig,
-)
 from manifest_lease import (
     HealthVerdict,
-    ProbeEvidence,
     probe_lease_health,
 )
 from server import (

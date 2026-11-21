@@ -14,21 +14,15 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
 from cli import _mask_secret, cmd_check_engine, main
-from project_config import QuenchStackConfig, ReviewerEngineConfig
 from server import (
     _EXEMPTION_PATTERN,
     _TEST_FILE_PATTERN,
-    _audit_test_changes,
     dev_tasks_checkout,
     dev_tasks_complete,
     dev_tasks_confirm,

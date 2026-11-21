@@ -8,13 +8,11 @@ import os
 import pytest
 import yaml
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 from manifest import (
     load_manifest,
     touch_heartbeat,
     TaskRecord,
-    MANIFEST_REL_PATH,
     atomic_replace_manifest,
 )
 from manifest_lease import reclaim_stale_task
@@ -22,9 +20,7 @@ from server import dev_tasks_confirm, dev_tasks_reclaim
 from state_machine import (
     STATUS_CONFIRMED,
     STATUS_IN_PROGRESS,
-    STATUS_PENDING,
     parse_task_file,
-    transition_task,
 )
 
 

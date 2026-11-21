@@ -168,7 +168,7 @@ def test_tp3_zero_net_coverage_loss_and_allowlist(baseline_data, scanner):
     expansions = merged_set - baseline_set
     unauthorized_expansions = expansions - MERGED_EXPANSION_ALLOWLIST
     assert not unauthorized_expansions, (
-        f"Unauthorized expansion in merged scope not in allowlist:\n"
+        "Unauthorized expansion in merged scope not in allowlist:\n"
         + "\n".join(str(e) for e in sorted(unauthorized_expansions)[:10])
     )
 

@@ -14,14 +14,9 @@ from autopilot_harness import (
     compute_batch_overlap_ratio,
     resolve_runner_dispatch_channel,
     _extract_top_module_dir,
-    _DEEP_SUBMODULE_CONTAINERS,
-    _SHALLOW_SUBMODULE_CONTAINERS,
     TaskStateSnapshot,
     LastEventSnapshot,
-    HarnessNextAction,
-    DEFAULT_MAX_REVIEW_ROUNDS,
     DEFAULT_MAX_RUNNER_TASKS,
-    DEFAULT_BATCH_OVERLAP_THRESHOLD,
 )
 
 
@@ -554,7 +549,7 @@ def test_inject_harness_next_action_standard_mode_bypasses_archive_scan(tmp_path
         external_api_available=True,
     )
 
-    archive_scanned = False
+    archive_scanned: bool = False
     orig_extract = server._extract_batch_scoped_files
 
     def tracked_extract(filepath, tasks):

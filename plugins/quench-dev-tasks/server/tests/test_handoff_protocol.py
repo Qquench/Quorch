@@ -17,7 +17,6 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List
 import pytest
 import yaml
 
@@ -27,7 +26,6 @@ if server_dir not in sys.path:
     sys.path.insert(0, server_dir)
 
 from project_config import (
-    QuenchStackConfig,
     ReviewerEngineConfig,
     load_project_config,
 )

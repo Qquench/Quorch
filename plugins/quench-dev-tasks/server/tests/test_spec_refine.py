@@ -3,24 +3,18 @@
 Rigorous mock tests covering AST slicing, CJK safety, path containment, circular imports,
 schema validation, and offline engine fallback.
 """
-import io
 import json
 import os
-import shutil
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 import pytest
 
 from code_explorer import (
-    ExploreResult,
     extract_ast_interfaces,
     explore_code_slices,
     is_path_safe,
     is_sensitive_file,
 )
-from project_config import QuenchStackConfig, ReviewerEngineConfig
 from server import (
     _parse_task_markdown_sections,
     dev_tasks_escalate,

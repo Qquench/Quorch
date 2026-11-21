@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import os
 import time
 import unicodedata
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 import warnings
 import pytest
@@ -15,7 +15,6 @@ from project_config import (
     AuditGatePolicy,
     ConfigError,
     ConfigFault,
-    SAFETY_KEY_DOMAINS,
     is_protected_config_path,
     load_project_config,
     migrate_and_validate,
@@ -175,7 +174,7 @@ def test_protected_config_fail_closed():
     class BadObj:
         def __str__(self):
             raise RuntimeError("Corrupted string conversion")
-    assert is_protected_config_path(BadObj()) is True
+    assert is_protected_config_path(cast(str, BadObj())) is True
 
 
 def test_nfd_mismatch():

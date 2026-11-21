@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
+from typing import Any
 
 # Add server and server/tests to sys.path to access constants and fixtures
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +26,6 @@ if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
 from fixtures.response_payloads import TYPICAL_PAYLOADS
-from response_compactor import canonical_json
 from tool_surface_constants import (
     EXPECTED_TOOL_NAMES,
     RESPONSE_BUDGET_BYTES,

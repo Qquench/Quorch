@@ -15,14 +15,13 @@ import json
 import os
 import shlex
 import socket
-import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, Literal, TypedDict
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -314,7 +313,7 @@ def probe_client_capabilities(
                     result = data["result"]
                 else:
                     status = "error"
-        except (socket.timeout, TimeoutError):
+        except TimeoutError:
             status = "timeout"
         except urllib.error.HTTPError as e:
             if e.code in (404, 502, 503, 504):

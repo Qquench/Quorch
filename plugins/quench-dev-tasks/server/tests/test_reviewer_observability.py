@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,9 +19,9 @@ if SERVER_DIR not in sys.path:
 from reviewer_engine import (
     AdaptiveHeartbeatSink,
     DeepSeekClient,
-    ProgressSink,
     ReviewerEngineConfig,
     RotatingFileSink,
+    TelemetryRecord,
     ThoughtChunk,
     compute_repetition_score,
     log_telemetry_event,
@@ -127,7 +128,7 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
     """验证 AdaptiveHeartbeatSink 纯拉模型落盘与 FILE 常驻兜底，严格遵守零 stdout/stderr 污染。"""
     # 0. D6 强制校验：未传 file_emit 必须抛 ValueError
     with pytest.raises(ValueError, match="file_emit"):
-        AdaptiveHeartbeatSink(file_emit=None)
+        AdaptiveHeartbeatSink(file_emit=cast(Any, None))
 
     # 1. State: mcp_present -> file_emit 正常落盘，不再执行无效 mcp push
     mcp_ctx = MagicMock()
@@ -183,7 +184,7 @@ def test_heartbeat_multi_channel_dispatch_and_mandatory_file_fallback(capfd):
 def test_telemetry_schema_and_fail_open(tmp_path):
     """B7 & T6-5: Telemetry schema: 1 format and fail-open logging behavior."""
     log_dir = str(tmp_path / "telemetry_test")
-    record = {
+    record: TelemetryRecord = {
         "schema": 1,
         "ts": "2026-09-21T10:00:00Z",
         "session_id": "session-123",
@@ -281,9 +282,9 @@ def test_deepseek_client_streaming_and_soft_ceiling(tmp_path):
     telemetry_file = os.path.join(log_dir, "telemetry.jsonl")
     assert os.path.isfile(telemetry_file)
     with open(telemetry_file, "r", encoding="utf-8") as f:
-        lines = [json.loads(l) for l in f.readlines()]
-    assert any(l["event"] == "start" for l in lines)
-    assert any(l["event"] == "finish" for l in lines)
+        lines = [json.loads(line_str) for line_str in f.readlines()]
+    assert any(entry["event"] == "start" for entry in lines)
+    assert any(entry["event"] == "finish" for entry in lines)
 
 
 def test_deepseek_client_soft_ceiling_trigger(tmp_path):

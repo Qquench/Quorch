@@ -16,7 +16,6 @@ import ast
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -27,8 +26,6 @@ from fixtures.response_payloads import (
     UNKNOWN_HOOK_LOG_SAMPLE,
 )
 from response_compactor import (
-    STATUS_COMPACT_ALWAYS_KEEP,
-    STATUS_COMPACT_DROP_ORDER,
     ResponseBudgetExceeded,
     assert_response_budget,
     canonical_json,
@@ -38,7 +35,6 @@ from response_compactor import (
     fit_to_budget,
 )
 from tool_surface_constants import (
-    EXPECTED_TOOL_NAMES,
     HOOK_LOG_CODES,
     RESPONSE_BUDGET_BYTES,
     STATUS_COMPACT_MAX_TASKS,

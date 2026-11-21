@@ -13,9 +13,7 @@ Covers:
 9. Callback error tolerance (stderr warning without breaking stream);
 10. Thread concurrency and race-free aggregation.
 """
-from datetime import datetime
 import re
-import sys
 import threading
 import time
 from typing import List
@@ -38,7 +36,7 @@ def test_coalescing_stats_dataclass():
     assert stats.chars_currently_buffered == 20
     assert stats.chunks_fed == 10
     with pytest.raises(Exception):
-        stats.lines_emitted = 4  # frozen dataclass
+        setattr(stats, "lines_emitted", 4)  # frozen dataclass
 
 
 def test_basic_token_aggregation_with_newlines():

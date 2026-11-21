@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 # Ensure scripts dir is accessible for importing check_test_tiering_invariants
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent

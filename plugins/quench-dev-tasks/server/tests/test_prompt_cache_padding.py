@@ -7,7 +7,6 @@ import dataclasses
 import pytest
 
 from reviewer_engine import (
-    STATIC_PREFIX_BLOCK_BYTES,
     align_static_prefix_to_block,
     AssembledPrompt,
     CodeSlice,

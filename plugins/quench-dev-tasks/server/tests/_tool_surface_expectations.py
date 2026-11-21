@@ -13,9 +13,7 @@ from typing import Any, Final, Mapping
 
 from tool_surface_constants import (
     CTX_PARAM_ALIASES,
-    EXPECTED_TOOL_NAMES,
     TOOL_ALLOWS_CTX,
-    TOOL_COUNT,
 )
 
 SERVER_SOURCE_PATH: Final[Path] = Path(__file__).resolve().parents[1] / "server.py"

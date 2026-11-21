@@ -2,6 +2,7 @@
 """Unit tests for ReviewerBadRequestError symmetry between stream and complete/acomplete paths."""
 from __future__ import annotations
 
+from email.message import Message
 import io
 import urllib.error
 from typing import Any, Mapping
@@ -40,7 +41,7 @@ def test_complete_bad_request_fast_fail(status_code: int) -> None:
         url="http://127.0.0.1:11434/v1/chat/completions",
         code=status_code,
         msg="Unprocessable Entity" if status_code == 422 else "Bad Request",
-        hdrs={},
+        hdrs=Message(),
         fp=err_fp,
     )
 
@@ -70,7 +71,7 @@ async def test_acomplete_bad_request_fast_fail(status_code: int) -> None:
         url="http://127.0.0.1:11434/v1/chat/completions",
         code=status_code,
         msg="Error",
-        hdrs={},
+        hdrs=Message(),
         fp=err_fp,
     )
 
@@ -98,7 +99,7 @@ async def test_stream_chat_bad_request_fast_fail(monkeypatch: pytest.MonkeyPatch
         url="http://127.0.0.1:11434/v1/chat/completions",
         code=status_code,
         msg="Error",
-        hdrs={},
+        hdrs=Message(),
         fp=err_fp,
     )
 

@@ -10,8 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
-from typing import Optional
+from typing import Optional, cast
 from unittest.mock import patch
 import pytest
 
@@ -32,7 +31,7 @@ import install  # type: ignore
 def _synthetic_oserror(*, errno_val: int = 0, winerror: Optional[int] = None) -> OSError:
     """构建用于测试的合成 OSError"""
     err = OSError(errno_val, "synthetic os error")
-    err.winerror = winerror
+    setattr(err, "winerror", winerror)
     return err
 
 
@@ -354,7 +353,7 @@ def test_enoent_semantics_asymmetric_contract():
     """验证 ENOENT 语义非对称性契约：写入侧判 blocked，清理侧判 ok（_is_enoent 幂等）。"""
     # 1. POSIX 分支 (errno=ENOENT, winerror=None)
     err_posix = OSError(errno.ENOENT, "No such file or directory")
-    err_posix.winerror = None
+    setattr(err_posix, "winerror", None)
     assert install.classify_probe_error(err_posix) == "blocked"
     assert install._is_enoent(err_posix) is True
 
@@ -467,10 +466,10 @@ def test_is_enoent_predicate():
     win_err3 = types.SimpleNamespace(errno=0, winerror=3)
     win_err5 = types.SimpleNamespace(errno=0, winerror=5)
     win_err_none = types.SimpleNamespace(errno=errno.ENOENT, winerror=None)
-    assert install._is_enoent(win_err2) is True
-    assert install._is_enoent(win_err3) is True
-    assert install._is_enoent(win_err5) is False
-    assert install._is_enoent(win_err_none) is True
+    assert install._is_enoent(cast(OSError, win_err2)) is True
+    assert install._is_enoent(cast(OSError, win_err3)) is True
+    assert install._is_enoent(cast(OSError, win_err5)) is False
+    assert install._is_enoent(cast(OSError, win_err_none)) is True
 
 
 def test_preflight_probe_doc_exists():

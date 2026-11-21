@@ -15,7 +15,6 @@ Covers:
 11. Context extension multi-hop loop;
 12. Suggested task draft parsing without disk mutation.
 """
-from dataclasses import dataclass
 from pathlib import Path
 import asyncio
 import json
@@ -26,11 +25,9 @@ from typing import Any, List, Optional
 from unittest.mock import MagicMock
 import pytest
 
-from consultation import ConsultRequest, ConsultResult, run_consultation
 from project_config import QuenchStackConfig, ReviewerEngineConfig
 from reviewer_engine import (
     ReviewerAuthenticationError,
-    ReviewerEngineError,
     ReviewerEngineUnavailableError,
     StreamChunk,
 )

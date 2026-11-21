@@ -16,8 +16,6 @@ import os
 from pathlib import Path
 import re
 import sys
-import time
-from typing import Mapping
 import pytest
 
 server_dir = str(Path(__file__).resolve().parent.parent)
@@ -27,28 +25,22 @@ if server_dir not in sys.path:
 from manifest import (
     BaselineSnapshot,
     FileFingerprint,
-    ReconciliationReport,
     capture_baseline,
     get_baseline_path,
     load_baseline_snapshot,
     reconcile_workspace_against_whitelist,
-    save_baseline_snapshot,
 )
 from path_guard import (
     PathTraversalError,
-    SubsetCheckResult,
     canonicalize_path,
     check_whitelist_subset,
     comparison_key,
     is_within_whitelist,
 )
 from state_machine import (
-    STATUS_CONFIRMED,
     STATUS_COMPLETED,
-    STATUS_IN_PROGRESS,
     SLOW_PATH_HASH_QUOTA_DEFAULT,
     ScopeViolationError,
-    extract_task_whitelist,
     transition_task,
 )
 
@@ -371,7 +363,7 @@ def test_reconciliation_budget_ms_raises_type_error(workspace_with_baseline):
             snapshot=snapshot,
             whitelist_paths=["src/app.py"],
             unmanaged_patterns=["docs/**", "*.md"],
-            budget_ms=500.0,
+            budget_ms=500.0,  # pyrefly: ignore[unexpected-keyword]
         )
     assert "unexpected keyword argument 'budget_ms'" in str(exc_info.value) or "budget_ms" in str(exc_info.value)
 

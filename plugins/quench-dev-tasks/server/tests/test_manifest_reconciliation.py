@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -14,8 +13,6 @@ from manifest import (
     register_proposal,
     reconcile_workspace,
     ReconcileClass,
-    ReconcileReport,
-    compute_normalized_md_hash,
 )
 from server import (
     dev_tasks_status,
@@ -25,9 +22,6 @@ from server import (
 from state_machine import (
     assert_task_checkout_allowed,
     InvalidTransitionError,
-    STATUS_CONFIRMED,
-    STATUS_IN_PROGRESS,
-    STATUS_PENDING,
 )
 
 

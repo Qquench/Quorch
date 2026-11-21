@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import glob
+import io
 import json
 import os
 import sys
 import tempfile
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, Final, List, Optional, Tuple
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 server_dir = os.path.dirname(current_dir)
@@ -18,8 +19,9 @@ if server_dir not in sys.path:
 
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -71,10 +73,10 @@ def _atomic_write_json(filepath: str, data: Any) -> None:
 
 def _is_external_api_available(workspace_root: str) -> bool:
     try:
-        from project_config import load_project_config
+        from project_config import ReviewerEngineConfig, load_project_config
         from reviewer_engine import ReviewerClient
         config = load_project_config(workspace_root)
-        re_cfg = getattr(config, "reviewer_engine", config)
+        re_cfg = config if isinstance(config, ReviewerEngineConfig) else config.reviewer_engine
         provider = getattr(re_cfg, "provider", None)
         if provider in (None, "", "none"):
             return False

@@ -16,14 +16,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import re
 import statistics
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Final, Literal, Mapping, NamedTuple, Sequence
+from typing import Final, Mapping, NamedTuple, Sequence
 
 # 确保可复用 scripts/check_test_tiering_invariants.py
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -527,7 +526,6 @@ def run_tier2_benchmark(
     state_p = (repo_root / baseline_path) if baseline_path else (repo_root / BASELINE_STATE_PATH)
     active_baseline = load_tier2_baseline(state_p)
     warn_line = active_baseline * TIER2_WARN_MULTIPLIER
-    panic_line = active_baseline * TIER2_PANIC_MULTIPLIER
 
     verdict = classify_tier2(elapsed, baseline=active_baseline, panic_streak=1)
     if verdict == "panic" or elapsed > TIER2_PANIC_S:

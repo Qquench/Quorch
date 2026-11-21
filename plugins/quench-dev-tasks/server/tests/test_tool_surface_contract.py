@@ -7,7 +7,6 @@ INVARIANT: Strictly zero import of server, fastmcp, yaml, or network.
 from __future__ import annotations
 
 import json
-import sys
 from typing import Any
 import pytest
 
@@ -24,7 +23,6 @@ from tool_surface_constants import (
 from _tool_surface_expectations import (
     SERVER_SOURCE_PATH,
     SNAPSHOT_PATH,
-    ToolSurfaceEntry,
     ToolSurfaceError,
     assert_ctx_surface,
     assert_surface_well_formed,

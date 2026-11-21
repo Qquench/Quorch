@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import fnmatch
 import re
 import tempfile
@@ -13,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Tuple, Literal, TypedDict, Final
+from typing import Any, Mapping, Optional, Sequence, Tuple, Literal, TypedDict, Final
 import math
 import unicodedata
 import urllib.parse
@@ -520,7 +519,7 @@ MAX_TOTAL_INJECTION_CHARS_UPPER: int = 200_000
 
 def _coerce_positive_int(raw: object, *, default: int, lo: int, hi: int) -> int:
     """Coerce YAML scalar to a clamped int; never raises on malformed input. Excludes bool."""
-    if isinstance(raw, bool) or raw is None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
         return default
     try:
         val = int(raw)

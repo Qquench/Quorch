@@ -23,26 +23,19 @@ from typing import (
     Any,
     Dict,
     Final,
-    List,
     Literal,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
 )
 
 import filelock
 
 from task_status import (
     STATUS_PENDING,
-    STATUS_CONFIRMED,
-    STATUS_IN_PROGRESS,
-    STATUS_COMPLETED,
-    STATUS_SKIPPED,
     STATUS_REWORK,
     STATUS_UNKNOWN,
     TASK_HEADER_PATTERN,
-    ALL_STATUSES,
     normalize_status,
     is_task_file,
 )

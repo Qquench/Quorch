@@ -386,7 +386,7 @@ def auto_heal_configs(
             if ws_hooks_target and ws_hooks_target in affected and ws_hooks_rendered:
                 atomic_write_file(ws_hooks_target, ws_hooks_rendered)
 
-            if ws_mcp_target and ws_mcp_target in affected:
+            if workspace_root and ws_mcp_target and ws_mcp_target in affected:
                 generate_agents_mcp_config(
                     project_root=workspace_root,
                     python_exe=py_exe,

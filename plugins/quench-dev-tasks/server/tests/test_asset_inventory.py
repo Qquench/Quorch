@@ -10,10 +10,8 @@ import hashlib
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 from types import MappingProxyType
-from unittest.mock import patch
 
 import pytest
 
@@ -23,32 +21,22 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import asset_inventory  # noqa: E402
 from asset_inventory import (  # noqa: E402
     EXIT_DRIFT,
     EXIT_OK,
     EXIT_USAGE,
     MAX_SCANNED_FILE_BYTES,
-    MUST_NOT_REMOVE_SYMBOLS,
     OUTPUT_MD_REL,
     FROZEN_V120_REL,
-    CURRENT_INV_REL,
     SERVER_ROOT_REL,
-    VERDICTS_REL,
-    DELTA_REPORT_ARG,
     DELTA_BEGIN_MARK,
     DELTA_END_MARK,
     FrozenSnapshotMissingError,
     FrozenSnapshotUnparsableError,
     DeltaBlockMalformedError,
-    ResolvedRecord,
-    PersistedRecord,
     EmergedRecord,
-    CouplingRecord,
     InventorySnapshot,
     DeltaReport,
-    INVARIANT_OWNERSHIP,
-    KNOWN_INVARIANT_GAPS,
     DOC_NON_CONSUMER_PREFIXES,
     DOC_ROOT_RELS,
     _is_non_consumer_doc,
@@ -59,8 +47,6 @@ from asset_inventory import (  # noqa: E402
     strip_delta_block,
     compute_pure_projection_sha256,
     atomic_write_text,
-    build_coupling_records,
-    build_module_graph,
     compute_delta_report,
     render_delta_report_markdown,
     write_inventory_with_delta,
@@ -74,18 +60,10 @@ from asset_inventory import (  # noqa: E402
     main,
     render_markdown,
     scan_modules,
-    PROJECTION_SCHEMA_VERSION,
     PROJECTION_BEGIN_MARK,
     PROJECTION_END_MARK,
-    ProjectionSchemaMismatchError,
-    PureProjection,
     build_pure_projection,
     canonical_projection_json,
-    diagnose_drift,
-    render_projection_block,
-    extract_projection_block,
-    strip_projection_block,
-    ToolSurface,
 )
 from dataclasses import dataclass
 
@@ -651,7 +629,6 @@ def test_doc_non_consumer_prefixes_subset_of_doc_roots():
 
 def test_asset_inventory_ignores_dev_tasks(tmp_path: Path):
     """R1/R3 Hermetic 单测：tmp_path 合成仓库，断言 docs/dev_tasks 彻底排除且不误伤正常 docs/ 文档。"""
-    from pathlib import PurePosixPath
 
     # 1. 验证 _is_non_consumer_doc 的目录分量隔离语义（R1：防误吞 docs/dev_tasks_* 兄弟路径）
     assert _is_non_consumer_doc("docs/dev_tasks/test_task.md") is True

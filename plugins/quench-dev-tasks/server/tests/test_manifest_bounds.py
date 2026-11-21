@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import os
-from dataclasses import asdict
 import pytest
 
 from manifest import (
@@ -30,7 +28,6 @@ def manifest_bounds_workspace(tmp_path):
 
 
 def test_compute_manifest_metrics_purity_and_accuracy(manifest_bounds_workspace):
-    ws = manifest_bounds_workspace
     rec1 = TaskRecord(
         task_id="demo::1.1",
         md_sha256="a" * 64,

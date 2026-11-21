@@ -6,34 +6,22 @@ Validates acceptance assertions A-1 through A-12 and defensive invariants D-1 th
 from __future__ import annotations
 
 import os
-import re
 import sys
 import pytest
 from pathlib import Path
 
 from code_explorer import (
     CodeExplorerError,
-    DirListing,
-    GrepResult,
     LineWindow,
-    SlicedFile,
-    UnsafePathError,
     build_line_window,
-    build_safe_slice,
-    explore_code_slices,
     grep,
     is_path_safe,
     list_dir,
     read_file_slice,
     resolve_within_roots,
     RING1_MAX_BYTES,
-    RING1_MAX_LINES,
-    MAX_FILE_BYTES,
-    MAX_GREP_HITS,
     MAX_GREP_HITS_PER_FILE,
     MAX_GREP_PATTERN_CHARS,
-    MAX_LIST_ENTRIES,
-    MAX_SLICE_LINES,
 )
 
 

@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 """Unit tests for ReviewerEngine stream_chat SSE reader seam and idle watchdog."""
-import asyncio
-import os
 import threading
 import time
-from typing import Any, List, Mapping, Optional
-from unittest.mock import MagicMock, patch
+from typing import Any, List, Mapping
+from unittest.mock import patch
 
 import pytest
 
@@ -14,7 +12,6 @@ from reviewer_engine import (
     ReviewerClient,
     StreamChunk,
     UsageSnapshot,
-    _open_sse_response,
 )
 
 

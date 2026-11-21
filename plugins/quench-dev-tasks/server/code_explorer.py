@@ -14,11 +14,10 @@ import ast
 import fnmatch
 import os
 import re
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import PureWindowsPath
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 # 敏感文件/凭据黑名单：坚决禁止将敏感密钥切片灌入 LLM Prompt
 SENSITIVE_PATTERNS = [
@@ -267,8 +266,6 @@ def extract_ast_interfaces(source_text: str, rel_path: str) -> Tuple[List[Symbol
     symbols: List[SymbolIface] = []
     local_imports: List[str] = []
 
-    lines = source_text.splitlines()
-
     for node in tree.body:
         # 1. 提取导入依赖（用于拓扑 Hop 发现）
         if isinstance(node, ast.Import):
@@ -290,7 +287,7 @@ def extract_ast_interfaces(source_text: str, rel_path: str) -> Tuple[List[Symbol
                     name=node.name,
                     kind=kind,
                     lineno=node.lineno,
-                    end_lineno=getattr(node, "end_lineno", node.lineno),
+                    end_lineno=node.end_lineno if node.end_lineno is not None else node.lineno,
                     signature=first_line.strip(),
                     docstring=doc.strip() if doc else None,
                 )
@@ -306,7 +303,7 @@ def extract_ast_interfaces(source_text: str, rel_path: str) -> Tuple[List[Symbol
                     name=node.name,
                     kind="class",
                     lineno=node.lineno,
-                    end_lineno=getattr(node, "end_lineno", node.lineno),
+                    end_lineno=node.end_lineno if node.end_lineno is not None else node.lineno,
                     signature=first_line.strip(),
                     docstring=class_doc.strip() if class_doc else None,
                 )
@@ -322,7 +319,7 @@ def extract_ast_interfaces(source_text: str, rel_path: str) -> Tuple[List[Symbol
                             name=f"{node.name}.{subnode.name}",
                             kind=sub_kind,
                             lineno=subnode.lineno,
-                            end_lineno=getattr(subnode, "end_lineno", subnode.lineno),
+                            end_lineno=subnode.end_lineno if subnode.end_lineno is not None else subnode.lineno,
                             signature=sub_first.strip(),
                             docstring=ast.get_docstring(subnode),
                         )
@@ -391,9 +388,9 @@ def build_line_window(
             byte_capped = True
 
     n = len(out)
-    next_offset: Optional[int] = offset + n
-    if next_offset >= total_lines:
-        next_offset = None
+    candidate_next = offset + n
+    next_offset: Optional[int] = None if candidate_next >= total_lines else candidate_next
+    if next_offset is None:
         byte_capped = False
 
     start_line = offset + 1

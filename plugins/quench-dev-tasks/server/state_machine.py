@@ -25,9 +25,6 @@ from task_status import (
     STATUS_REWORK,
     ALL_STATUSES,
     STATUS_UNKNOWN,
-    TASK_FILE_RELATIVE_DIR,
-    EMOJI_STATUS_OPTIONS,
-    STATUS_REGEX_PART,
     TASK_HEADER_PATTERN,
     normalize_status,
 )

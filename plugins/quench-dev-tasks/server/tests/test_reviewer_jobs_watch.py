@@ -7,8 +7,8 @@ import asyncio
 import builtins
 import os
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
 
 import anyio
 import pytest
@@ -21,7 +21,6 @@ from reviewer_jobs import (
     PollSnapshot,
     ReviewerJobSupervisor,
     ReviewerPhase,
-    probe_lease_health,
 )
 
 
@@ -88,13 +87,17 @@ def test_read_snapshot_elapsed_s_non_negative_with_fake_clock(tmp_path):
     rec = _make_record(supervisor, started_monotonic=base_m)
 
     # 1. 模拟时钟回拨 (clock < created_monotonic) -> 必须 >= 0
-    fake_clock_back = lambda: base_m - 50.0
+    def fake_clock_back() -> float:
+        return base_m - 50.0
+
     snap_back = supervisor.read_snapshot(rec.job_id, clock=fake_clock_back)
     assert snap_back.elapsed_s == 0
     assert isinstance(snap_back.elapsed_s, int)
 
     # 2. 模拟正常时钟前行 25.8s -> 取整为 25
-    fake_clock_forward = lambda: base_m + 25.8
+    def fake_clock_forward() -> float:
+        return base_m + 25.8
+
     snap_fwd = supervisor.read_snapshot(rec.job_id, clock=fake_clock_forward)
     assert snap_fwd.elapsed_s == 25
     assert isinstance(snap_fwd.elapsed_s, int)
@@ -147,9 +150,7 @@ async def test_watch_exponential_backoff(tmp_path, monkeypatch):
         sleep_intervals.append(seconds)
         if len(sleep_intervals) >= 4:
             # 模拟任务完成以中止 watch
-            rec_done = JobRecord(
-                **{**rec.__dict__, "state": JobState.COMPLETED, "generation": rec.generation}
-            )
+            rec_done = replace(rec, state=JobState.COMPLETED, generation=rec.generation)
             supervisor._save_job_record(rec_done)
         await original_sleep(0.001)
 
@@ -186,11 +187,11 @@ async def test_watch_generation_drift_healing(tmp_path, monkeypatch):
         sleep_count += 1
         if sleep_count == 1:
             # 制造代际漂移 (generation: 1 -> 2)
-            bumped = JobRecord(**{**rec.__dict__, "generation": 2})
+            bumped = replace(rec, generation=2)
             supervisor._save_job_record(bumped)
         elif sleep_count >= 2:
             # 终态收尾
-            done = JobRecord(**{**rec.__dict__, "generation": 2, "state": JobState.COMPLETED})
+            done = replace(rec, generation=2, state=JobState.COMPLETED)
             supervisor._save_job_record(done)
         await original_sleep(0.001)
 
@@ -235,7 +236,7 @@ async def test_watch_liveness_probe_throttling(tmp_path, monkeypatch):
         nonlocal ticks
         ticks += 1
         if ticks >= 3:
-            done = JobRecord(**{**rec.__dict__, "state": JobState.COMPLETED})
+            done = replace(rec, state=JobState.COMPLETED)
             supervisor._save_job_record(done)
         await original_sleep(0.001)
 
@@ -278,7 +279,7 @@ async def test_watch_zero_disk_write(tmp_path, monkeypatch):
         nonlocal ticks
         ticks += 1
         if ticks >= 2:
-            done = JobRecord(**{**rec.__dict__, "state": JobState.COMPLETED})
+            done = replace(rec, state=JobState.COMPLETED)
             # 允许在测试注入中写盘，临时恢复
             real_open_call = real_open(supervisor._get_record_path(rec.session_id, rec.job_id), "w", encoding="utf-8")
             with real_open_call as f:
@@ -355,7 +356,7 @@ async def test_watch_zero_lock_during_await(tmp_path, monkeypatch):
         # ★硬断言★ 在任意 await 挂起期间，FileLock 绝不可处于被持有状态
         assert len(active_locks) == 0, f"Lock held across await point: {active_locks}"
         if ticks >= 3:
-            done = JobRecord(**{**rec.__dict__, "state": JobState.COMPLETED})
+            done = replace(rec, state=JobState.COMPLETED)
             supervisor._save_job_record(done)
         await orig_sleep(0.001)
 

@@ -11,11 +11,9 @@ Adheres to:
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -41,7 +39,7 @@ from git_pre_commit_guard import (
     evaluate_prompt_surface_check,
     is_quorch_core_repo,
 )
-from tool_surface_constants import EXPECTED_TOOL_NAMES, TOOL_COUNT
+from tool_surface_constants import EXPECTED_TOOL_NAMES
 
 
 # ---------------------------------------------------------------------------

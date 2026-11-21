@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 
-import json
+from dataclasses import asdict
 import os
 import sys
 import pytest
@@ -45,7 +45,7 @@ def test_i5_poll_zero_lock_and_bounded_metadata_no_text():
         state=JobState.RUNNING,
         retry_after_seconds=5,
         log_ref="20260925_001_session_test_001.log",
-        progress=prog,
+        progress=asdict(prog),
     )
 
     projected = project_nonterminal(snap)
@@ -81,11 +81,10 @@ def test_i5b_snapshot_over_cap_raises_not_truncates(monkeypatch):
         state=JobState.RUNNING,
         retry_after_seconds=5,
         log_ref="20260925_001_test.log",
-        progress=prog,
+        progress=asdict(prog),
     )
 
     # 模拟超大 payload 触发 1024 字节上限
-    orig_canonical = canonical_snapshot_bytes
     monkeypatch.setattr(
         "reviewer_jobs.canonical_snapshot_bytes",
         lambda p: 1025,

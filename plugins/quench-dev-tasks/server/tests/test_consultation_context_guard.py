@@ -15,16 +15,12 @@ import os
 import pytest
 
 from consultation import (
-    CodeSlice,
-    ConsultRequest,
     HopBudget,
     MIN_TELEMETRY_SAMPLES,
     MULTI_HOP_DEMAND_PERCENT,
     MULTI_HOP_DEMAND_THRESHOLD,
     build_static_prefix,
-    render_mode_prompt,
     resolve_context_files,
-    run_consultation,
     sanitize_session_id,
     should_enable_multi_hop,
     strip_reasoning_from_history,

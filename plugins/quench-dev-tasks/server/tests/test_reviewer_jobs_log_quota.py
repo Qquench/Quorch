@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from log_naming import ActiveLogRegistry, norm_registry_key
+from log_naming import norm_registry_key
 from reviewer_jobs import (
     JobProgress,
     JobRecord,
@@ -17,7 +17,6 @@ from reviewer_jobs import (
     ReviewerJobSupervisor,
     ReviewerPhase,
     TERMINAL_STATES,
-    compute_protected_logs,
 )
 
 
@@ -163,6 +162,7 @@ def test_submit_opportunistic_gc_expired_terminal_jobs_and_cleans_empty_dir(tmp_
         result_ref=str(old_sess_dir / "results" / "job_expired.result.json"),
     )
     supervisor._save_job_record(rec_old)
+    assert rec_old.result_ref is not None
     Path(rec_old.result_ref).write_text("{}", encoding="utf-8")
     (old_sess_dir / "job_expired.record.lock").write_text("", encoding="utf-8")
 
@@ -182,7 +182,6 @@ def test_gc_terminal_jobs_prunes_excess_retains_recent_and_preserves_active(tmp_
     supervisor = ReviewerJobSupervisor(tmp_path)
     now = time.time()
 
-    active_dir = supervisor._get_session_dir("sess_active")
     rec_active = JobRecord(
         job_id="job_active_1",
         session_id="sess_active",
@@ -206,7 +205,6 @@ def test_gc_terminal_jobs_prunes_excess_retains_recent_and_preserves_active(tmp_
     for i in range(5):
         s_id = f"sess_{i % 2}"
         j_id = f"job_term_{i}"
-        s_dir = supervisor._get_session_dir(s_id)
         rec = JobRecord(
             job_id=j_id,
             session_id=s_id,

@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
-import json
 import logging
 import os
-import subprocess
 import sys
 from unittest.mock import patch
-import pytest
 
 server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 hooks_dir = os.path.join(server_dir, "hooks")
@@ -357,7 +354,7 @@ def test_hook_log_tail_bounded_and_fail_open(tmp_path):
 
     lines = _read_hook_log_tail(log_file, max_bytes=HOOK_LOG_TAIL_BYTES)
     assert len(lines) > 0
-    total_read_bytes = sum(len(l.encode("utf-8")) for l in lines)
+    total_read_bytes = sum(len(line_str.encode("utf-8")) for line_str in lines)
     assert total_read_bytes <= HOOK_LOG_TAIL_BYTES + 2048
     assert lines[-1] == "2026-09-13 10:00:99 [INFO] [ALLOW] valid tail line"
 

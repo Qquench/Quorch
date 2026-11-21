@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import sys
 from typing import List, Optional
@@ -15,9 +16,9 @@ from typing import List, Optional
 # Windows UTF-8 console defense
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -105,9 +106,9 @@ def cmd_status(workspace_root: str, plain: bool = False) -> int:
     active_task = st.get("active_task")
     bypass = st.get("session_bypass")
 
-    print(c.bold(f"\n======================================================="))
+    print(c.bold("\n======================================================="))
     print(c.bold(f"  Quench 任务状态看板 — [{project_name}]"))
-    print(c.bold(f"======================================================="))
+    print(c.bold("======================================================="))
     print(f"📁 任务目录: {c.cyan(dev_tasks_dir)}")
 
     # 1. 活跃执行中任务
@@ -150,7 +151,7 @@ def cmd_status(workspace_root: str, plain: bool = False) -> int:
             status_str = " | ".join(status_parts) if status_parts else "空"
             print(f"   • {c.bold(fname)} (共 {total} 项) -> [{status_str}]")
 
-    print(f"-------------------------------------------------------\n")
+    print("-------------------------------------------------------\n")
     return 0
 
 
@@ -195,6 +196,8 @@ def cmd_check_engine(
     thinking_supported = False
     thinking_probe = "config"
     error_msg: Optional[str] = None
+    local_override_loaded = False
+    source_label = "base (.agents/quench_stack.yaml)"
 
     try:
         cfg = load_project_config(ws)
@@ -286,7 +289,7 @@ def cmd_check_engine(
         if error_msg:
             print(f"   {c.red(error_msg)}")
 
-    print(f"-------------------------------------------------------\n")
+    print("-------------------------------------------------------\n")
     return exit_code
 
 
@@ -309,7 +312,7 @@ def cmd_init(
         )
         return 0
     except SystemExit as se:
-        return se.code if se.code is not None else 0
+        return se.code if isinstance(se.code, int) else 0
     except Exception as e:
         print(f"❌ 项目初始化失败: {e}", file=sys.stderr)
         return 1
@@ -564,7 +567,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as se:
-        return se.code if se.code is not None else 0
+        return se.code if isinstance(se.code, int) else 0
 
     ws = getattr(args, "workspace", ".") or "."
     plain = getattr(args, "plain", False)

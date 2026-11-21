@@ -14,11 +14,6 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any, Final, Mapping
 
-from tool_surface_constants import (
-    EXPECTED_TOOL_NAMES,
-    MAX_NONTERMINAL_SNAPSHOT_BYTES,
-    RESPONSE_BUDGET_BYTES,
-)
 
 CANONICAL_HOOK_LOG_FIXTURES: Final[Mapping[str, str]] = MappingProxyType({
     "ASK_MODAL_BLOCKED": (

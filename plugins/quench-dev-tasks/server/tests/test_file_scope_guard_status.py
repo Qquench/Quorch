@@ -12,9 +12,7 @@ import os
 import subprocess
 import sys
 import time
-from collections import Counter
 from pathlib import Path
-import pytest
 
 from task_status import (
     STATUS_PENDING,
@@ -23,18 +21,14 @@ from task_status import (
     STATUS_COMPLETED,
     STATUS_SKIPPED,
     STATUS_REWORK,
-    ALL_STATUSES,
     STATUS_UNKNOWN,
-    TaskHeaderScan,
     normalize_status,
     extract_header_task_statuses,
-    is_task_file as is_task_file_ssot,
 )
 from hooks.file_scope_guard import (
     MUTATING_TOOLS,
     READ_ONLY_TOOLS,
     build_post_image,
-    diff_task_statuses,
     check_task_status_guard,
     extract_statuses,
 )
@@ -120,7 +114,6 @@ def test_guidance_header_blockquote_with_emoji_allowed(tmp_path):
     task_file.write_text(SAMPLE_TASK_CONTENT, encoding="utf-8")
 
     # 在引用块中修改文字
-    new_guidance = SAMPLE_TASK_CONTENT.replace("Strictly follow each task's", "Carefully follow each task's")
     args = {
         "TargetContent": "Strictly follow each task's",
         "ReplacementContent": "Carefully follow each task's",
@@ -247,7 +240,6 @@ def test_new_duplicate_task_id_intercepted(tmp_path):
     task_file.write_text(SAMPLE_TASK_CONTENT, encoding="utf-8")
 
     # 复制 1.1 块产生重复
-    duplicate_append = SAMPLE_TASK_CONTENT + "\n### 任务 1.1 ⬜ 待确认 — 重复任务"
     args = {
         "TargetContent": "### 任务 1.2 🔄 需返工 — 示例任务B",
         "ReplacementContent": "### 任务 1.2 🔄 需返工 — 示例任务B\n\n### 任务 1.1 ⬜ 待确认 — 重复任务",

@@ -8,7 +8,6 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,11 +23,9 @@ from reviewer_jobs import (
     ReviewerJobSupervisor,
     ReviewerPhase,
     SnapshotContractViolation,
-    TERMINAL_RESULT_ALLOWED_FIELDS,
     _durable_write_json,
     project_terminal,
 )
-from workspace_lease import WorkspaceLeaseGuard
 
 
 def test_dual_source_single_ssot_and_reconcile_backfill(tmp_path):
@@ -62,6 +59,7 @@ def test_dual_source_single_ssot_and_reconcile_backfill(tmp_path):
     supervisor._save_job_record(rec)
 
     # 结果持久化
+    assert rec.result_ref is not None
     res_path = Path(rec.result_ref)
     _durable_write_json(res_path, {"status": "success", "findings": "SSOT review verdict"})
 
@@ -76,6 +74,7 @@ def test_dual_source_single_ssot_and_reconcile_backfill(tmp_path):
 
     # 验证 JobRecord 状态未被破坏
     loaded_rec = supervisor._load_job_record("session_ssot_1", "job_completed_ssot_1")
+    assert loaded_rec is not None
     assert loaded_rec.state == JobState.COMPLETED
 
     # 验证 verdicts.jsonl 存在补写的记录
@@ -124,6 +123,7 @@ def test_running_job_missing_in_jsonl_never_orphaned_if_peer_alive(tmp_path, mon
     assert supervisor.registry.is_pinned(running_rec.log_path)
 
     loaded = supervisor._load_job_record("session_foreign_1", "job_foreign_running_1")
+    assert loaded is not None
     assert loaded.state == JobState.RUNNING
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 from unittest.mock import MagicMock
 
 import pytest
@@ -186,7 +186,7 @@ def test_tool_schema_physical_size_hard_gate() -> None:
 
 def test_validate_schema_size_budget_pure_aggregation() -> None:
     """P-1: Pure validator deterministic aggregation with overridden small thresholds."""
-    from ide_schema_export import SizeViolation, format_size_violations, validate_schema_size_budget
+    from ide_schema_export import format_size_violations, validate_schema_size_budget
     from tool_surface_constants import measure_tool_schema_bytes
 
     # Tool A (120B > 100B), Tool B (110B > 100B), Tool C (50B <= 100B)
@@ -321,7 +321,7 @@ def test_run_cli_size_gate_positive_and_negative_direct(capsys: pytest.CaptureFi
 
     try:
         # 1. Construct valid live schemas
-        valid_live = {
+        valid_live: dict[str, Any] = {
             tool_name: {"description": f"Tool {tool_name}", "parameters": {"type": "object", "properties": {}}}
             for tool_name in EXPECTED_TOOL_NAMES
         }

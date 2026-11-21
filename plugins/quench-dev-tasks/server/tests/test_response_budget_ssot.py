@@ -17,7 +17,6 @@ import json
 import re
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
 
 import pytest
 
@@ -191,7 +190,6 @@ def test_response_budget_ssot_e1_f_readme_inv10_anchor() -> None:
     )
 
     inv_name = inv10_match.group(1).strip()
-    inv_mechanism = inv10_match.group(2).strip()
     inv_anchors = inv10_match.group(3).strip()
 
     assert "Response Budget SSOT" in inv_name, f"INV-10 name mismatch: '{inv_name}'"

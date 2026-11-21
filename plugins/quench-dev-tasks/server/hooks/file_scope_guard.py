@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import fnmatch
 import glob
+import io
 import json
 import logging
 import logging.handlers
@@ -24,23 +25,17 @@ if server_dir not in sys.path:
 
 from task_status import (
     STATUS_PENDING,
-    STATUS_CONFIRMED,
-    STATUS_IN_PROGRESS,
-    STATUS_COMPLETED,
-    STATUS_SKIPPED,
     STATUS_REWORK,
-    ALL_STATUSES,
     STATUS_UNKNOWN,
     TaskHeaderScan,
     extract_header_task_statuses,
-    is_task_file as is_task_file_ssot,
 )
 
 if sys.version_info >= (3, 7):
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -840,7 +835,7 @@ def verify_session_integrity(
 
 def safe_clean_corrupted_bypass(bypass_path: str, logger: Optional[logging.Logger] = None) -> None:
     """原子化清理或重命名已失效/损坏的会话旁路文件，带 FileLock 保护。"""
-    from filelock import FileLock, Timeout
+    from filelock import FileLock
     lock_file = bypass_path + ".lock"
     try:
         with FileLock(lock_file, timeout=5.0):

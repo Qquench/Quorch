@@ -1640,7 +1640,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as se:
-        return se.code if se.code is not None else EXIT_USAGE
+        return se.code if isinstance(se.code, int) else EXIT_USAGE
 
     try:
         start_path = Path(args.repo_root) if args.repo_root else Path.cwd()

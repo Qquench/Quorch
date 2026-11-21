@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, ClassVar, Final, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, AsyncIterator, Callable, ClassVar, Final, Literal, Mapping, Optional, Union
 from uuid import uuid4
 
 import anyio
@@ -26,7 +26,6 @@ from log_naming import (
     MAX_LOG_REF_CHARS,
     REVIEWER_LOG_QUOTA_KEEP,
     REVIEWER_TERMINAL_LOG_RETENTION,
-    SESSION_ID_PATTERN,
     SLUG_MAX_LEN,
     ActiveLogRegistry,
     allocate_log_file,
@@ -35,8 +34,7 @@ from log_naming import (
     validate_log_ref,
 )
 from project_config import resolve_reviewer_log_dir
-from workspace_lease import WorkspaceLeaseGuard, WorkspaceLeaseNotHeldError
-from reviewer_engine import format_heartbeat_line
+from workspace_lease import WorkspaceLeaseGuard
 from tool_surface_constants import MAX_NONTERMINAL_SNAPSHOT_BYTES
 
 _REAL_ASYNCIO_SLEEP = asyncio.sleep
@@ -157,7 +155,7 @@ class JobRecord:
     created_wall_utc: str
     updated_wall_utc: str
     log_path: str  # 盘上绝对权威路径
-    progress: JobProgress
+    progress: Optional[JobProgress]
     result_ref: Optional[str]
     tokens_billed_after_cancel: Optional[int] = None
     degraded_reason: Optional[DegradedReason] = None
@@ -667,7 +665,7 @@ _atomic_replace_json = _durable_write_json
 
 
 def _record_to_dict(record: JobRecord) -> dict[str, Any]:
-    d = asdict(record)
+    d: dict[str, Any] = asdict(record)
     d["state"] = record.state.value if isinstance(record.state, Enum) else str(record.state)
     if record.progress is not None and d.get("progress") is not None:
         if getattr(record.progress, "phase", None) is not None:
@@ -1270,11 +1268,21 @@ class ReviewerJobSupervisor:
                             )
                             self._save_job_record(new_curr)
 
+                    consult_mode: Literal["critique", "evaluate", "brainstorm", "audit"] = (
+                        record.mode
+                        if (
+                            record.mode == "critique"
+                            or record.mode == "evaluate"
+                            or record.mode == "brainstorm"
+                            or record.mode == "audit"
+                        )
+                        else "critique"
+                    )
                     consult_req = ConsultRequest(
                         workspace_root=self.workspace_root,
                         query=req.get("query", ""),
                         context_files=tuple(req.get("context_files", ())),
-                        mode=record.mode,
+                        mode=consult_mode,
                         max_hops=req.get("max_hops", 1),
                         session_id=record.session_id,
                     )
@@ -1866,7 +1874,7 @@ class ReviewerJobSupervisor:
                 if results_dir.is_dir():
                     try:
                         results_dir.rmdir()
-                    except (OSError, FileNotFoundError):
+                    except OSError:
                         pass
 
                 remaining_records = list(s_dir.glob("*.record.json"))
@@ -1874,13 +1882,13 @@ class ReviewerJobSupervisor:
                     for lk in s_dir.glob("*.record.lock"):
                         try:
                             lk.unlink(missing_ok=True)
-                        except (OSError, FileNotFoundError):
+                        except OSError:
                             pass
                     try:
                         s_dir.rmdir()
-                    except (OSError, FileNotFoundError):
+                    except OSError:
                         pass
-            except (OSError, FileNotFoundError):
+            except OSError:
                 pass
 
         return reaped

@@ -9,12 +9,9 @@ Verifies:
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 # Ensure server and scripts directories are in sys.path
 SERVER_DIR = Path(__file__).resolve().parent.parent
@@ -27,7 +24,6 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import reviewer_engine
 from check_no_api_bypass import (
     scan_file_for_bypass,
-    scan_workspace_for_bypass,
     main as scanner_main,
 )
 

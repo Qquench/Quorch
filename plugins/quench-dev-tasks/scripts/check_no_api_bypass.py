@@ -15,18 +15,19 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Set
+from typing import List, Optional, Sequence
 
 if sys.platform == "win32":
     try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        for _stream in (sys.stdin, sys.stdout, sys.stderr):
+            if isinstance(_stream, io.TextIOWrapper):
+                _stream.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -191,7 +192,7 @@ def scan_file_for_bypass(file_path: str) -> List[Violation]:
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
-    except Exception as e:
+    except Exception:
         return []
 
     try:

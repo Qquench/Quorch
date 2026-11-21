@@ -6,10 +6,11 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
-from typing import Final, Iterator, Optional, Union
+from typing import Optional, Union
 
 from filelock import FileLock, Timeout
 
@@ -240,7 +241,7 @@ class WorkspaceLeaseGuard:
             raise WorkspaceLeaseNotHeldError("Workspace lease has been lost or taken over by another process.")
 
     @contextmanager
-    def destructive_context(self) -> Iterator[None]:
+    def destructive_context(self) -> Generator[None, None, None]:
         """破坏性清理操作上下文门禁。必须持有有效租约方可执行。"""
         if not self.is_held():
             raise WorkspaceLeaseNotHeldError("Destructive workspace operations require an active workspace lease.")

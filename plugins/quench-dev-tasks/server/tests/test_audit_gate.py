@@ -3,11 +3,9 @@
 
 import json
 import os
-import shutil
-import tempfile
 import typing
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Literal, Optional
 import pytest
 import yaml
 
@@ -15,23 +13,19 @@ from project_config import (
     canonical_artifact_ref,
     AuditGatePolicy,
     AuditGateReason,
-    AuditGateResult,
     QuenchStackConfig,
-    ObservabilityConfig,
     load_project_config,
     most_restrictive_policy,
 )
 from path_guard import PathTraversalError
-from state_machine import TaskItem, STATUS_PENDING, STATUS_CONFIRMED, STATUS_COMPLETED
+from state_machine import TaskItem
 from server import (
     _managed_path_matches,
     _freshness_ok,
     _extract_task_scoped_files,
-    _read_recent_audit_records,
     _check_audit_gate,
     dev_tasks_propose,
     dev_tasks_confirm,
-    dev_tasks_checkout,
 )
 
 TEST_IDS = [
@@ -137,7 +131,7 @@ def test_roundtrip_real_writer_record_matches(tmp_path):
         "status": "ok",
     })
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="### 任务 1.1")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, target_path, task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "matched"
@@ -167,7 +161,7 @@ def test_tail_window_exhausted_warns_and_allows(tmp_path):
     )
     _write_verdict(log_path, {"created_wall_utc": "2026-01-01T00:00:00+00:00", "padding": "x" * 200, "context_files": ["other#1"]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "tail_window_exhausted"
@@ -191,7 +185,7 @@ def test_torn_last_line_skipped_previous_matched(tmp_path):
     with open(log_path, "a", encoding="utf-8") as f:
         f.write('{"torn": true, "broken\n')
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "matched"
@@ -204,7 +198,7 @@ def test_degraded_record_follows_on_degraded_policy(tmp_path):
     now_wall = datetime.now(timezone.utc).isoformat()
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": [ref], "degraded_reason": "timeout"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
 
     import dataclasses
     cfg_block = dataclasses.replace(cfg, audit_gate=AuditGatePolicy(enabled=True, on_degraded="block", audit_log_path=log_path))
@@ -231,7 +225,7 @@ def test_rework_revoke_skip_never_gated(tmp_path):
 def test_missing_log_dogfood_no_self_lock(tmp_path):
     ws, log_path, cfg = _make_ws(tmp_path, {"on_degraded": "warn", "audit_log_path": "missing_verdicts.jsonl"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "log_missing"
@@ -244,7 +238,7 @@ def test_session_bypass_allows(tmp_path):
     with open(b_path, "w", encoding="utf-8") as f:
         json.dump({"active": True, "session_id": "sess_123", "expires_at": future}, f)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg, session_id="sess_123")
     assert res["allowed"] is True
     assert res["reason"] == "session_bypass_active"
@@ -255,7 +249,7 @@ def test_naive_timestamp_reports_timestamp_invalid(tmp_path):
     ref = canonical_artifact_ref(ws, "task.md", "1.1")
     _write_verdict(log_path, {"created_wall_utc": "2026-10-01T12:00:00", "context_files": [ref]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "record_timestamp_invalid"
 
@@ -265,7 +259,7 @@ def test_blocked_when_no_matching_record(tmp_path):
     now_wall = datetime.now(timezone.utc).isoformat()
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": ["other#1"]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is False
     assert res["reason"] == "no_matching_record"
@@ -277,7 +271,7 @@ def test_stale_record_reports_record_stale(tmp_path):
     stale_wall = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     _write_verdict(log_path, {"created_wall_utc": stale_wall, "context_files": [ref]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "record_stale"
 
@@ -286,7 +280,7 @@ def test_internal_error_fail_open_reason(tmp_path, monkeypatch):
     ws, _, cfg = _make_ws(tmp_path)
     monkeypatch.setattr("server._managed_path_matches", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("simulated crash")))
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "internal_error"
@@ -314,7 +308,7 @@ def test_bind_artifact_false_rejected_by_validator():
 def test_audit_log_path_traversal_rejected_by_path_guard(tmp_path):
     ws, _, cfg = _make_ws(tmp_path, {"audit_log_path": "../../etc/shadow"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     with pytest.raises(PathTraversalError):
         _check_audit_gate(ws, "task.md", task, cfg)
 
@@ -322,7 +316,7 @@ def test_audit_log_path_traversal_rejected_by_path_guard(tmp_path):
 def test_no_manifest_lock_acquired_during_gate(tmp_path, monkeypatch):
     ws, log_path, cfg = _make_ws(tmp_path)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     lock_file = os.path.join(ws, ".agents", ".quorch", "manifest.json.lock")
     import filelock
     orig_acquire = filelock.FileLock.acquire
@@ -366,7 +360,7 @@ def test_truncated_with_matching_record_in_tail_returns_matched(tmp_path):
     # 尾部写入匹配记录
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": [ref]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "matched"
@@ -378,7 +372,7 @@ def test_truncated_zero_parseable_tail_reports_tail_window_exhausted_not_unparsa
     with open(log_path, "wb") as f:
         f.write(b"x" * 150)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "tail_window_exhausted"
     assert res["allowed"] is False
@@ -423,7 +417,7 @@ def test_require_undegraded_false_accepts_fresh_degraded_record(tmp_path):
     now_wall = datetime.now(timezone.utc).isoformat()
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": [ref], "degraded_reason": "timeout"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "matched"
@@ -434,7 +428,7 @@ def test_step10_only_when_truly_no_matching_record(tmp_path):
     now_wall = datetime.now(timezone.utc).isoformat()
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": ["foo#1"]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "no_matching_record"
 
@@ -445,7 +439,7 @@ def test_future_timestamp_beyond_tolerance_reports_timestamp_invalid(tmp_path):
     future_wall = (datetime.now(timezone.utc) + timedelta(seconds=10)).isoformat()
     _write_verdict(log_path, {"created_wall_utc": future_wall, "context_files": [ref]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "record_timestamp_invalid"
 
@@ -456,7 +450,7 @@ def test_stale_and_timestamp_invalid_are_mutually_exclusive(tmp_path):
     future_wall = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     _write_verdict(log_path, {"created_wall_utc": future_wall, "context_files": [ref]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "record_timestamp_invalid"
     assert res["reason"] != "record_stale"
@@ -465,7 +459,7 @@ def test_stale_and_timestamp_invalid_are_mutually_exclusive(tmp_path):
 def test_disabled_reason_when_gate_disabled(tmp_path):
     ws, _, cfg = _make_ws(tmp_path, {"enabled": False})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "disabled"
@@ -474,7 +468,7 @@ def test_disabled_reason_when_gate_disabled(tmp_path):
 def test_not_managed_scope_reason_when_no_managed_file(tmp_path):
     ws, _, cfg = _make_ws(tmp_path)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] docs/README.md"]
+    setattr(task, "affected_files", ["[MODIFY] docs/README.md"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "not_managed_scope"
@@ -485,7 +479,7 @@ def test_log_unparsable_reason_on_io_failure(tmp_path):
     with open(log_path, "w", encoding="utf-8") as f:
         f.write("NOT_JSON\n")
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "log_unparsable"
 
@@ -503,7 +497,7 @@ def test_corrupt_line_yields_parse_skipped_diagnostics(tmp_path):
     with open(log_path, "a", encoding="utf-8") as f:
         f.write("corrupt line 1\ncorrupt line 2\n")
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "matched"
     assert res["parse_skipped_lines"] == 2
@@ -542,7 +536,7 @@ def test_freshness_boundary_max_age_plus_epsilon_blocks_as_stale():
 
 def test_scoped_files_marker_normalization_reaches_managed_scope():
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] `plugins/quench-dev-tasks/server/server.py`", "[NEW] `src/sub/util.py` (comment)"]
+    setattr(task, "affected_files", ["[MODIFY] `plugins/quench-dev-tasks/server/server.py`", "[NEW] `src/sub/util.py` (comment)"])
     cleaned = _extract_task_scoped_files(task)
     assert "plugins/quench-dev-tasks/server/server.py" in cleaned
     assert "src/sub/util.py" in cleaned
@@ -566,7 +560,7 @@ def test_degraded_record_blocks_under_default_policy(tmp_path):
     now_wall = datetime.now(timezone.utc).isoformat()
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": [ref], "degraded_reason": "timeout"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is False
     assert res["reason"] == "record_degraded"
@@ -579,7 +573,7 @@ def test_session_id_none_never_grants_bypass(tmp_path):
     with open(b_path, "w", encoding="utf-8") as f:
         json.dump({"active": True, "session_id": "sess_123", "expires_at": future}, f)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg, session_id=None)
     assert res["reason"] != "session_bypass_active"
 
@@ -588,7 +582,7 @@ def test_step5_tolerates_skew_within_tolerance_step8_rejects_beyond(tmp_path):
     ws, log_path, cfg = _make_ws(tmp_path, {"clock_skew_tolerance_seconds": 2})
     ref = canonical_artifact_ref(ws, "task.md", "1.1")
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
 
     # 1. 容差内未来偏移 (+1s) -> step 5 matched
     ts_ok = (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()
@@ -608,7 +602,7 @@ def test_step5_tolerates_skew_within_tolerance_step8_rejects_beyond(tmp_path):
 def test_managed_glob_matches_concrete_server_path_reaches_blocked_not_not_managed_scope(tmp_path):
     ws, _, cfg = _make_ws(tmp_path, {"on_missing_record": "block"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] plugins/quench-dev-tasks/server/server.py"]
+    setattr(task, "affected_files", ["[MODIFY] plugins/quench-dev-tasks/server/server.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] != "not_managed_scope"
     assert res["reason"] in ("no_matching_record", "log_missing")
@@ -618,7 +612,7 @@ def test_on_missing_record_warn_allows_and_reports_reason(tmp_path):
     ws, log_path, cfg = _make_ws(tmp_path, {"on_missing_record": "warn"})
     _write_verdict(log_path, {"created_wall_utc": datetime.now(timezone.utc).isoformat(), "context_files": ["other#1"]})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "no_matching_record"
@@ -632,8 +626,8 @@ def test_canonical_artifact_ref_task_id_equals_state_machine_task_id():
 
 def test_most_restrictive_policy_monotone_matrix():
     """断言：别名最严优先 9 组合与 None 缺省单调性（block > warn > allow）。"""
-    levels = ["block", "warn", "allow"]
-    rank = {"block": 3, "warn": 2, "allow": 1}
+    levels: list[Literal["block", "warn", "allow"]] = ["block", "warn", "allow"]
+    rank: dict[str, int] = {"block": 3, "warn": 2, "allow": 1}
     for p in levels:
         assert most_restrictive_policy(p, None) == p
         for s in levels:
@@ -654,7 +648,7 @@ def test_alias_tightens_record_degraded_to_block(tmp_path):
     now_wall = datetime.now(timezone.utc).isoformat()
     _write_verdict(log_path, {"created_wall_utc": now_wall, "context_files": [ref], "degraded_reason": "worker_timeout"})
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["reason"] == "record_degraded"
     assert res["allowed"] is False
@@ -668,7 +662,7 @@ def test_explicit_inverted_orchestrator_log_missing_allows(tmp_path):
     from runtime_mode import update_runtime_mode
     update_runtime_mode(ws, switch_mode="inverted", external_api_available=False)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "explicit_inverted_orchestrator"
@@ -682,7 +676,7 @@ def test_explicit_inverted_orchestrator_no_matching_record_allows(tmp_path):
     from runtime_mode import update_runtime_mode
     update_runtime_mode(ws, switch_mode="inverted", external_api_available=False)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is True
     assert res["reason"] == "explicit_inverted_orchestrator"
@@ -695,7 +689,7 @@ def test_auto_fallback_inverted_not_explicit_orchestrator(tmp_path):
     # standard 模式但外部 API 不可用触发 auto_fallback
     update_runtime_mode(ws, switch_mode="standard", external_api_available=False)
     task = TaskItem(id="1.1", title="T", status="⬜ 待确认", line_number=1, raw_line="")
-    task.affected_files = ["[MODIFY] src/app.py"]
+    setattr(task, "affected_files", ["[MODIFY] src/app.py"])
     res = _check_audit_gate(ws, "task.md", task, cfg)
     assert res["allowed"] is False
     assert res["reason"] in ("log_missing", "no_matching_record")
