@@ -508,8 +508,10 @@ def test_stop_hook_circuit_breaker_and_guardrails(tmp_path):
 
 def test_file_scope_guard_agent_brain_artifact_exempt_with_and_without_active_task(tmp_path):
     """断言跨盘符/工作区外 Agent brain/<conv-id>/ 制品在无活跃任务（情形 B）和有活跃任务（情形 A）下均免拦截放行，且路径回溯逃逸被拦截。"""
-    ws_str = str(tmp_path)
-    agents_dir = tmp_path / ".agents"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ws_str = str(ws)
+    agents_dir = ws / ".agents"
     agents_dir.mkdir()
     stack_yaml = agents_dir / "quench_stack.yaml"
     stack_yaml.write_text(
@@ -517,9 +519,11 @@ def test_file_scope_guard_agent_brain_artifact_exempt_with_and_without_active_ta
         encoding="utf-8",
     )
 
-    external_brain_walkthrough = "C:/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/walkthrough.md"
-    external_brain_plan = "C:/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/implementation_plan.md"
-    external_brain_scratch = "C:/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/scratch/test_script.py"
+    external_base = tmp_path / "external"
+    brain_dir = external_base / "app_data" / "brain" / "2e8912e4-f711-4ded-8a2e-a521e1ac1156"
+    external_brain_walkthrough = str(brain_dir / "walkthrough.md")
+    external_brain_plan = str(brain_dir / "implementation_plan.md")
+    external_brain_scratch = str(brain_dir / "scratch" / "test_script.py")
 
     # Case 1: No active task (Case B) with empty allow_untracked_patterns
     res_walkthrough_write = run_hook(FILE_GUARD, {
@@ -560,7 +564,7 @@ def test_file_scope_guard_agent_brain_artifact_exempt_with_and_without_active_ta
     assert res_scratch_write["decision"] == "allow"
 
     # Case 2: Active task 1.1 in progress touching only src/core/main.py (Case A)
-    dev_tasks = tmp_path / "docs" / "dev_tasks"
+    dev_tasks = ws / "docs" / "dev_tasks"
     dev_tasks.mkdir(parents=True)
     task_file = dev_tasks / "2026-11-21_test_task.md"
     task_file.write_text(
@@ -593,7 +597,7 @@ def test_file_scope_guard_agent_brain_artifact_exempt_with_and_without_active_ta
         "toolCall": {
             "name": "write_file",
             "args": {
-                "Path": "C:/Users/user/other_repo/README.md",
+                "Path": str(external_base / "other_repo" / "README.md"),
                 "Content": "# Unauthorized external edit\n",
             },
         },
@@ -606,13 +610,51 @@ def test_file_scope_guard_agent_brain_artifact_exempt_with_and_without_active_ta
         "toolCall": {
             "name": "write_file",
             "args": {
-                "Path": "C:/Users/user/app_data/brain/conv-id/../../other_repo/notes.md",
+                "Path": os.path.join(
+                    str(external_base),
+                    "app_data",
+                    "brain",
+                    "conv-id",
+                    "..",
+                    "..",
+                    "other_repo",
+                    "notes.md",
+                ),
                 "Content": "# Escaped brain dir\n",
             },
         },
         "workspacePaths": [ws_str],
     })
     assert res_traversal_escape["decision"] == "force_ask"
+
+    # Windows-only cross-drive check (e.g. workspace on D:, target on Z:)
+    if os.name == "nt":
+        ws_drive = os.path.splitdrive(ws_str)[0].upper()
+        alt_drive = "Z:" if ws_drive != "Z:" else "Y:"
+
+        res_cross_drive_brain = run_hook(FILE_GUARD, {
+            "toolCall": {
+                "name": "write_file",
+                "args": {
+                    "Path": f"{alt_drive}/Users/user/app_data/brain/2e8912e4-f711-4ded-8a2e-a521e1ac1156/walkthrough.md",
+                    "Content": "# Cross-drive brain walkthrough\n",
+                },
+            },
+            "workspacePaths": [ws_str],
+        })
+        assert res_cross_drive_brain["decision"] == "allow"
+
+        res_cross_drive_other = run_hook(FILE_GUARD, {
+            "toolCall": {
+                "name": "write_file",
+                "args": {
+                    "Path": f"{alt_drive}/Users/user/other_repo/README.md",
+                    "Content": "# Unauthorized cross-drive edit\n",
+                },
+            },
+            "workspacePaths": [ws_str],
+        })
+        assert res_cross_drive_other["decision"] == "force_ask"
 
 
 

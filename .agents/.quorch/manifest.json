@@ -1870,6 +1870,17 @@
       "git_head_sha": "8e9ebfce2dfb4484f426840f99aa94265e070ee9",
       "git_index_mtime": 1795233018.7561584,
       "released": true
+    },
+    "2026-11-21_fix_ubuntu_ci_test_hooks::1.1": {
+      "task_id": "2026-11-21_fix_ubuntu_ci_test_hooks::1.1",
+      "md_sha256": "d0a7702a068ce7dc4a2067e7a9371e36a072a5e7494fc0bac3184d1ac9a0abc6",
+      "generation": 1,
+      "holder_token": "token_1795253789074_14720",
+      "last_heartbeat_monotonic_ns": 377878156000000,
+      "last_heartbeat_wall_utc": "2026-11-21T09:43:03.425062+00:00",
+      "git_head_sha": "9146dd4e25ca962b0e16db6ccd137f326deee01f",
+      "git_index_mtime": 1795254183.2197125,
+      "released": true
     }
   }
 }

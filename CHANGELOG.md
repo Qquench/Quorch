@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-21] 2026-11-21_fix_ubuntu_ci_test_hooks.md
+
+- **Task 1.1**: 修复 Ubuntu CI 中 test_hooks.py 跨平台外部路径硬编码导致的断言失败
+
 ## [2026-11-21] 2026-11-21_v1_35_vendor_neutral_subagent_tier_routing.md
 
 - **Task 35.1**: 规则、Skill 与三端入口路由卡的厂商/档位中立路由契约补全
