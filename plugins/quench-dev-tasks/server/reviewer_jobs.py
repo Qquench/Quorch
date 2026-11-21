@@ -183,11 +183,13 @@ class PollSnapshot:
         if not self.phase:
             phase_val = None
             if self.progress is not None:
-                if hasattr(self.progress, "phase") and self.progress.phase is not None:
-                    p = self.progress.phase
-                    phase_val = p.value if isinstance(p, Enum) else str(p)
-                elif isinstance(self.progress, Mapping) and "phase" in self.progress:
-                    phase_val = str(self.progress["phase"])
+                if isinstance(self.progress, Mapping):
+                    if "phase" in self.progress:
+                        phase_val = str(self.progress["phase"])
+                else:
+                    p = getattr(self.progress, "phase", None)
+                    if p is not None:
+                        phase_val = p.value if isinstance(p, Enum) else str(p)
             if not phase_val:
                 phase_val = self.state
             object.__setattr__(self, "phase", phase_val)

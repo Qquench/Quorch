@@ -1076,10 +1076,8 @@ def _build_quench_stack_config(
     rp_data = data.get("reaper_policy")
     if not isinstance(rp_data, dict):
         gov_data = data.get("governance")
-        if isinstance(gov_data, dict) and isinstance(gov_data.get("reaper_policy"), dict):
-            rp_data = gov_data.get("reaper_policy")
-        else:
-            rp_data = {}
+        gov_rp = gov_data.get("reaper_policy") if isinstance(gov_data, dict) else None
+        rp_data = gov_rp if isinstance(gov_rp, dict) else {}
 
     reaper_policy = ReaperPolicyConfig(
         heartbeat_silence_threshold_seconds=_coerce_positive_int(
@@ -1366,9 +1364,13 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
     # 检查本地私有覆盖配置 .agents/quench_stack.local.yaml (已在 .gitignore 中忽略)
     def _merge_local_override(base: dict, overlay: dict) -> dict:
         """对安全与治理字段执行单调收紧硬门禁与基线锁定；其余字段走深合并。"""
+        def _as_dict(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+            val = mapping.get(key)
+            return val if isinstance(val, dict) else {}
+
         audit_order = {"block": 2, "warn": 1, "allow": 0}
-        base_ag = base.get("audit_gate") if isinstance(base.get("audit_gate"), dict) else {}
-        over_ag = overlay.get("audit_gate") if isinstance(overlay.get("audit_gate"), dict) else {}
+        base_ag = _as_dict(base, "audit_gate")
+        over_ag = _as_dict(overlay, "audit_gate")
         if base_ag.get("enabled") is True and over_ag.get("enabled") is False:
             raise ConfigError(
                 f"Local override cannot disable audit_gate when enabled in baseline ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
@@ -1397,8 +1399,8 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
                     f"本地覆盖不得放宽 audit_gate.accepted_sources: {widened}"
                 )
 
-        base_scope = base.get("governance_scope") if isinstance(base.get("governance_scope"), dict) else {}
-        over_scope = overlay.get("governance_scope") if isinstance(overlay.get("governance_scope"), dict) else {}
+        base_scope = _as_dict(base, "governance_scope")
+        over_scope = _as_dict(overlay, "governance_scope")
         if "managed_paths" in over_scope and "managed_paths" in base_scope:
             base_managed = set(base_scope["managed_paths"])
             over_managed = set(over_scope["managed_paths"])
@@ -1419,8 +1421,8 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
                     "本地覆盖不得放宽基线非受管路径"
                 )
 
-        base_gov = base.get("governance") if isinstance(base.get("governance"), dict) else {}
-        over_gov = overlay.get("governance") if isinstance(overlay.get("governance"), dict) else {}
+        base_gov = _as_dict(base, "governance")
+        over_gov = _as_dict(overlay, "governance")
         if "manifest_path" in over_gov and base_gov.get("manifest_path") != over_gov.get("manifest_path"):
             raise ConfigError(
                 f"Local override cannot redirect governance.manifest_path ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "

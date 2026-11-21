@@ -1881,6 +1881,50 @@
       "git_head_sha": "9146dd4e25ca962b0e16db6ccd137f326deee01f",
       "git_index_mtime": 1795254183.2197125,
       "released": true
+    },
+    "2026-11-21_fix_real_pyright_type_issues::1.1": {
+      "task_id": "2026-11-21_fix_real_pyright_type_issues::1.1",
+      "md_sha256": "b74a572e670d2d7a2f85da64b009f65f4fd5073c1fb647d1a7505e8fe093e15d",
+      "generation": 1,
+      "holder_token": "token_1795266020300_14720",
+      "last_heartbeat_monotonic_ns": 389824812000000,
+      "last_heartbeat_wall_utc": "2026-11-21T13:02:10.092694+00:00",
+      "git_head_sha": "d1b3c6e113d2eafa17df940bceb0793152c9abff",
+      "git_index_mtime": 1795255504.3139007,
+      "released": true
+    },
+    "2026-11-21_fix_real_pyright_type_issues::1.2": {
+      "task_id": "2026-11-21_fix_real_pyright_type_issues::1.2",
+      "md_sha256": "b74a572e670d2d7a2f85da64b009f65f4fd5073c1fb647d1a7505e8fe093e15d",
+      "generation": 1,
+      "holder_token": "token_1795266138501_14720",
+      "last_heartbeat_monotonic_ns": 390138171000000,
+      "last_heartbeat_wall_utc": "2026-11-21T13:07:23.440237+00:00",
+      "git_head_sha": "d1b3c6e113d2eafa17df940bceb0793152c9abff",
+      "git_index_mtime": 1795266443.300566,
+      "released": true
+    },
+    "2026-11-22_pyright_pyrefly_dual_compat::1.1": {
+      "task_id": "2026-11-22_pyright_pyrefly_dual_compat::1.1",
+      "md_sha256": "b0508f7a298a45fbcaf5223691a712db619230fef8f0f71b79cc0dd5eaec9175",
+      "generation": 1,
+      "holder_token": "token_1795267999504_14720",
+      "last_heartbeat_monotonic_ns": 391772625000000,
+      "last_heartbeat_wall_utc": "2026-11-21T13:34:37.895584+00:00",
+      "git_head_sha": "d1b3c6e113d2eafa17df940bceb0793152c9abff",
+      "git_index_mtime": 1795266443.300566,
+      "released": true
+    },
+    "2026-11-22_pyright_pyrefly_dual_compat::1.2": {
+      "task_id": "2026-11-22_pyright_pyrefly_dual_compat::1.2",
+      "md_sha256": "b0508f7a298a45fbcaf5223691a712db619230fef8f0f71b79cc0dd5eaec9175",
+      "generation": 1,
+      "holder_token": "token_1795268087374_14720",
+      "last_heartbeat_monotonic_ns": 392114156000000,
+      "last_heartbeat_wall_utc": "2026-11-21T13:40:21.457521+00:00",
+      "git_head_sha": "d1b3c6e113d2eafa17df940bceb0793152c9abff",
+      "git_index_mtime": 1795268420.9715188,
+      "released": true
     }
   }
 }

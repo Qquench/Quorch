@@ -146,7 +146,7 @@ def test_r3_invariant_manual_always_last_and_available(test_workspace):
         reason="batch_complete",
     )
 
-    strategies = envelope["strategies"]
+    strategies = envelope.get("strategies", [])
     assert len(strategies) >= 1
     last_strat = strategies[-1]
     assert last_strat["strategy"] == "manual"
@@ -168,7 +168,7 @@ def test_ability_envelope_negotiation_tiers(test_workspace, monkeypatch):
         reason="batch_complete",
         host_capabilities=["subagent"],
     )
-    assert env1["preferred"] == "subagent"
+    assert env1.get("preferred") == "subagent"
 
     # 2. Host does NOT support subagent, engine key present -> fallback to "engine"
     env2 = _resolve_handoff_envelope(
@@ -179,7 +179,7 @@ def test_ability_envelope_negotiation_tiers(test_workspace, monkeypatch):
         reason="batch_complete",
         host_capabilities=[],
     )
-    assert env2["preferred"] == "engine"
+    assert env2.get("preferred") == "engine"
 
     # 3. Host does not support subagent, NO key -> fallback to "manual"
     monkeypatch.delenv("DEEPSEEK_API_KEY_Quench", raising=False)
@@ -194,7 +194,7 @@ def test_ability_envelope_negotiation_tiers(test_workspace, monkeypatch):
             reason="batch_complete",
             host_capabilities=[],
         )
-        assert env3["preferred"] == "manual"
+        assert env3.get("preferred") == "manual"
 
 
 def test_mode_manual_override(test_workspace, monkeypatch):
@@ -211,7 +211,7 @@ def test_mode_manual_override(test_workspace, monkeypatch):
         reason="escalation",
         host_capabilities=["subagent"],
     )
-    assert env["preferred"] == "manual"
+    assert env.get("preferred") == "manual"
 
 
 def test_zero_stdout_pollution(test_workspace, capfd, monkeypatch):
@@ -266,7 +266,7 @@ def test_secret_desensitization(test_workspace, monkeypatch):
     serialized = json.dumps(envelope, ensure_ascii=False)
     assert secret_key not in serialized
 
-    engine_strat = next(s for s in envelope["strategies"] if s["strategy"] == "engine")
+    engine_strat = next(s for s in envelope.get("strategies", []) if s["strategy"] == "engine")
     assert engine_strat["payload"]["api_key_present"] is True
     assert "secret" not in json.dumps(engine_strat["payload"])
 
@@ -316,7 +316,7 @@ def test_path_traversal_defense(test_workspace):
         context_files=evil_context,
     )
 
-    subagent_strat = next(s for s in envelope["strategies"] if s["strategy"] == "subagent")
+    subagent_strat = next(s for s in envelope.get("strategies", []) if s["strategy"] == "subagent")
     ctx_files = subagent_strat["payload"]["context_files"]
 
     assert ctx_files == ["valid_sub/file.py"]

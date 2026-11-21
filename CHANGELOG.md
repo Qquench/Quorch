@@ -3,6 +3,16 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-22] 2026-11-22_pyright_pyrefly_dual_compat.md
+
+- **Task 1.1**: 在根与服务端 pyproject.toml 中同步补充 [tool.pyright] extraPaths 与 PEP 562 兼容配置
+- **Task 1.2**: 对齐负向单测忽略标记与测试契约访问以实现 Pyright/Pyrefly 双引擎零报错
+
+## [2026-11-22] 2026-11-21_fix_real_pyright_type_issues.md
+
+- **Task 1.1**: 修复 probe_client_capabilities、project_config 与 manifest 中的真实类型窄化与流守卫问题
+- **Task 1.2**: 修复 reviewer_jobs、reviewer_engine 与 server 中的属性守卫及 TypedDict 安全索引问题
+
 ## [2026-11-21] 2026-11-21_fix_ubuntu_ci_test_hooks.md
 
 - **Task 1.1**: 修复 Ubuntu CI 中 test_hooks.py 跨平台外部路径硬编码导致的断言失败

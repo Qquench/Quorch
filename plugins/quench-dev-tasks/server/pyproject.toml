@@ -25,3 +25,7 @@ search-path = ["../../../scripts", "../scripts", "hooks", "tests"]
 unnecessary-type-conversion = "ignore"
 untyped-import = "ignore"
 
+[tool.pyright]
+extraPaths = ["../../../scripts", "../scripts", "hooks", "tests"]
+reportUnsupportedDunderAll = "none"
+

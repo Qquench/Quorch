@@ -323,7 +323,7 @@ def test_poll_structured_nonterminal_projection(tmp_path):
 
     # 2. 显式传入 raw_text=True 抛出 TypeError
     with pytest.raises(TypeError) as excinfo:
-        supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)  # pyrefly: ignore[unexpected-keyword]
+        supervisor.poll(rec.job_id, session_id="raw_text_sess", raw_text=True)  # type: ignore
     assert "unexpected keyword argument" in str(excinfo.value) or "raw_text" in str(excinfo.value)
 
 
@@ -475,7 +475,7 @@ def test_heartbeat_single_line_projection_format():
     assert structured["state"] == "RUNNING"
 
     with pytest.raises(TypeError):
-        project_poll_result(snapshot, raw_text=True)  # pyrefly: ignore[unexpected-keyword]
+        project_poll_result(snapshot, raw_text=True)  # type: ignore
 
 
 def test_progress_snapshot_and_no_is_terminal_state(tmp_path):

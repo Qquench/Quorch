@@ -311,7 +311,10 @@ def mutate_manifest_under_lock(
                         f"expected {initial_generations}, got {current_generations} / 清单代际在事务内发生冲突"
                     )
 
-            if new_manifest is not initial_manifest or result is not False:
+            def _is_false_sentinel(val: Any) -> bool:
+                return val is False
+
+            if new_manifest is not initial_manifest or not _is_false_sentinel(result):
                 atomic_replace_manifest(workspace_root, new_manifest)
 
             return result

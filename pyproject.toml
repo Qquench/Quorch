@@ -11,3 +11,7 @@ search-path = ["scripts", "plugins/quench-dev-tasks/scripts", "plugins/quench-de
 unnecessary-type-conversion = "ignore"
 untyped-import = "ignore"
 
+[tool.pyright]
+extraPaths = ["scripts", "plugins/quench-dev-tasks/scripts", "plugins/quench-dev-tasks/server", "plugins/quench-dev-tasks/server/hooks", "plugins/quench-dev-tasks/server/tests"]
+reportUnsupportedDunderAll = "none"
+

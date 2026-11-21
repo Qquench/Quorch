@@ -131,7 +131,7 @@ def test_shadow_schema_matches_pending_poll_signature() -> None:
     )
 
     # Type hints and union detection (PEP 563 / PEP 604 safe)
-    dev_poll_fn = inspect.unwrap(server.dev_reviewer_poll.fn if hasattr(server.dev_reviewer_poll, "fn") else server.dev_reviewer_poll)
+    dev_poll_fn = inspect.unwrap(getattr(server.dev_reviewer_poll, "fn", server.dev_reviewer_poll))
     assert set(get_args(get_type_hints(dev_poll_fn)["ctx"])) == {Context, type(None)}
     assert set(get_args(get_type_hints(pending_dev_reviewer_poll)["ctx"])) == {Context, type(None)}
 

@@ -363,7 +363,7 @@ def test_reconciliation_budget_ms_raises_type_error(workspace_with_baseline):
             snapshot=snapshot,
             whitelist_paths=["src/app.py"],
             unmanaged_patterns=["docs/**", "*.md"],
-            budget_ms=500.0,  # pyrefly: ignore[unexpected-keyword]
+            budget_ms=500.0,  # type: ignore
         )
     assert "unexpected keyword argument 'budget_ms'" in str(exc_info.value) or "budget_ms" in str(exc_info.value)
 

@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import concurrent.futures
 from datetime import datetime, timezone
+import io
 import json
 import os
 import shlex
@@ -23,10 +24,9 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Literal, TypedDict
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+for _stream in (sys.stdout, sys.stderr):
+    if isinstance(_stream, io.TextIOWrapper):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 class ClientCapabilityReport(TypedDict):

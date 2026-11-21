@@ -2307,7 +2307,7 @@ def dev_tasks_checkout(
             "rework_tasks": rework_tasks[:5],
             "handoff_recommended": True,
             "reviewer_handoff": envelope,
-            "handoff_card": envelope["legacy_card_markdown"],
+            "handoff_card": envelope.get("legacy_card_markdown", ""),
             "instruction": checkout_instruction,
             "message": f"Current batch has no '✅ Confirmed' tasks. (Pending: {len(pending_tasks)}, Rework: {len(rework_tasks)}) / 当前批次已无 '✅ 已确认' 任务。(待终审: {len(pending_tasks)} 项, 需返工: {len(rework_tasks)} 项)",
         }
@@ -3260,7 +3260,7 @@ def dev_tasks_escalate(
         "auto_diagnostics": auto_diagnostics,
         "engine": engine_provider,
         "reviewer_handoff": envelope,
-        "handoff_card": envelope["legacy_card_markdown"],
+        "handoff_card": envelope.get("legacy_card_markdown", ""),
         "instruction": (
             "[Architectural Escalation Recorded] Task escalated for in-depth review. "
             "Follow harness_next_action to evaluate via dev_reviewer_submit(mode='audit') or dispatch to Reviewer subagent / "

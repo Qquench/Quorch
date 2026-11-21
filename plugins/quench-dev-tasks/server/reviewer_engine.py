@@ -1902,9 +1902,10 @@ class ReviewerClient:
         finally:
             if sinks:
                 for s in sinks:
-                    if hasattr(s, "close"):
+                    close_fn = getattr(s, "close", None)
+                    if callable(close_fn):
                         try:
-                            s.close()
+                            close_fn()
                         except Exception:
                             pass
 
