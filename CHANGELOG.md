@@ -3,6 +3,10 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-27] 2026-11-27_ci_tier1_fast_budget_fix.md
+
+- **Task 36.17**: 修复 Windows CI Tier-1 耗时红灯：重型用例归位 Tier-2、无损优化 AST 扫描并收敛 TIER1_HARD_FAIL_S 为 10.0s SSOT
+
 ## [2026-11-26] 2026-11-26_v1_36_ci_6b14210_hotfix_and_archive.md
 
 - **Task 36.16**: 修复 6b14210 双平台 CI 失败并同步归档资产基线

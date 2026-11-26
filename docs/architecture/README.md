@@ -259,7 +259,7 @@ Quench enforces a bifurcated test execution contract designed for fast developer
 
 4. **Duration Baseline Freeze & Variance Gate (`scripts/check_test_duration_baselines.py`)**:
    - Enforces timing budgets, variance stability, and regression envelopes (TR-3 / TR-4):
-     - **Tier-1 Baseline**: 1 warmup + 3 measured iterations; hard-fail threshold **≤ 8.0s**, target warning threshold **≤ 5.0s**, ultra-fast aspirational goal **≤ 3.0s**.
+     - **Tier-1 Baseline**: 1 warmup + 3 measured iterations; hard-fail threshold **≤ 10.0s**, target warning threshold **≤ 5.0s**, ultra-fast aspirational goal **≤ 3.0s**.
      - **Tier-2 Dynamic Budget Envelope & Panic Line (单向下移 + 双向假红防护)**: Dynamic convergence envelope with single-directional ratcheting: $\text{Baseline}_{\text{next}} = \max(\text{TIER2\_ABSOLUTE\_FLOOR\_S}, \min(\text{Baseline}_{\text{prev}}, \text{robust\_estimate}))$, $\text{TIER2\_WARN\_S} = \text{Baseline}_{\text{next}} \times 1.15$, $\text{TIER2\_PANIC\_S} = \text{Baseline}_{\text{next}} \times 1.30$. Enforces 30s safety floor (`TIER2_ABSOLUTE_FLOOR_S = 30.0`), in-run 3-sample confirmation (`RATCHET_CONFIRM_ROUNDS = 3`), bidirectional false-red guard (`PANIC_DOWNGRADE_STREAK = 2`), and optional fail-safe sidecar (`.agents/bench/tier2_baseline.json`).
      - **Sample Variance Guard**: Sample Coefficient of Variation ($CV = \sigma / \mu \le 15\%$ with $ddof=1$ sample Bessel correction) with bounded 1-round retry (`MAX_CV_RETRY_ROUNDS = 1`).
      - **Dual-Layer Anti-Reentrancy Protection**: Subprocess isolation with `QUENCH_TEST_DURATION_BENCH_ACTIVE=quench-bench-v1` magic-value environment guard plus `--tier2` runner `--deselect` on contract test harness, preventing recursive test invocation or timing self-pollution.

@@ -67,7 +67,6 @@ def _sample_task(tid: str, file_path: str = "src/app.py") -> dict:
     }
 
 
-@pytest.mark.tier1_fast
 def test_archive_clears_autopilot_task_file_and_discovers_new_batch(tmp_path):
     """Task 36.1: dev_tasks_archive clears autopilot.task_file and missing task_file falls back to dev_tasks_dir scan."""
     ws = _init_ws(tmp_path)
@@ -101,7 +100,6 @@ def test_archive_clears_autopilot_task_file_and_discovers_new_batch(tmp_path):
     assert res_dict["harness_next_action"]["action"] == "REVIEW"
 
 
-@pytest.mark.tier1_fast
 def test_cumulative_runner_tasks_backward_compat_increment_and_fuse_reset(tmp_path):
     """Task 36.1: Legacy runtime_mode defaults cumulative_runner_tasks=0; complete increments, >=12 triggers spawn_fresh, checkout resets."""
     ws = _init_ws(tmp_path)
@@ -152,7 +150,6 @@ def test_cumulative_runner_tasks_backward_compat_increment_and_fuse_reset(tmp_pa
     assert load_runtime_mode(ws, False).autopilot.cumulative_runner_tasks == 0
 
 
-@pytest.mark.tier1_fast
 def test_runtime_mode_cas_mismatch_no_self_timeout_and_non_dict_tolerance(tmp_path):
     """Task 36.2: CAS mismatch avoids re-entering FileLock; non-dict JSON and autopilot:null are tolerated."""
     ws = _init_ws(tmp_path)
@@ -188,7 +185,6 @@ def test_runtime_mode_cas_mismatch_no_self_timeout_and_non_dict_tolerance(tmp_pa
     assert snap_null.runtime_mode_warning == "runtime_mode_invalid_autopilot_type"
 
 
-@pytest.mark.tier1_fast
 def test_runtime_mode_lock_timeout_graceful_degradation(tmp_path):
     """Task 36.2: Contended FileLock Timeout degrades gracefully with rejected_reason='lock_timeout'."""
     from filelock import FileLock
@@ -210,7 +206,6 @@ def test_runtime_mode_lock_timeout_graceful_degradation(tmp_path):
     assert snap.autopilot.stop_at == "after_review"
 
 
-@pytest.mark.tier1_fast
 def test_resolve_task_file_path_confinement_and_tool_error_handling(tmp_path):
     """Task 36.3: _resolve_task_file_path blocks workspace escapes and tool callers return structured errors."""
     ws = _init_ws(tmp_path)
@@ -266,7 +261,6 @@ def test_resolve_task_file_path_confinement_and_tool_error_handling(tmp_path):
     assert esc_ctx.get("context_files_loaded") == 1
 
 
-@pytest.mark.tier1_fast
 def test_python_source_has_real_assertions_ast_and_git_subdir_audit(tmp_path):
     """Task 36.3: AST assertion checker rejects comments/docstrings and git subdir/non-ASCII audit works."""
     assert _python_source_has_real_assertions("# assert True\n") is False
@@ -311,7 +305,6 @@ def test_python_source_has_real_assertions_ast_and_git_subdir_audit(tmp_path):
     assert audit_real["passed"] is True
 
 
-@pytest.mark.tier1_fast
 def test_naive_utc_bypass_expires_at_parsing(tmp_path):
     """Task 36.3: Naive ISO expires_at in .quench_bypass.json is interpreted as UTC."""
     ws = _init_ws(tmp_path)

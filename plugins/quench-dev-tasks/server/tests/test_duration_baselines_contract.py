@@ -185,9 +185,11 @@ def test_synthetic_cv_overrun_retry_behavior():
 
 
 def test_synthetic_budget_overrun_fails_closed():
-    """对抗注入：耗时均值超过 TIER1_HARD_FAIL_S (8.0s) 必须 fail-closed。"""
+    """对抗注入：耗时均值超过 bench_tool.TIER1_HARD_FAIL_S 必须 fail-closed。"""
+    overrun_s = bench_tool.TIER1_HARD_FAIL_S + 0.5
+
     def mock_slow_runner(cmd, env, timeout):
-        return 0, "25 passed in 9.0s", 8.5
+        return 0, f"25 passed in {overrun_s + 0.5:.1f}s", overrun_s
 
     ok, metrics, logs = bench_tool.run_tier1_benchmark(
         REPO_ROOT, iterations=3, allow_retry=False, runner_func=mock_slow_runner

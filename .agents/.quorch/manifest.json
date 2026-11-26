@@ -2101,6 +2101,17 @@
       "git_head_sha": "6b14210be45ea132b6799ea7ec10e4e17702fcf2",
       "git_index_mtime": 1795682679.8353324,
       "released": true
+    },
+    "2026-11-27_ci_tier1_fast_budget_fix::36.17": {
+      "task_id": "2026-11-27_ci_tier1_fast_budget_fix::36.17",
+      "md_sha256": "e61a6ff0c8d795c4757ac106fecaea1771a58fcf0dd6f1607f284584870062df",
+      "generation": 1,
+      "holder_token": "token_1795699605847_2016",
+      "last_heartbeat_monotonic_ns": 298109031000000,
+      "last_heartbeat_wall_utc": "2026-11-26T13:30:29.274438+00:00",
+      "git_head_sha": "ab5f6b5a704d85323311823b3598e39801d2272a",
+      "git_index_mtime": 1795697026.2731576,
+      "released": true
     }
   }
 }

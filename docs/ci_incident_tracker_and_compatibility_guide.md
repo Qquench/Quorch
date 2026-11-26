@@ -25,6 +25,7 @@
    - [案例 10: IDE 参数默认值剥离与 docstring 描述缺失引发大模型调用面漂移 (CI-2026-10-21-AST-01)](#案例-10-ide-参数默认值剥离与-docstring-描述缺失引发大模型调用面漂移-ci-2026-10-21-ast-01)
    - [案例 11: FastMCP Context 形参注入的零 Schema 漂移契约与 report_progress 版本能力矩阵 (CI-2026-10-22-MCP-01)](#案例-11-fastmcp-context-形参注入的零-schema-漂移契约与-report_progress-版本能力矩阵-ci-2026-10-22-mcp-01)
    - [案例 12: Python 3.12 跨平台路径分类器与 Unix Filelock 锁文件 W10 零写契约违规 (INC-20261022-01)](#案例-12-python-312-跨平台路径分类器与-unix-filelock-锁文件-w10-零写契约违规-inc-20261022-01)
+   - [案例 13: 重型集成测试渗入 tier1_fast 与冷启动硬红线过紧导致 Windows CI 红灯 (INC-20261126-01)](#案例-13-重型集成测试渗入-tier1_fast-与冷启动硬红线过紧导致-windows-ci-红灯-inc-20261126-01)
 4. [跨平台编码安全准则 (Defensive Guidelines)](#4-跨平台编码安全准则-defensive-guidelines)
 5. [CI 验证与双向回归自检矩阵](#5-ci-验证与双向回归自检矩阵)
 6. [新增 CI 异常案例归档规范与模板](#6-新增-ci-异常案例归档规范与模板)
@@ -70,6 +71,7 @@ Quench Dev-Orchestrator 是在 **Windows (Google Antigravity IDE)** 环境中孵
 | **CI-2026-10-21-AST-01** | 2026-10-21 | Task 1.1 / `main` | Cross-Platform | IDE 剥离 default 导致大模型主动传入 `raw_text=True` <!-- quench-prompt-surface:historical --> 破坏结构化契约 | [案例 10](#案例-10-ide-参数默认值剥离与-docstring-描述缺失引发大模型调用面漂移-ci-2026-10-21-ast-01) | `main` | ✅ 已闭环 |
 | **CI-2026-10-22-MCP-01** | 2026-10-22 | Task 24.1 / `main` | Ubuntu 22.04 (All Py) | Context 形参注入零 Schema 漂移契约 | [案例 11](#案例-11-fastmcp-context-形参注入的零-schema-漂移契约与-report_progress-版本能力矩阵-ci-2026-10-22-mcp-01) | `main` | ✅ 已闭环 |
 | **INC-20261022-01** | 2026-10-22 | Task 1.1 / `main` | Linux CI (Py 3.12) | 路径分类器跨平台歧义与 Unix FileLock W10 零写契约假红 | [案例 12](#案例-12-python-312-跨平台路径分类器与-unix-filelock-锁文件-w10-零写契约违规-inc-20261022-01) | `main` | ✅ 已闭环 |
+| **INC-20261126-01** | 2026-11-26 | `ab5f6b5` / `main` (Run 45822381023) | Windows Server (Py 3.12) | `test_tier1_fast_budget_execution` 耗时 8.77s 超 8.0s 红线 | [案例 13](#案例-13-重型集成测试渗入-tier1_fast-与冷启动硬红线过紧导致-windows-ci-红灯-inc-20261126-01) | Task 36.17 | ✅ 已闭环 |
 
 ---
 
@@ -518,6 +520,28 @@ foreach ($job in $jobs.jobs) {
      - 静态 AST 扫描确保 `_snapshot_business_state_scandir` 无显式 `os.stat` / `Path.stat` 冗余系统调用开销，确保零 stat 契约与 W10 兼容性。
   3. **防御准则沉淀 (Guideline 9)**:
      - 跨平台路径识别与 W10 锁原语豁免纪律。
+
+---
+
+### 案例 13: 重型集成测试渗入 tier1_fast 与冷启动硬红线过紧导致 Windows CI 红灯 (INC-20261126-01)
+
+- **首次触发节点**: 提交 `ab5f6b5` / `main`（GitHub Actions Run `45822381023`，Job `139917670013`）
+- **现象**:
+  - Ubuntu 3.12 全绿（`1416 passed, 1 skipped`）；
+  - Windows 3.12 失败 1 项（`1 failed, 1416 passed`）：
+    ```text
+    FAILED plugins/quench-dev-tasks/server/tests/test_tiering_gate_contract.py::test_tier1_fast_budget_execution
+    AssertionError: Tier-1 budget exceeded: took 8.77s (budget <= 8.0s)
+    ```
+  - 本地 Windows 稳定复现：`test_tier1_fast_budget_execution` 耗时 `8.28s`，`test_tier1_real_anchor_execution` 均值 `8.23s`（均超 `8.0s`）。
+- **根因深度复盘**:
+  1. **重型集成用例误入 Tier-1**：`6b14210` 新增的 `test_v1_36_batch1_gateway_contracts.py` 将 7 个包含 7 次 `git` 子进程调用、完整 MCP 落盘生命周期（`propose→confirm→checkout→complete→archive`）与 `FileLock` 超时等待的集成测试标注为 `@pytest.mark.tier1_fast`（同批 `batch2`~`batch5` 均未标注），经 `ab5f6b5`（Task 36.14）恢复 `b"mark.tier1_fast"` 全量采集后单文件额外拉高 `2.1s~2.7s`。
+  2. **AST 静态扫描未前置过滤**：`test_missing_sentinel_singleton.py`（`0.70s`）与 `test_import_mode_contract.py`（`0.49s`）在 Tier-1 中无条件遍历并 `ast.parse` 大量无关源码/测试文件。
+  3. **硬红线双写且 Windows 冷启动余量过窄**：Windows 环境下 Python 解释器启动与 pytest 采集基座约 `3.3s`，原 `8.0s` 硬红线在 `test_tiering_gate_contract.py` 与 `scripts/check_test_duration_baselines.py` 两处重复硬编码，抗多租户 CI 调度抖动余量不足。
+- **加固方案 (三重闭环，Task 36.17)**:
+  1. **重型集成测试归位 Tier-2（零覆盖损失）**：移除 `test_v1_36_batch1_gateway_contracts.py` 的 7 处 `@pytest.mark.tier1_fast` 标记，全部 7 项用例仍在全量 CI / Tier-2 完整执行。
+  2. **无损 AST 预过滤与正负回归单测**：为 `test_missing_sentinel_singleton.py` 与 `test_import_mode_contract.py` 增加 `os.walk` 目录剪枝及语法等价文本/正则预过滤，并新增合成违规夹具单测证明零漏报，使 Windows `tier1_fast` 基准均值由 `8.23s` 降至 **`4.86s`**（回到 `5.0s` 目标线内）。
+  3. **SSOT 红线收敛**：`scripts/check_test_duration_baselines.py::TIER1_HARD_FAIL_S` 调整为 `10.0s`（2× `TIER1_TARGET_S`，保持 `5.0s` WARN / `3.0s` INFO 不变），`test_tiering_gate_contract.py` 与 `test_duration_baselines_contract.py` 统一引用单一事实源，杜绝魔法数字漂移。
 
 
 

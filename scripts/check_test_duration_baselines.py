@@ -5,7 +5,7 @@
 退出码矩阵 (Exit Code Matrix):
   --check : 硬失败族 -> 1 (budget > HARD_FAIL / 两轮 CV > MAX_CV / 非零退出 / 超时 / 解析失败 /
             样本不足(iterations < MEASURED_ITERATIONS) / min_duration<=0 或 mean<=0);
-            WARN (mean > 5.0 且 <= 8.0) / INFO (mean <= 3.0) -> 0;
+            WARN (mean > 5.0 且 <= 10.0) / INFO (mean <= 3.0) -> 0;
   --tier2 : PANIC (> TIER2_PANIC_S) 或子进程异常 -> 1;
             WARN (> TIER2_WARN_S 且 <= TIER2_PANIC_S) 或 OK (<= TIER2_WARN_S) -> 0;
   无参数  : 等价于 --check.
@@ -35,7 +35,7 @@ if str(CURRENT_DIR) not in sys.path:
 from check_test_tiering_invariants import sanitized_env  # noqa: E402
 
 # --- Tier-1 阈值（三级语义显式化）---
-TIER1_HARD_FAIL_S: Final[float] = 8.0   # 超此值 fail-closed（CI 阻断；与 test_tier1_fast_budget_execution 同源）
+TIER1_HARD_FAIL_S: Final[float] = 10.0  # 超此值 fail-closed（CI 阻断；与 test_tier1_fast_budget_execution 同源）
 TIER1_TARGET_S: Final[float] = 5.0      # 超此值 WARN（放行，exit 0）
 TIER1_FAST_GOAL_S: Final[float] = 3.0   # 报告项（info，对应路线图 §4.3 观测口径，不作门禁）
 

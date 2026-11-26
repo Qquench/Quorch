@@ -16,6 +16,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import check_test_tiering_invariants as tiering_gate  # noqa: E402
+from check_test_duration_baselines import TIER1_HARD_FAIL_S  # noqa: E402
 
 
 def test_tiering_gate_clean_repo_passes():
@@ -124,7 +125,7 @@ def test_no_double_import_identity_r3():
 
 
 def test_tier1_fast_budget_execution():
-    """Verify that running pytest -m tier1_fast executes within budget (<=8s, target <=5s)."""
+    """Verify that running pytest -m tier1_fast executes within budget (<= TIER1_HARD_FAIL_S, target <= 5.0s)."""
     t0 = time.monotonic()
     res = subprocess.run(
         [sys.executable, "-m", "pytest", "-m", "tier1_fast", "-q"],
@@ -138,4 +139,6 @@ def test_tier1_fast_budget_execution():
     )
     elapsed = time.monotonic() - t0
     assert res.returncode == 0, f"pytest -m tier1_fast failed:\n{res.stderr}\n{res.stdout}"
-    assert elapsed <= 8.0, f"Tier-1 budget exceeded: took {elapsed:.2f}s (budget <= 8.0s)"
+    assert elapsed <= TIER1_HARD_FAIL_S, (
+        f"Tier-1 budget exceeded: took {elapsed:.2f}s (budget <= {TIER1_HARD_FAIL_S:.1f}s)"
+    )

@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import ast
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -21,29 +23,56 @@ def test_production_imports_are_absolute_only(root: Path | None = None) -> None:
 
     relative_imports: list[str] = []
 
-    for py_path in server_dir.rglob("*.py"):
-        if "tests" in py_path.parts:
-            continue
-        if py_path.name == "__init__.py":
-            continue
-        if any(part.startswith(".") or part == "venv" for part in py_path.parts):
-            continue
+    for dirpath, dirs, filenames in os.walk(server_dir):
+        dirs[:] = [
+            d
+            for d in dirs
+            if not (d.startswith(".") or d in ("tests", "__pycache__", "venv"))
+        ]
+        for fname in filenames:
+            if not fname.endswith(".py") or fname == "__init__.py":
+                continue
+            py_path = Path(dirpath) / fname
+            source_text = py_path.read_text(encoding="utf-8")
+            if not re.search(r"\bfrom(?:[ \t]|\\\r?\n)*\.", source_text):
+                continue
 
-        try:
-            tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
-        except Exception as e:
-            pytest.fail(f"Failed to parse AST for {py_path}: {e}")
+            try:
+                tree = ast.parse(source_text, filename=str(py_path))
+            except Exception as e:
+                pytest.fail(f"Failed to parse AST for {py_path}: {e}")
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.level or 0) > 0:
-                relative_imports.append(
-                    f"{py_path.name}:{node.lineno} -> from {'.' * node.level}{node.module or ''} import ..."
-                )
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and (node.level or 0) > 0:
+                    relative_imports.append(
+                        f"{py_path.name}:{node.lineno} -> from {'.' * node.level}{node.module or ''} import ..."
+                    )
 
     assert not relative_imports, (
         f"Found {len(relative_imports)} residual relative imports in production modules:\n"
         + "\n".join(relative_imports)
     )
+
+
+def test_production_imports_scanner_catches_relative_imports(tmp_path: Path) -> None:
+    """Verify relative import scanner catches all valid Python relative import forms and allows absolute imports."""
+    bad_variants = [
+        ("dot_space", "from .foo import bar\n"),
+        ("dot_nospace", "from.foo import bar\n"),
+        ("double_dot", "from ..pkg import baz\n"),
+        ("line_continued", "from \\\n .foo import bar\n"),
+    ]
+    for name, code in bad_variants:
+        case_dir = tmp_path / name
+        case_dir.mkdir()
+        (case_dir / "mod.py").write_text(code, encoding="utf-8")
+        with pytest.raises(AssertionError, match="residual relative imports"):
+            test_production_imports_are_absolute_only(root=case_dir)
+
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    (clean_dir / "mod.py").write_text("from foo.bar import baz\n", encoding="utf-8")
+    test_production_imports_are_absolute_only(root=clean_dir)
 
 
 def test_daemon_entrypoint_pins_server_on_syspath() -> None:

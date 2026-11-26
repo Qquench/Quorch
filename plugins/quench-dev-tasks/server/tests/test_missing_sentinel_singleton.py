@@ -10,8 +10,10 @@ Sole source of truth for sentinel definition: Task 1.1 (tool_surface_constants.p
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 import copy
 import importlib.util
+import os
 import pickle
 import sys
 from pathlib import Path
@@ -93,6 +95,53 @@ def test_get_default_returns_canonical_sentinel_on_missing_param() -> None:
     assert val_tool is MISSING
 
 
+def _scan_missing_sentinel_violations(scan_dirs: Sequence[Path]) -> list[str]:
+    """Scan Python files under scan_dirs for module-level bare object() MISSING assignments."""
+    violations: list[str] = []
+
+    for scan_dir in scan_dirs:
+        for dirpath, dirs, filenames in os.walk(scan_dir):
+            dirs[:] = [
+                d
+                for d in dirs
+                if not (d.startswith(".") or d in ("__pycache__", "venv") or "site-packages" in d)
+            ]
+            for fname in filenames:
+                if not fname.endswith(".py"):
+                    continue
+                py_path = Path(dirpath) / fname
+                try:
+                    source_text = py_path.read_text(encoding="utf-8")
+                    if "MISSING" not in source_text or "object" not in source_text:
+                        continue
+                    tree = ast.parse(source_text, filename=str(py_path))
+                except Exception as exc:
+                    violations.append(f"{py_path}: Parse error {exc}")
+                    continue
+
+                for node in tree.body:
+                    if isinstance(node, ast.Assign):
+                        if (
+                            isinstance(node.value, ast.Call)
+                            and isinstance(node.value.func, ast.Name)
+                            and node.value.func.id == "object"
+                        ):
+                            for target in node.targets:
+                                if isinstance(target, ast.Name) and "MISSING" in target.id:
+                                    violations.append(f"{py_path}:{node.lineno} {target.id} = object()")
+                    elif isinstance(node, ast.AnnAssign):
+                        if (
+                            node.value is not None
+                            and isinstance(node.value, ast.Call)
+                            and isinstance(node.value.func, ast.Name)
+                            and node.value.func.id == "object"
+                        ):
+                            if isinstance(node.target, ast.Name) and "MISSING" in node.target.id:
+                                violations.append(f"{py_path}:{node.lineno} {node.target.id} = object()")
+
+    return violations
+
+
 def test_only_one_missing_sentinel_definition_in_repo() -> None:
     """AST static scan across plugins/quench-dev-tasks/server/ and scripts/:
     assert count == 0 for module-level assignments of bare object() where target name contains MISSING.
@@ -103,36 +152,29 @@ def test_only_one_missing_sentinel_definition_in_repo() -> None:
         repo_root / "scripts",
     ]
 
-    violations: list[str] = []
-
-    for scan_dir in scan_dirs:
-        for py_path in scan_dir.rglob("*.py"):
-            if any(part.startswith(".") or part == "__pycache__" or "site-packages" in part for part in py_path.parts):
-                continue
-            try:
-                tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
-            except Exception as exc:
-                violations.append(f"{py_path}: Parse error {exc}")
-                continue
-
-            for node in tree.body:
-                if isinstance(node, ast.Assign):
-                    if (
-                        isinstance(node.value, ast.Call)
-                        and isinstance(node.value.func, ast.Name)
-                        and node.value.func.id == "object"
-                    ):
-                        for target in node.targets:
-                            if isinstance(target, ast.Name) and "MISSING" in target.id:
-                                violations.append(f"{py_path}:{node.lineno} {target.id} = object()")
-                elif isinstance(node, ast.AnnAssign):
-                    if (
-                        node.value is not None
-                        and isinstance(node.value, ast.Call)
-                        and isinstance(node.value.func, ast.Name)
-                        and node.value.func.id == "object"
-                    ):
-                        if isinstance(node.target, ast.Name) and "MISSING" in node.target.id:
-                            violations.append(f"{py_path}:{node.lineno} {node.target.id} = object()")
-
+    violations = _scan_missing_sentinel_violations(scan_dirs)
     assert len(violations) == 0, "Found bare object() MISSING assignments:\n" + "\n".join(violations)
+
+
+def test_missing_sentinel_scanner_catches_synthetic_violations(tmp_path: Path) -> None:
+    """Verify _scan_missing_sentinel_violations detects Assign/AnnAssign violations and passes clean files."""
+    assign_dir = tmp_path / "assign_case"
+    assign_dir.mkdir()
+    (assign_dir / "bad_assign.py").write_text("FOO_MISSING = object()\n", encoding="utf-8")
+    assign_violations = _scan_missing_sentinel_violations([assign_dir])
+    assert len(assign_violations) == 1
+    assert "FOO_MISSING = object()" in assign_violations[0]
+
+    ann_dir = tmp_path / "ann_case"
+    ann_dir.mkdir()
+    (ann_dir / "bad_ann.py").write_text("BAR_MISSING: object = object()\n", encoding="utf-8")
+    ann_violations = _scan_missing_sentinel_violations([ann_dir])
+    assert len(ann_violations) == 1
+    assert "BAR_MISSING = object()" in ann_violations[0]
+
+    clean_dir = tmp_path / "clean_case"
+    clean_dir.mkdir()
+    (clean_dir / "no_missing.py").write_text("CLEAN_SENTINEL = object()\n", encoding="utf-8")
+    (clean_dir / "no_object.py").write_text("OTHER_MISSING = None\n", encoding="utf-8")
+    (clean_dir / "import_only.py").write_text("from tool_surface_constants import MISSING\n", encoding="utf-8")
+    assert _scan_missing_sentinel_violations([clean_dir]) == []
