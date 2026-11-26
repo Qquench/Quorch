@@ -120,3 +120,21 @@ def test_append_changelog_entry_golden_fidelity(monkeypatch: pytest.MonkeyPatch)
     finally:
         if os.path.exists(exist_cl_path):
             os.remove(exist_cl_path)
+
+
+def test_append_changelog_entry_concurrent_atomic(tmp_path):
+    """验证 append_changelog_entry 并发写入下受 FileLock 与原子替换保护无损坏。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    cl_path = tmp_path / "nested" / "CHANGELOG.md"
+    tasks = [TaskItem(id="1", title="并发项", status="✔️ 已完成", line_number=1, raw_line="")]
+
+    def _worker(idx: int) -> None:
+        reporting.append_changelog_entry(str(cl_path), f"2026-11-26_t{idx}.md", tasks)
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(_worker, range(6)))
+
+    text = cl_path.read_text(encoding="utf-8")
+    for idx in range(6):
+        assert f"2026-11-26_t{idx}.md" in text

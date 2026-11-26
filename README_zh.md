@@ -132,7 +132,7 @@ reason=【未纳管代码修改确认 / Unmanaged Code Modification Confirmation
     DoD 单测与 Diff 审计 ──▶ ✔️ 已完成 ──▶ CHANGELOG.md
 ```
 
-- **厂商中立审查引擎 (`ReviewerClient`)**：支持同一 IDE 环境内的高阶子代理与人工切模协作，也支持通过声明式 `PROVIDER_PRESETS` 注册表按需接入 OpenAI、DeepSeek（含 Prompt Cache 感知）、通用代理及企业内网自建满血模型集群（如 `vLLM` / `Ollama` OpenAI 兼容网关），并通过 `scripts/check_no_api_bypass.py` 静态 AST 门禁确保单一出口与零厂商硬编码。
+- **厂商中立审查引擎 (`ReviewerClient`)**：支持同一 IDE 环境内的高阶子代理与人工切模协作，也支持通过 `.agents/quench_stack.yaml` / `.agents/quench_stack.local.yaml` 声明式接入任意 OpenAI 兼容端点（`PROVIDER_PRESETS` 保持空表以杜绝硬编码厂商预设），并通过 `plugins/quench-dev-tasks/scripts/check_no_api_bypass.py` 静态 AST 门禁确保单一出口与零厂商硬编码。
 - **严格防角色扮演与结构化契约**：异步轮询非终态恒定返回 <= 1KB 的极简快照，终态裁定上限 40,000 字符；外部引擎不可用时统一输出 `findings == ""` 的显式降级卡片。
 - **实时思考流落盘与 Stdio 纯净度**：思维链实时写入 `.agents/logs/reviewer/`（1024KB 硬封顶安全轮转 + 跨块流式脱敏），100% 保障 MCP `stdout` JSON-RPC 通道纯净。
 - **跨进程排他锁与六字段契约**：由 `filelock`、心跳租约与工作区基线 Git diff 对账守护，每项任务均显式约束【涉及文件】、【缺陷根因与修改目标】、【目标签名与类型契约】、【分步改造指引】、【防御与边缘校验】和【DoD 验证命令】。
@@ -147,7 +147,7 @@ reason=【未纳管代码修改确认 / Unmanaged Code Modification Confirmation
 > **作者说明与诚挚提示**  
 > 本项目源于我个人在 **Windows 环境下使用 Google Antigravity IDE** 进行日常开发时的实际工程痛点与治理需求。其底层核心状态机、治理引擎与 Antigravity 拦截链路已在本地经过充分实战跑通与验证。
 >
-> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然仓库内已配备完整自动化测试套件（`pytest` 共计 **1,318 项收集用例**），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
+> 然而，针对其他开发工具（如 **Cursor**、Windsurf 等）以及跨操作系统的适配层代码，由于我个人缺乏相关的实操与开发经验，相关模块完全是由 AI Agent 基于既有架构抽象推演并生成的。虽然仓库内已配备完整自动化测试套件（`pytest` 共计 **1,300+ 项收集用例**），但在真实多元的生产场景下可能仍会遇到边缘缺陷或兼容性瑕疵。
 >
 > 诚挚欢迎广大社区开发者提出 Issue、反馈实际使用体验或提交 PR，共同完善和加固各客户端适配层！
 

@@ -303,8 +303,13 @@ def compose_task_document(
             parts.append(replaced[b.task_id])
         else:
             parts.append(b.raw_text)
-    for app in appended:
-        parts.append(app)
+    if appended:
+        for app in appended:
+            if app:
+                preceding = "".join(parts)
+                if preceding and not preceding.endswith("\n"):
+                    parts.append("\n")
+                parts.append(app)
     parts.append(doc.epilogue)
     return "".join(parts)
 
@@ -447,8 +452,8 @@ def write_task_file_guarded(
                 try:
                     for t in tasks_to_write:
                         register_proposal(workspace_root, task_id=str(t["id"]).strip(), md_path=abs_path)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to register proposal for '%s': %s", abs_path, exc, exc_info=True)
 
                 return {
                     "ok": True,
@@ -469,6 +474,16 @@ def write_task_file_guarded(
             newline = "\r\n" if "\r\n" in orig_text else "\n"
 
             doc = split_task_document(orig_text)
+            seen_disk_ids: set[str] = set()
+            dup_disk_ids: list[str] = []
+            for b in doc.blocks:
+                if b.task_id in seen_disk_ids and b.task_id not in dup_disk_ids:
+                    dup_disk_ids.append(b.task_id)
+                seen_disk_ids.add(b.task_id)
+            if dup_disk_ids:
+                raise DuplicateTaskIdError(
+                    f"Existing task file '{abs_path}' contains duplicate task IDs on disk: {dup_disk_ids}."
+                )
             existing_blocks = {b.task_id: b for b in doc.blocks}
             existing_statuses = {b.task_id: b.status for b in doc.blocks}
 
@@ -564,13 +579,15 @@ def write_task_file_guarded(
                             raise NonEditableTaskMissingError(
                                 f"Existing non-editable task '{tid}' ({old_st}) is missing from overwrite payload."
                             )
-                        target_dict = payload_map[tid]
+                        target_dict = dict(payload_map[tid])
                         if "status" in target_dict:
                             new_st = normalize_status(target_dict["status"])
                             if new_st != old_st:
                                 raise InvalidTransitionError(
                                     f"Invalid status modification: cannot change status of non-editable task '{tid}' from '{old_st}' to '{new_st}'."
                                 )
+                        else:
+                            target_dict["status"] = old_st
                         # 检查非可编辑块内容未篡改（归一化换行符以兼容跨平台差异）
                         rendered = _render_task_markdown(target_dict)
                         rendered_norm = rendered.strip().replace("\r\n", "\n")
@@ -600,8 +617,10 @@ def write_task_file_guarded(
                 # c. 组装替换块与新增块
                 for b in doc.blocks:
                     if b.task_id in payload_map:
-                        t = payload_map[b.task_id]
+                        t = dict(payload_map[b.task_id])
                         if b.status in EDITABLE_STATES:
+                            if "status" not in t:
+                                t["status"] = b.status
                             val_res = validate_task_schema(t)
                             if not val_res.is_valid:
                                 raise ValueError(f"Task '{b.task_id}' schema validation failed: {val_res.errors}")
@@ -661,8 +680,8 @@ def write_task_file_guarded(
                 for tid in written:
                     if tid not in existing_blocks:
                         register_proposal(workspace_root, task_id=tid, md_path=abs_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to register proposal for '%s': %s", abs_path, exc, exc_info=True)
 
             return {
                 "ok": True,

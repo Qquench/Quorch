@@ -23,6 +23,8 @@ _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _CURRENT_DIR not in sys.path:
     sys.path.insert(0, _CURRENT_DIR)
 
+from config_sync import atomic_write_file
+
 
 def json_escape_path(path_str: str) -> str:
     """对文件路径进行 JSON 安全转义，杜绝 Windows 反斜杠破坏 JSON 格式"""
@@ -101,9 +103,7 @@ def _render_hooks_json(project_root: str, force: bool = False) -> None:
         print(f"❌ 渲染后 hooks.json 不是合法 JSON: {e}", file=sys.stderr)
         return
 
-    with open(target_hooks_path, "w", encoding="utf-8") as f:
-        json.dump(hooks_data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    atomic_write_file(target_hooks_path, json.dumps(hooks_data, indent=2, ensure_ascii=False) + "\n")
     print(f"✅ 已生成 .agents/hooks.json (配置生命周期拦截钩子，解释器: {python_exe})")
 
 
@@ -151,9 +151,7 @@ def generate_cursor_mcp_config(project_root: str, python_exe: str, force: bool =
 
     mcp_servers["quench-dev-tasks"] = quench_server_def
 
-    with open(mcp_path, "w", encoding="utf-8") as f:
-        json.dump(existing_data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    atomic_write_file(mcp_path, json.dumps(existing_data, indent=2, ensure_ascii=False) + "\n")
 
     print(f"✅ 已生成/更新 .cursor/mcp.json (注册 quench-dev-tasks，解释器: {python_exe})")
     return mcp_path
@@ -272,7 +270,7 @@ def diagnose_environment(project_root: str) -> dict:
             "has_agents_mcp_config": False,
             "agents_mcp_config_valid": False,
             "mcp_config_valid": False,
-            "python_valid": sys.version_info >= (3, 8),
+            "python_valid": sys.version_info >= (3, 12),
             "dependencies_ready": False,
             "issues": issues,
             "suggestions": suggestions,
@@ -353,14 +351,21 @@ def diagnose_environment(project_root: str) -> dict:
                     clean_cmd = cmd_str.strip()
                     while clean_cmd.startswith('""') and clean_cmd.endswith('""') and len(clean_cmd) > 2:
                         clean_cmd = clean_cmd[1:-1].strip()
-                    quoted_matches = re.findall(r'"([^"]+)"', clean_cmd)
-                    if quoted_matches:
-                        tokens = quoted_matches
-                    else:
-                        try:
-                            tokens = shlex.split(clean_cmd)
-                        except Exception:
-                            tokens = [t.strip('"') for t in clean_cmd.split('"') if t.strip()]
+                    try:
+                        raw_tokens = shlex.split(clean_cmd, posix=(sys.platform != "win32"))
+                        tokens = [
+                            t[1:-1]
+                            if len(t) >= 2 and ((t[0] == '"' and t[-1] == '"') or (t[0] == "'" and t[-1] == "'"))
+                            else t
+                            for t in raw_tokens
+                        ]
+                    except Exception:
+                        quoted_matches = re.findall(r'"([^"]+)"', clean_cmd)
+                        tokens = (
+                            quoted_matches
+                            if quoted_matches
+                            else [t.strip('"') for t in clean_cmd.split('"') if t.strip()]
+                        )
                     for tok in tokens:
                         clean_tok = tok.strip('"').strip()
                         if os.path.isabs(clean_tok) and (clean_tok.lower().endswith(".py") or clean_tok.lower().endswith(".exe")):
@@ -398,11 +403,11 @@ def diagnose_environment(project_root: str) -> dict:
             suggestions.append(f"运行 'python {os.path.abspath(__file__)} {project_root}' 自动生成 .agents/mcp_config.json")
 
     # 6. 检查 Python 版本
-    python_valid = sys.version_info >= (3, 8)
+    python_valid = sys.version_info >= (3, 12)
     if not python_valid:
-        py_ver_str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        issues.append(f"当前 Python 版本 ({py_ver_str}) 过低，推荐 Python >= 3.8")
-        suggestions.append("请升级 Python 运行环境至 3.8 或更高版本")
+        py_ver_str = f"{sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}"
+        issues.append(f"当前 Python 版本 ({py_ver_str}) 过低，推荐 Python >= 3.12")
+        suggestions.append("请升级 Python 运行环境至 3.12 或更高版本")
 
     # 7. 检查关键依赖库
     missing_deps = []
@@ -417,14 +422,13 @@ def diagnose_environment(project_root: str) -> dict:
         issues.append(f"缺少关键 Python 依赖库: {', '.join(missing_deps)}")
         suggestions.append(f"在当前运行环境中执行: pip install {' '.join(missing_deps)}")
 
-    # 8. 检查并自动自愈插件本体 MCP 配置 (mcp_config.json)
+    # 8. 检查并自动自愈插件本体 MCP 配置 (mcp_config.json)，对目标工作区保持纯只读诊断
     mcp_config_valid = True
     script_dir = os.path.dirname(os.path.abspath(__file__))
     plugin_dir = os.path.dirname(script_dir)
     try:
         from config_sync import auto_heal_configs
-        ws_root = root if os.path.isfile(os.path.join(root, ".agents", "hooks.json")) else None
-        healed, affected = auto_heal_configs(plugin_dir=plugin_dir, workspace_root=ws_root)
+        healed, affected = auto_heal_configs(plugin_dir=plugin_dir, workspace_root=None)
         mcp_path = os.path.join(plugin_dir, "mcp_config.json")
         if not os.path.isfile(mcp_path):
             mcp_config_valid = False
@@ -466,7 +470,7 @@ def print_diagnostic_report(diag: dict, project_root: str) -> None:
     )
     print(f"• 工作区 MCP 配置:  {agents_mcp_status}")
     print(f"• 插件级 MCP 配置:  {'✅ 已就绪 (mcp_config.json 自动同步)' if diag.get('mcp_config_valid') else '❌ 异常'}")
-    print(f"• Python 运行环境:  {'✅ 合格 (>= 3.8)' if diag['python_valid'] else '❌ 版本过低'}")
+    print(f"• Python 运行环境:  {'✅ 合格 (>= 3.12)' if diag['python_valid'] else '❌ 版本过低'}")
     print(f"• 关键依赖库就绪:   {'✅ 全部就绪 (fastmcp, yaml, filelock)' if diag['dependencies_ready'] else '❌ 缺失部分依赖'}")
     print("-" * 60)
     if not diag["issues"]:
@@ -524,8 +528,7 @@ def generate_agents_md(
     # 替换项目名称占位符
     content = content.replace("{{PROJECT_NAME}}", project_name)
 
-    with open(target_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    atomic_write_file(target_path, content)
 
     line_count = content.count("\n") + 1
     print(f"✅ 已生成 AGENTS.md（{line_count} 行，跨 IDE 引导卡）")
@@ -631,8 +634,7 @@ def init_project(
                 print("ℹ️ .agents/plugins.json 已配置 quench-dev-tasks 插件路径，跳过添加。")
             else:
                 entries.append({"path": norm_plugins_parent})
-                with open(plugins_json_path, "w", encoding="utf-8") as f:
-                    json.dump(plugins_data, f, indent=2, ensure_ascii=False)
+                atomic_write_file(plugins_json_path, json.dumps(plugins_data, indent=2, ensure_ascii=False) + "\n")
                 print(f"✅ 已在 .agents/plugins.json 中添加插件路径: {norm_plugins_parent}")
         else:
             plugins_data = {
@@ -640,8 +642,7 @@ def init_project(
                     {"path": norm_plugins_parent}
                 ]
             }
-            with open(plugins_json_path, "w", encoding="utf-8") as f:
-                json.dump(plugins_data, f, indent=2, ensure_ascii=False)
+            atomic_write_file(plugins_json_path, json.dumps(plugins_data, indent=2, ensure_ascii=False) + "\n")
             print(f"✅ 已创建 .agents/plugins.json (注册插件路径: {norm_plugins_parent})")
 
     # 4. 创建 .agents/quench_stack.yaml
@@ -662,8 +663,7 @@ def init_project(
             count=1,
         )
 
-        with open(stack_yaml_path, "w", encoding="utf-8") as f:
-            f.write(customized_content)
+        atomic_write_file(stack_yaml_path, customized_content)
         print(f"✅ 已创建 .agents/quench_stack.yaml (项目名称: {effective_name})")
 
     # 5. 创建 / 渲染 .agents/hooks.json 与 .agents/mcp_config.json (仅 antigravity 或 all)
@@ -702,8 +702,7 @@ def init_project(
 - 标记完成：AI 调用 `dev_tasks_complete`
 - 归档历史：AI 调用 `dev_tasks_archive`
 """
-        with open(readme_path, "w", encoding="utf-8") as f:
-            f.write(readme_content)
+        atomic_write_file(readme_path, readme_content)
         print("✅ 已生成 docs/dev_tasks/README.md 说明文档。")
 
     # 8. Cursor MCP 配置与 Rules 规范注入 (仅 cursor 或 all)

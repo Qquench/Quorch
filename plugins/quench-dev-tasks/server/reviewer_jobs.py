@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import hashlib
 import json
 import os
@@ -224,6 +225,8 @@ def probe_lease_health(
     ttl_s: Optional[float] = None,
 ) -> bool:
     """Check if job lease/record is healthy. Returns True if healthy (alive), False if orphaned."""
+    if record.state == JobState.CANCELLED_PENDING_REAP:
+        return True
     cur_wall = now_wall_s if now_wall_s is not None else time.time()
     effective_ttl = ttl_s if ttl_s is not None else 60.0
     return not is_record_orphaned(record, now_wall_s=cur_wall, ttl_s=effective_ttl)
@@ -345,33 +348,55 @@ class _ExemptInodeTracker:
     """锁原语豁免追踪器。作用域限定于单次 poll/watch 调用，非长驻单例。"""
     def __init__(self, maxsize: int = 256) -> None:
         self._maxsize = maxsize
-        self._registered: set[tuple[int, int]] = set()
-        self._baseline_fp: dict[tuple[int, int], tuple[int, int]] = {}
+        self._registered: set[tuple[int, int] | tuple[int, int, str]] = set()
+        self._baseline_fp: dict[tuple[int, int] | tuple[int, int, str], tuple[int, int]] = {}
+        self._win_fallback_fp: dict[tuple[int, int, str], tuple[int, int]] = {}
+
+    @staticmethod
+    def _norm_path(path: Path | str) -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
 
     def register(self, path: Path) -> None:
         """登记 path 为锁原语豁免对象。立即执行 stat() 采样基线；失败时静默不写基线 (P1-1)。"""
         try:
             st = path.stat()
-            k = _inode_key(st.st_dev, st.st_ino)
+            raw_k = _inode_key(st.st_dev, st.st_ino)
+            norm_p = self._norm_path(path)
+            k: tuple[int, int] | tuple[int, int, str] = (
+                (0, 0, norm_p) if raw_k == (0, 0) else raw_k
+            )
+            if k not in self._baseline_fp and len(self._baseline_fp) >= self._maxsize:
+                return
             self._registered.add(k)
             self._baseline_fp[k] = (st.st_size, st.st_mtime_ns)
-            if sys.platform == "win32" and k != (0, 0):
-                k_win = _inode_key(0, 0)
+            if sys.platform == "win32" and raw_k != (0, 0):
+                k_win: tuple[int, int, str] = (0, 0, norm_p)
                 self._registered.add(k_win)
-                self._baseline_fp[k_win] = (st.st_size, st.st_mtime_ns)
+                self._win_fallback_fp[k_win] = (st.st_size, st.st_mtime_ns)
         except OSError:
             pass
 
-    def is_exempt(self, key: tuple[int, int], size: int, mtime_ns: int) -> bool:
+    def is_exempt(
+        self,
+        key: tuple[int, int] | tuple[int, int, str],
+        size: int,
+        mtime_ns: int,
+        path: Path | str | None = None,
+    ) -> bool:
         """单一 fail-closed 谓词：未注册、缺基线、漂移一律 False；完全吻合返回 True。"""
-        if key not in self._registered:
+        eff_key: tuple[int, int] | tuple[int, int, str] = key
+        if key == (0, 0) and path is not None:
+            eff_key = (0, 0, self._norm_path(path))
+        if eff_key not in self._registered:
             return False
-        base = self._baseline_fp.get(key)
+        base = self._baseline_fp.get(eff_key)
+        if base is None and isinstance(eff_key, tuple) and len(eff_key) == 3:
+            base = self._win_fallback_fp.get(eff_key)
         if base is None:
             return False
         return base == (size, mtime_ns)
 
-    def baseline_keys(self) -> frozenset[tuple[int, int]]:
+    def baseline_keys(self) -> frozenset[tuple[int, int] | tuple[int, int, str]]:
         return frozenset(self._registered)
 
 
@@ -382,8 +407,8 @@ def _new_tracker_for_poll(maxsize: int = 256) -> _ExemptInodeTracker:
 
 def _snapshot_business_state_scandir(
     ws: Path, *, exempt: _ExemptInodeTracker | None = None
-) -> dict[tuple[int, int], tuple[int, int]]:
-    out: dict[tuple[int, int], tuple[int, int]] = {}
+) -> dict[tuple[int, int] | tuple[int, int, str], tuple[int, int]]:
+    out: dict[tuple[int, int] | tuple[int, int, str], tuple[int, int]] = {}
     stack = [ws]
     while stack:
         curr = stack.pop()
@@ -397,7 +422,12 @@ def _snapshot_business_state_scandir(
                             stack.append(Path(entry.path))
                             continue
                         st = entry.stat(follow_symlinks=False)
-                        k = _inode_key(st.st_dev, st.st_ino)
+                        raw_k = _inode_key(st.st_dev, st.st_ino)
+                        k: tuple[int, int] | tuple[int, int, str] = (
+                            (0, 0, os.path.normcase(os.path.abspath(entry.path)))
+                            if raw_k == (0, 0)
+                            else raw_k
+                        )
                         if exempt is not None and exempt.is_exempt(k, st.st_size, st.st_mtime_ns):
                             continue
                         # 锁原语豁免域 (W10 §3.3.1): Unix filelock (*.lock) 属于锁原语豁免域
@@ -792,7 +822,7 @@ def is_record_orphaned(record: JobRecord, *, now_wall_s: float, ttl_s: float) ->
     if record.state in (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED):
         return False
 
-    if record.state in (JobState.QUEUED, JobState.RUNNING):
+    if record.state in (JobState.QUEUED, JobState.RUNNING, JobState.CANCELLED_PENDING_REAP):
         try:
             val = record.updated_wall_utc
             if isinstance(val, (int, float)):
@@ -921,6 +951,7 @@ class ReviewerJobSupervisor:
         self._abort_handles: dict[str, Any] = {}
         self._running_jobs_lock = threading.Lock()
         self._last_probe_mono: dict[str, float] = {}
+        self._live_tokens: dict[str, int] = {}
 
     def _pin_log(self, log_path: str) -> str:
         key = norm_registry_key(log_path)
@@ -1249,6 +1280,7 @@ class ReviewerJobSupervisor:
 
                     def on_prog(tokens: int, elapsed: float, phase_str: str, idle: float):
                         tokens_accum["tokens"] = tokens
+                        self._live_tokens[record.job_id] = tokens
                         p_phase = (
                             ReviewerPhase(phase_str)
                             if phase_str in ("assembling", "streaming", "finalizing")
@@ -1260,15 +1292,18 @@ class ReviewerJobSupervisor:
                             phase=p_phase,
                             idle_s=idle,
                         )
-                        # 更新盘上进度
-                        curr = self._load_job_record(record.session_id, record.job_id)
-                        if curr and curr.state == JobState.RUNNING:
-                            new_curr = dataclasses.replace(
-                                curr,
-                                progress=prog,
-                                updated_monotonic=time.monotonic(),
-                            )
-                            self._save_job_record(new_curr)
+                        # 更新盘上进度（加 FileLock 防覆盖并发终态，且刷新墙钟防 >300s 假孤儿）
+                        lock_path = self._get_lock_path(record.session_id, record.job_id)
+                        with FileLock(str(lock_path), timeout=5.0):
+                            curr = self._load_job_record(record.session_id, record.job_id)
+                            if curr and curr.state == JobState.RUNNING:
+                                new_curr = dataclasses.replace(
+                                    curr,
+                                    progress=prog,
+                                    updated_monotonic=time.monotonic(),
+                                    updated_wall_utc=datetime.now(timezone.utc).isoformat(),
+                                )
+                                self._save_job_record(new_curr)
 
                     consult_mode: Literal["critique", "evaluate", "brainstorm", "audit"] = (
                         record.mode
@@ -1374,6 +1409,7 @@ class ReviewerJobSupervisor:
                     self._abort_handles.pop(record.job_id, None)
                     self._tasks.pop(record.job_id, None)
                     self._worker_threads.pop(record.job_id, None)
+                    self._live_tokens.pop(record.job_id, None)
 
                 # 终态安全 unpin：仅当已处于 PIN_RELEASABLE_STATES 时释放 pin
                 final_rec = self._load_job_record(record.session_id, record.job_id)
@@ -1440,10 +1476,14 @@ class ReviewerJobSupervisor:
                 raise KeyError(f"Job record not found: '{val_id}'")
 
             # 探针节流：以 liveness_probe_interval_s 节流 probe_lease_health (W9)
+            # 仅 QUEUED / RUNNING 在轮询探针中判定孤儿；CANCELLED_PENDING_REAP 保持 Form C 非终态投影，由 reconcile_on_load 异代清理
             now_mono = clock()
             last_probe = self._last_probe_mono.get(val_id, -float("inf"))
             is_healthy = True
-            if (now_mono - last_probe) >= liveness_probe_interval_s:
+            if (
+                record.state in (JobState.QUEUED, JobState.RUNNING)
+                and (now_mono - last_probe) >= liveness_probe_interval_s
+            ):
                 self._last_probe_mono[val_id] = now_mono
                 try:
                     is_healthy = self.probe_lease_health(record)
@@ -1542,8 +1582,11 @@ class ReviewerJobSupervisor:
 
         # t=0 首次同步快路径读取快照并 yield
         snap = await anyio.to_thread.run_sync(
-            self._read_snapshot_sync,
-            val_id,
+            functools.partial(
+                self._read_snapshot_sync,
+                val_id,
+                liveness_probe_interval_s=liveness_probe_interval_s,
+            )
         )
         yield snap
 
@@ -1572,8 +1615,11 @@ class ReviewerJobSupervisor:
                 break
 
             snap = await anyio.to_thread.run_sync(
-                self._read_snapshot_sync,
-                val_id,
+                functools.partial(
+                    self._read_snapshot_sync,
+                    val_id,
+                    liveness_probe_interval_s=liveness_probe_interval_s,
+                )
             )
 
             # 代际自愈 (W7)：比对当前 JobRecord.generation 与上轮代际，发生漂移时重置退避并 yield
@@ -1629,8 +1675,15 @@ class ReviewerJobSupervisor:
                     pass
             return project_terminal(record, res_dict)
 
-        # 非终态白名单投影
-        snapshot = self.read_snapshot(val_id)
+        # 非终态白名单投影（W10 零写盘：无节流复核探针，防 2s 窗内将 ORPHANED 翻回 RUNNING）
+        snapshot = self._read_snapshot_sync(val_id, liveness_probe_interval_s=0.0)
+        if snapshot.state == JobState.ORPHANED.value:
+            orphaned_rec = dataclasses.replace(
+                record,
+                state=JobState.ORPHANED,
+                degraded_reason=record.degraded_reason or "orphaned",
+            )
+            return project_terminal(orphaned_rec, None)
         return self.project_poll_result(snapshot)
 
     def progress_snapshot(self, job_id: str, *, session_id: str) -> Optional[JobProgress]:
@@ -1710,6 +1763,12 @@ class ReviewerJobSupervisor:
 
         target_state = JobState.CANCELLED if worker_joined else JobState.CANCELLED_PENDING_REAP
 
+        billed = max(
+            record.tokens_billed_after_cancel or 0,
+            self._live_tokens.get(val_id, 0),
+            record.progress.approx_reasoning_tokens if record.progress else 0,
+        )
+
         # CAS 推进 CANCELLED 或 CANCELLED_PENDING_REAP
         self._cas_transition(
             record.session_id,
@@ -1718,7 +1777,7 @@ class ReviewerJobSupervisor:
             target_state,
             updates={
                 "degraded_reason": "cancelled",
-                "tokens_billed_after_cancel": record.tokens_billed_after_cancel or 0,
+                "tokens_billed_after_cancel": billed,
             },
         )
 
@@ -1726,7 +1785,23 @@ class ReviewerJobSupervisor:
         if final_rec:
             self._append_verdict_audit(final_rec)
 
-        if final_rec and final_rec.state in PIN_RELEASABLE_STATES:
+        task_still_running = task is not None and not task.done()
+        if task_still_running:
+            def _on_task_done(_t: asyncio.Task) -> None:
+                rec_after = self._load_job_record(record.session_id, record.job_id)
+                if rec_after and rec_after.state in PIN_RELEASABLE_STATES:
+                    self._release_log_pin(rec_after)
+            try:
+                task.add_done_callback(_on_task_done)
+            except Exception:
+                pass
+
+        if (
+            final_rec
+            and final_rec.state in PIN_RELEASABLE_STATES
+            and not task_still_running
+            and worker_joined
+        ):
             self._release_log_pin(final_rec)
             try:
                 log_dir = resolve_reviewer_log_dir(self.workspace_root)
@@ -1794,8 +1869,8 @@ class ReviewerJobSupervisor:
                         existing_verdict_ids.add(rec.job_id)
                     continue
 
-                # 2. 非终态在途任务：缺行绝不判定孤儿；严格基于 is_record_orphaned
-                if rec.state in (JobState.QUEUED, JobState.RUNNING):
+                # 2. 非终态在途任务（含崩溃遗留 CANCELLED_PENDING_REAP）：缺行绝不判定孤儿；严格基于 is_record_orphaned
+                if rec.state in (JobState.QUEUED, JobState.RUNNING, JobState.CANCELLED_PENDING_REAP):
                     # 同进程自身启动时不抢自己
                     if rec.owner_pid == os.getpid() and rec.owner_boot_nonce == self._boot_nonce:
                         continue
@@ -1805,7 +1880,7 @@ class ReviewerJobSupervisor:
                         if self._cas_transition(
                             rec.session_id,
                             rec.job_id,
-                            (JobState.QUEUED, JobState.RUNNING),
+                            (JobState.QUEUED, JobState.RUNNING, JobState.CANCELLED_PENDING_REAP),
                             JobState.ORPHANED,
                             updates={"degraded_reason": "orphaned"},
                         ):

@@ -87,7 +87,11 @@ def _parse_task_markdown_sections(text: str) -> Dict[str, Any]:
         pass
 
     result: Dict[str, Any] = {}
-    header_m = re.search(r"^###\s+(?:任务|Task)\s+([^\s—\-]+)\s*.*?[—\-]\s*(.*)$", text, re.MULTILINE)
+    header_m = re.search(
+        r"^###\s+(?:任务|Task)\s+([A-Za-z0-9_.\-]+)\s*(?:[^\n]*?)(?:—|\s-\s)\s*(.*)$",
+        text,
+        re.MULTILINE,
+    )
     if header_m:
         result["id"] = header_m.group(1).strip()
         result["title"] = header_m.group(2).strip()
@@ -107,27 +111,48 @@ def _parse_task_markdown_sections(text: str) -> Dict[str, Any]:
             result["draft"] = True
 
     sections = [
-        ("affected_files", r"####\s+【?(?:涉及文件|Affected Files)】?"),
-        ("root_cause_and_goal", r"####\s+【?(?:缺陷根因与修改目标|Root Cause & Goal|Root Cause and Goal)】?"),
-        ("type_contracts", r"####\s+【?(?:目标签名与类型契约|Type Contracts)】?"),
-        ("steps", r"####\s+【?(?:分步改造指引|Step-by-Step Instructions|Steps)】?"),
-        ("defensive_checks", r"####\s+【?(?:防御与边缘校验|Defensive Checks|Defensive and Edge Checks)】?"),
-        ("dod_commands", r"####\s+【?(?:DoD 验证命令|DoD Verification Commands|dod_commands)】?"),
+        ("affected_files", re.compile(r"^####\s+【?(?:涉及文件|Affected Files)】?\s*$", re.IGNORECASE)),
+        ("root_cause_and_goal", re.compile(r"^####\s+【?(?:缺陷根因与修改目标|Root Cause & Goal|Root Cause and Goal)】?\s*$", re.IGNORECASE)),
+        ("type_contracts", re.compile(r"^####\s+【?(?:目标签名与类型契约|Type Contracts)】?\s*$", re.IGNORECASE)),
+        ("steps", re.compile(r"^####\s+【?(?:分步改造指引|Step-by-Step Instructions|Steps)】?\s*$", re.IGNORECASE)),
+        ("defensive_checks", re.compile(r"^####\s+【?(?:防御与边缘校验|Defensive Checks|Defensive and Edge Checks)】?\s*$", re.IGNORECASE)),
+        ("dod_commands", re.compile(r"^####\s+【?(?:DoD 验证命令|DoD Verification Commands|dod_commands)】?\s*$", re.IGNORECASE)),
     ]
 
-    for idx, (field_name, pattern) in enumerate(sections):
-        m = re.search(pattern, text, re.IGNORECASE)
-        if not m:
+    # 逐行扫描非代码围栏区域的 #### 标题，支持任意顺序与围栏内 #### 免疫
+    matched_headers: List[tuple[int, int, str]] = []
+    offset = 0
+    fence_char: str | None = None
+    fence_len = 0
+    for raw_line in text.splitlines(keepends=True):
+        line_len = len(raw_line)
+        stripped = raw_line.strip()
+        fence_m = re.match(r"^(`{3,}|~{3,})(.*)$", stripped)
+        if fence_m:
+            marker_str = fence_m.group(1)
+            rest_str = fence_m.group(2).strip()
+            ch = marker_str[0]
+            mlen = len(marker_str)
+            if fence_char is None:
+                if not (ch == "`" and "`" in rest_str):
+                    fence_char = ch
+                    fence_len = mlen
+            elif ch == fence_char and mlen >= fence_len and rest_str == "":
+                fence_char = None
+                fence_len = 0
+            offset += line_len
             continue
-        start_pos = m.end()
-        next_pos = len(text)
-        for _, next_pat in sections[idx + 1:]:
-            next_m = re.search(next_pat, text[start_pos:], re.IGNORECASE)
-            if next_m:
-                next_pos = start_pos + next_m.start()
-                break
 
-        sec_content = text[start_pos:next_pos].strip()
+        if fence_char is None:
+            for field_name, pat in sections:
+                if pat.match(stripped):
+                    matched_headers.append((offset, offset + line_len, field_name))
+                    break
+        offset += line_len
+
+    for idx, (_h_start, h_end, field_name) in enumerate(matched_headers):
+        next_pos = matched_headers[idx + 1][0] if idx + 1 < len(matched_headers) else len(text)
+        sec_content = text[h_end:next_pos].strip()
         if sec_content.startswith("```") and sec_content.endswith("```"):
             inner = sec_content.splitlines()
             if len(inner) >= 2:
@@ -176,7 +201,17 @@ def validate_task_schema(task: Dict[str, Any]) -> ValidationResult:
                 if not isinstance(item, str):
                     errors.append(f"Field 'affected_files' contains non-string element: {item} / affected_files 包含非字符串元素: {item}")
                     continue
+                if not item.strip():
+                    errors.append("Field 'affected_files' contains empty or whitespace-only entry / 字段 'affected_files' 包含空或纯空白条目")
+                    continue
                 s_item = re.sub(r"^[\s\-\*\+\d\.\>\#]+\s*", "", item).strip().strip("`'\" ")
+                if not s_item:
+                    errors.append(f"Field 'affected_files' contains empty file entry: {item!r} / affected_files 包含空文件条目: {item!r}")
+                    continue
+                m_tag = re.match(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*(.*)$", s_item, re.IGNORECASE)
+                if m_tag and not m_tag.group(2).strip():
+                    errors.append(f"Field 'affected_files' entry '{s_item}' is missing a file path after tag / 文件项 '{s_item}' 缺少文件路径")
+                    continue
                 if not any(s_item.startswith(prefix) for prefix in VALID_AFFECTED_PREFIXES):
                     warnings.append(
                         f"File item '{s_item}' does not use recommended prefixes [MODIFY]/[NEW]/[DELETE]/[RENAME] / 文件项 '{s_item}' 未使用推荐的操作标记 [MODIFY]/[NEW]/[DELETE]/[RENAME]"
@@ -265,6 +300,7 @@ def lint_task_physical_feasibility(
     3. DoD pytest commands must pass `pytest --collect-only -q` dry-run (exit code in {0, 5}).
     """
     ws_root = os.path.abspath(workspace_root)
+    real_ws = os.path.realpath(ws_root)
     if isinstance(task_content, str):
         task_dict = _parse_task_markdown_sections(task_content)
     elif isinstance(task_content, dict):
@@ -298,6 +334,27 @@ def lint_task_physical_feasibility(
         # 匹配操作标记与文件路径
         m = re.match(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*(.*)$", clean_item, re.IGNORECASE)
         if not m:
+            # 无前缀条目仍需经过路径穿越防线校验
+            m_link = re.search(r"\[.*?\]\((.*?)\)", clean_item)
+            untagged_path = m_link.group(1).strip() if m_link else clean_item
+            untagged_path = untagged_path.strip("`'\" ")
+            if untagged_path.startswith("file:///"):
+                untagged_path = untagged_path[8:].lstrip("/\\")
+            if untagged_path:
+                try:
+                    sanitize_workspace_path(real_ws, untagged_path)
+                except PathTraversalError as pte:
+                    issues.append(
+                        LintIssue(
+                            "error",
+                            "affected_files",
+                            f"路径穿越安全违规: '{untagged_path}' 超出工作区根目录 ({pte})",
+                        )
+                    )
+                except Exception:
+                    issues.append(
+                        LintIssue("error", "affected_files", f"非法文件路径: '{untagged_path}'")
+                    )
             continue
 
         action = m.group(1).upper()
@@ -329,7 +386,7 @@ def lint_task_physical_feasibility(
         for act, rel in check_items:
             # 路径穿越防线（单一事实源 path_guard，消除跨平台分隔符歧义）
             try:
-                target_abs = sanitize_workspace_path(ws_root, rel)
+                target_abs = sanitize_workspace_path(real_ws, rel)
             except PathTraversalError as pte:
                 issues.append(
                     LintIssue(
@@ -369,8 +426,9 @@ def lint_task_physical_feasibility(
                 else:
                     parent_dir = os.path.dirname(target_abs)
                     try:
-                        common_parent = os.path.commonpath([ws_root, os.path.abspath(parent_dir)])
-                        if common_parent != ws_root:
+                        real_parent = os.path.realpath(os.path.abspath(parent_dir))
+                        common_parent = os.path.commonpath([real_ws, real_parent])
+                        if os.path.normcase(common_parent) != os.path.normcase(real_ws):
                             issues.append(
                                 LintIssue(
                                     "error",
@@ -445,7 +503,7 @@ def lint_task_physical_feasibility(
             try:
                 proc = subprocess.run(
                     dry_cmd,
-                    cwd=ws_root,
+                    cwd=real_ws,
                     capture_output=True,
                     text=True,
                     timeout=8,
@@ -457,12 +515,22 @@ def lint_task_physical_feasibility(
                     pass
                 else:
                     # 检查是否为 [NEW] 声明的新建测试文件不存在导致的单测收集未就绪
+                    import posixpath
                     missing_expected_new = False
-                    if "file or directory not found" in comb_out.lower():
-                        for nf in new_declared_files:
-                            if os.path.basename(nf) in comb_out:
-                                missing_expected_new = True
-                                break
+                    missing_matches = re.findall(
+                        r"file or directory not found:\s*(.+)", comb_out, re.IGNORECASE
+                    )
+                    if missing_matches:
+                        norm_new_set = {
+                            posixpath.normpath(nf.replace("\\", "/")).lstrip("./").lower()
+                            for nf in new_declared_files
+                        }
+                        missing_paths = [
+                            posixpath.normpath(mp.strip().strip("'\"").replace("\\", "/")).lstrip("./").lower()
+                            for mp in missing_matches
+                        ]
+                        if missing_paths and all(mp in norm_new_set for mp in missing_paths):
+                            missing_expected_new = True
 
                     if missing_expected_new or "no tests collected" in comb_out.lower():
                         pass

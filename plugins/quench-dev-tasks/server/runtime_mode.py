@@ -52,6 +52,7 @@ class AutopilotRuntimeState:
     consumed: bool = False
     consumed_for: Optional[str] = None  # 当前消费所绑定的 task_id（严格任务ID命名空间，batch阶段为 "__batch__:<task_file>"）
     set_at: Optional[str] = None  # ISO-8601 UTC
+    cumulative_runner_tasks: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,6 +61,7 @@ class AutopilotRuntimeState:
             "consumed": self.consumed,
             "consumed_for": self.consumed_for,
             "set_at": self.set_at,
+            "cumulative_runner_tasks": self.cumulative_runner_tasks,
         }
 
 
@@ -156,11 +158,90 @@ def generate_session_role_contract(
         }
 
 
+def _snapshot_from_raw_data(
+    raw_data: Any,
+    external_api_available: bool,
+    runtime_mode_warning: Optional[str] = None,
+) -> EffectiveModeSnapshot:
+    """Build an EffectiveModeSnapshot purely from in-memory raw_data without disk I/O or locking."""
+    warning = runtime_mode_warning
+    if not isinstance(raw_data, dict):
+        if raw_data is not None and warning is None:
+            warning = "runtime_mode_invalid_root_type"
+        data: Dict[str, Any] = {}
+    else:
+        data = raw_data
+
+    explicit_mode = data.get("orchestration_mode")
+    raw_rc = data.get("reviewer_channel", "external_api")
+    reviewer_channel: ReviewerChannel = raw_rc if raw_rc in VALID_REVIEWER_CHANNELS else "external_api"
+    raw_hint = data.get("runner_subagent_model_hint")
+    runner_subagent_model_hint = raw_hint if isinstance(raw_hint, str) else None
+
+    raw_ap = data.get("autopilot")
+    if isinstance(raw_ap, dict):
+        autopilot_dict = raw_ap
+    else:
+        if "autopilot" in data and warning is None:
+            warning = "runtime_mode_invalid_autopilot_type"
+        autopilot_dict = {}
+
+    if explicit_mode == "standard" or explicit_mode == "inverted":
+        effective_mode: OrchestrationMode = explicit_mode
+        mode_source: ModeSource = "explicit"
+        fallback_notice = None
+    else:
+        if not external_api_available:
+            effective_mode = "inverted"
+            mode_source = "auto_fallback"
+            fallback_notice = "外部 Reviewer API 未配置或不可用，运行时自动回退为 inverted 模式。主模型执行自审，严守 INV-3/INV-6/INV-9 规范。"
+        else:
+            effective_mode = "standard"
+            mode_source = "default"
+            fallback_notice = None
+
+    effective_reviewer_channel: Optional[ReviewerChannel] = (
+        reviewer_channel if effective_mode == "standard" else None
+    )
+
+    raw_stop_at = autopilot_dict.get("stop_at", "none")
+    raw_cum = autopilot_dict.get("cumulative_runner_tasks", 0)
+    try:
+        cumulative_runner_tasks = (
+            max(0, int(raw_cum))
+            if raw_cum is not None and not isinstance(raw_cum, bool)
+            else 0
+        )
+    except (ValueError, TypeError):
+        cumulative_runner_tasks = 0
+    autopilot = AutopilotRuntimeState(
+        task_file=autopilot_dict.get("task_file") if isinstance(autopilot_dict.get("task_file"), str) else None,
+        stop_at=raw_stop_at if raw_stop_at in VALID_STOP_AT_STAGES else "none",
+        consumed=bool(autopilot_dict.get("consumed", False)),
+        consumed_for=autopilot_dict.get("consumed_for") if isinstance(autopilot_dict.get("consumed_for"), str) else None,
+        set_at=autopilot_dict.get("set_at") if isinstance(autopilot_dict.get("set_at"), str) else None,
+        cumulative_runner_tasks=cumulative_runner_tasks,
+    )
+
+    role_contract = generate_session_role_contract(effective_mode, runner_subagent_model_hint)
+
+    return EffectiveModeSnapshot(
+        effective_mode=effective_mode,
+        mode_source=mode_source,
+        effective_reviewer_channel=effective_reviewer_channel,
+        runner_subagent_model_hint=runner_subagent_model_hint,
+        fallback_notice=fallback_notice,
+        runtime_mode_warning=warning,
+        session_role_contract=role_contract,
+        autopilot=autopilot,
+    )
+
+
 def load_runtime_mode(workspace_root: str, external_api_available: bool) -> EffectiveModeSnapshot:
     mode_path = get_runtime_mode_path(workspace_root)
     lock_path = get_runtime_mode_lock_path(workspace_root)
     runtime_mode_warning: Optional[str] = None
-    raw_data: Optional[Dict[str, Any]] = None
+    raw_data: Any = None
 
     if os.path.isfile(mode_path):
         lock = FileLock(lock_path, timeout=0)
@@ -183,53 +264,7 @@ def load_runtime_mode(workspace_root: str, external_api_available: bool) -> Effe
             runtime_mode_warning = f"runtime_mode_read_error: {e}"
             raw_data = None
 
-    if raw_data is None:
-        raw_data = {}
-
-    explicit_mode = raw_data.get("orchestration_mode")
-    reviewer_channel = raw_data.get("reviewer_channel", "external_api")
-    runner_subagent_model_hint = raw_data.get("runner_subagent_model_hint")
-    autopilot_dict = raw_data.get("autopilot", {})
-
-    if explicit_mode == "standard" or explicit_mode == "inverted":
-        effective_mode: OrchestrationMode = explicit_mode
-        mode_source: ModeSource = "explicit"
-        fallback_notice = None
-    else:
-        if not external_api_available:
-            effective_mode = "inverted"
-            mode_source = "auto_fallback"
-            fallback_notice = "外部 Reviewer API 未配置或不可用，运行时自动回退为 inverted 模式。主模型执行自审，严守 INV-3/INV-6/INV-9 规范。"
-        else:
-            effective_mode = "standard"
-            mode_source = "default"
-            fallback_notice = None
-
-    effective_reviewer_channel: Optional[ReviewerChannel] = (
-        reviewer_channel if effective_mode == "standard" else None
-    )
-
-    raw_stop_at = autopilot_dict.get("stop_at", "none")
-    autopilot = AutopilotRuntimeState(
-        task_file=autopilot_dict.get("task_file"),
-        stop_at=raw_stop_at if raw_stop_at in VALID_STOP_AT_STAGES else "none",
-        consumed=bool(autopilot_dict.get("consumed", False)),
-        consumed_for=autopilot_dict.get("consumed_for"),
-        set_at=autopilot_dict.get("set_at"),
-    )
-
-    role_contract = generate_session_role_contract(effective_mode, runner_subagent_model_hint)
-
-    return EffectiveModeSnapshot(
-        effective_mode=effective_mode,
-        mode_source=mode_source,
-        effective_reviewer_channel=effective_reviewer_channel,
-        runner_subagent_model_hint=runner_subagent_model_hint,
-        fallback_notice=fallback_notice,
-        runtime_mode_warning=runtime_mode_warning,
-        session_role_contract=role_contract,
-        autopilot=autopilot,
-    )
+    return _snapshot_from_raw_data(raw_data, external_api_available, runtime_mode_warning=runtime_mode_warning)
 
 
 def update_runtime_mode(
@@ -246,84 +281,140 @@ def update_runtime_mode(
     lock_timeout_s: float = 0.5,
     external_api_available: bool = True,
     consumed_for: Optional[str] = None,
+    cumulative_runner_tasks: Optional[int] = None,
+    increment_runner_tasks: int = 0,
 ) -> Tuple[EffectiveModeSnapshot, bool, MutationResultDict]:
     mode_path = get_runtime_mode_path(workspace_root)
     lock_path = get_runtime_mode_lock_path(workspace_root)
     os.makedirs(os.path.dirname(mode_path), exist_ok=True)
     lock = FileLock(lock_path, timeout=lock_timeout_s)
 
-    with lock:
-        raw_data: Dict[str, Any] = {}
-        if os.path.isfile(mode_path):
-            try:
-                with open(mode_path, "r", encoding="utf-8") as f:
-                    raw_data = json.load(f)
-            except Exception:
-                raw_data = {}
-
-        autopilot_dict = raw_data.get("autopilot", {})
-        disk_set_at = autopilot_dict.get("set_at")
-
-        # Step 3: CAS check for consume_stop_at
-        if consume_stop_at:
-            if expect_set_at != disk_set_at:
-                # CAS mismatch! Fail-closed, do not mutate disk!
-                current_snapshot = load_runtime_mode(workspace_root, external_api_available)
-                return (
-                    current_snapshot,
-                    False,
-                    {
-                        "applied": False,
-                        "consume_mismatch": True,
-                        "disk_set_at": disk_set_at,
-                        "expected_set_at": expect_set_at,
-                    },
-                )
-            # CAS passed: bind consumed_for and refresh set_at
-            target_consumed_for = consume_for or consumed_for or current_task_id
-            new_set_at = datetime.now(timezone.utc).isoformat()
-            autopilot_dict["consumed"] = True
-            autopilot_dict["consumed_for"] = target_consumed_for
-            autopilot_dict["set_at"] = new_set_at
-
-        # Step 4: explicit new stop_at passed (including stop_at="none")
-        if stop_at is not None:
-            new_set_at = datetime.now(timezone.utc).isoformat()
-            autopilot_dict["stop_at"] = stop_at
-            autopilot_dict["set_at"] = new_set_at
-            autopilot_dict["consumed"] = False
-            autopilot_dict["consumed_for"] = None
-
-        if task_file is not None:
-            autopilot_dict["task_file"] = task_file
-
-        raw_data["autopilot"] = autopilot_dict
-
-        if switch_mode is not None:
-            raw_data["orchestration_mode"] = switch_mode
-        if switch_reviewer_channel is not None:
-            raw_data["reviewer_channel"] = switch_reviewer_channel
-        if runner_subagent_model_hint is not None:
-            raw_data["runner_subagent_model_hint"] = runner_subagent_model_hint
-
-        raw_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-        # Atomic write: write to temp file in .agents, then os.replace
-        dir_name = os.path.dirname(mode_path)
-        fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix=".quench_mode_tmp_", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(raw_data, f, indent=2, ensure_ascii=False)
-            os.replace(temp_path, mode_path)
-        except Exception:
-            if os.path.exists(temp_path):
+    try:
+        with lock:
+            raw_data: Dict[str, Any] = {}
+            if os.path.isfile(mode_path):
                 try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
-            raise
+                    with open(mode_path, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        raw_data = loaded
+                    else:
+                        raw_data = {}
+                except json.JSONDecodeError:
+                    # Recover from corrupt JSON on disk
+                    raw_data = {}
+                except OSError as e:
+                    # Transient I/O error: do NOT overwrite existing configuration with {}
+                    snap = _snapshot_from_raw_data(
+                        None,
+                        external_api_available,
+                        runtime_mode_warning=f"read_io_error: {e}",
+                    )
+                    return (
+                        snap,
+                        False,
+                        {
+                            "applied": False,
+                            "rejected_reason": f"read_io_error: {e}",
+                            "consume_mismatch": False,
+                            "disk_set_at": snap.autopilot.set_at,
+                            "expected_set_at": expect_set_at,
+                        },
+                    )
 
-    fresh_snapshot = load_runtime_mode(workspace_root, external_api_available)
+            raw_ap = raw_data.get("autopilot")
+            autopilot_dict = dict(raw_ap) if isinstance(raw_ap, dict) else {}
+            disk_set_at = autopilot_dict.get("set_at")
+
+            # Step 3: CAS check for consume_stop_at
+            if consume_stop_at:
+                if expect_set_at != disk_set_at:
+                    # CAS mismatch! Fail-closed, do not mutate disk, avoid re-entering FileLock!
+                    current_snapshot = _snapshot_from_raw_data(raw_data, external_api_available)
+                    return (
+                        current_snapshot,
+                        False,
+                        {
+                            "applied": False,
+                            "consume_mismatch": True,
+                            "disk_set_at": disk_set_at,
+                            "expected_set_at": expect_set_at,
+                        },
+                    )
+                # CAS passed: bind consumed_for and refresh set_at
+                target_consumed_for = consume_for or consumed_for or current_task_id
+                new_set_at = datetime.now(timezone.utc).isoformat()
+                autopilot_dict["consumed"] = True
+                autopilot_dict["consumed_for"] = target_consumed_for
+                autopilot_dict["set_at"] = new_set_at
+
+            # Step 4: explicit new stop_at passed (including stop_at="none")
+            if stop_at is not None:
+                new_set_at = datetime.now(timezone.utc).isoformat()
+                autopilot_dict["stop_at"] = stop_at
+                autopilot_dict["set_at"] = new_set_at
+                autopilot_dict["consumed"] = False
+                autopilot_dict["consumed_for"] = None
+
+            if task_file is not None:
+                autopilot_dict["task_file"] = task_file
+
+            if cumulative_runner_tasks is not None:
+                autopilot_dict["cumulative_runner_tasks"] = max(0, int(cumulative_runner_tasks))
+            elif increment_runner_tasks:
+                prev_cum = autopilot_dict.get("cumulative_runner_tasks", 0)
+                try:
+                    prev_int = (
+                        max(0, int(prev_cum))
+                        if prev_cum is not None and not isinstance(prev_cum, bool)
+                        else 0
+                    )
+                except (ValueError, TypeError):
+                    prev_int = 0
+                autopilot_dict["cumulative_runner_tasks"] = max(0, prev_int + int(increment_runner_tasks))
+
+            raw_data["autopilot"] = autopilot_dict
+
+            if switch_mode is not None:
+                raw_data["orchestration_mode"] = switch_mode
+            if switch_reviewer_channel is not None:
+                raw_data["reviewer_channel"] = switch_reviewer_channel
+            if runner_subagent_model_hint is not None:
+                raw_data["runner_subagent_model_hint"] = runner_subagent_model_hint
+
+            raw_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            # Atomic write: write to temp file in .agents, flush + fsync, then os.replace
+            dir_name = os.path.dirname(mode_path)
+            fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix=".quench_mode_tmp_", suffix=".json")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(raw_data, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_path, mode_path)
+            except Exception:
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+                raise
+    except Timeout:
+        current_snapshot = load_runtime_mode(workspace_root, external_api_available)
+        return (
+            current_snapshot,
+            False,
+            {
+                "applied": False,
+                "rejected_reason": "lock_timeout",
+                "consume_mismatch": False,
+                "disk_set_at": current_snapshot.autopilot.set_at,
+                "expected_set_at": expect_set_at,
+            },
+        )
+
+    fresh_snapshot = _snapshot_from_raw_data(raw_data, external_api_available)
     final_disk_set_at = fresh_snapshot.autopilot.set_at
     return (
         fresh_snapshot,

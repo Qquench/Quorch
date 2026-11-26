@@ -217,9 +217,27 @@ def canonicalize_path(
     # Host-invariant separator normalization
     clean = raw_str.replace("\\", "/")
 
-    # Check for direct escape prefixes
+    # Check for direct escape prefixes, Windows drive-relative paths, NTFS ADS, trailing dots/spaces, and reserved names
     if clean.startswith("../") or clean == "..":
         raise PathTraversalError(f"Parent directory traversal escapes base directory: {raw_path!r}")
+    if re.match(r"^[a-zA-Z]:(?![/])", clean):
+        raise PathTraversalError(f"Windows drive-relative path rejected: {raw_path!r}")
+
+    # Strip valid drive root (e.g. 'C:/') before checking colons/ADS and path components
+    component_check_str = clean[2:] if re.match(r"^[a-zA-Z]:/", clean) else clean
+    if ":" in component_check_str:
+        raise PathTraversalError(f"Colon or NTFS ADS path rejected: {raw_path!r}")
+
+    for part in component_check_str.split("/"):
+        if not part or part in (".", ".."):
+            continue
+        if _MULTI_DOT.match(part):
+            raise PathTraversalError(f"Invalid multi-dot sequence detected: {raw_path!r}")
+        if part.endswith(".") or part.endswith(" "):
+            raise PathTraversalError(f"Win32 trailing dot/space evasion detected: {raw_path!r}")
+        stem = part.split(".")[0].upper()
+        if stem in _WIN_RESERVED_NAMES:
+            raise PathTraversalError(f"Windows reserved device name detected: {raw_path!r}")
 
     base_str = str(base_dir)
     real_base = os.path.realpath(os.path.abspath(base_str)) if follow_symlinks else os.path.abspath(base_str)
@@ -316,8 +334,8 @@ def is_within_whitelist(
         if regex.match(norm_path):
             return True
 
-        # If pattern has no directory separators (e.g. *.md), allow matching basename
-        if "/" not in pat_str and regex.match(basename):
+        # If pattern has no directory separators and contains wildcards (e.g. *.md), allow matching basename
+        if "/" not in pat_str and ("*" in pat_str or "?" in pat_str) and regex.match(basename):
             return True
 
     return False

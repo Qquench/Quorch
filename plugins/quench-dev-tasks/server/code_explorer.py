@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import logging
 import os
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import PureWindowsPath
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple
+
+logger = logging.getLogger(__name__)
 
 # 敏感文件/凭据黑名单：坚决禁止将敏感密钥切片灌入 LLM Prompt
 SENSITIVE_PATTERNS = [
@@ -183,6 +186,8 @@ def resolve_within_roots(
     # 规范化与根拒绝
     norm = target_path.replace("\\", "/").strip()
     if norm in ("", "/"):
+        return None
+    if re.match(r"^[A-Za-z]:(?![/])", norm):
         return None
     if re.match(r"^[A-Za-z]:/?$", norm):
         return None
@@ -549,14 +554,14 @@ def grep(
 
     ignored_dirs = {".git", "node_modules", "__pycache__", ".pytest_cache", ".venv", "venv"}
 
-    files_to_scan: List[str] = []
-    if os.path.isfile(target_real):
-        files_to_scan.append(target_real)
-    else:
-        for root_dir, dirs, files in os.walk(target_real):
+    def _iter_candidate_files() -> Iterator[str]:
+        if os.path.isfile(target_real):
+            yield target_real
+            return
+        for root_dir, dirs, files in os.walk(target_real, followlinks=False):
             dirs[:] = sorted([d for d in dirs if d not in ignored_dirs])
             for f in sorted(files):
-                files_to_scan.append(os.path.join(root_dir, f))
+                yield os.path.join(root_dir, f)
 
     files_scanned = 0
     histogram_map: Dict[str, int] = {}
@@ -564,9 +569,11 @@ def grep(
     truncated = False
 
     max_files_limit = max(1, int(max_files))
+    matched_root_real = os.path.realpath(matched_root)
+    matched_root_norm = os.path.normcase(matched_root_real)
 
-    for file_path in files_to_scan:
-        if files_scanned >= max_files_limit:
+    for file_path in _iter_candidate_files():
+        if files_scanned >= max_files_limit or time.monotonic() >= deadline_at:
             truncated = True
             break
 
@@ -574,15 +581,28 @@ def grep(
         if is_sensitive_file(rel_to_root):
             continue
 
+        # 软链接目标沙箱归属与敏感性双向校验
         try:
-            st = os.stat(file_path)
+            real_file = os.path.realpath(file_path)
+            common = os.path.normcase(os.path.commonpath([matched_root_norm, os.path.normcase(real_file)]))
+        except (ValueError, OSError):
+            continue
+        if common != matched_root_norm:
+            continue
+
+        real_rel = os.path.relpath(real_file, matched_root_real).replace("\\", "/")
+        if is_sensitive_file(real_rel):
+            continue
+
+        try:
+            st = os.stat(real_file)
             if st.st_size > MAX_FILE_BYTES:
                 continue
         except OSError:
             continue
 
         try:
-            with open(file_path, "rb") as bf:
+            with open(real_file, "rb") as bf:
                 raw = bf.read(MAX_FILE_BYTES + 1)
             if b"\x00" in raw[:4096]:
                 continue
@@ -865,8 +885,8 @@ def explore_code_slices(
                             next_frontier.append(os.path.relpath(cand_local, root_real))
                         elif os.path.isfile(cand_root):
                             next_frontier.append(os.path.relpath(cand_root, root_real))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to inspect imports in %s: %s", rel_display, exc, exc_info=True)
 
         current_frontier = sorted(list(dict.fromkeys(next_frontier)), key=lambda p: str(p).replace("\\", "/"))
         hop_level += 1

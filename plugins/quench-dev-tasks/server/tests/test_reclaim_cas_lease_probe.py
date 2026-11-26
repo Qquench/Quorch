@@ -291,3 +291,28 @@ def test_probe_parameter_threshold_override(reaper_workspace):
         now_wall_utc=now_wall,
     )
     assert ev_strict.verdict == HealthVerdict.STALE_SUSPECT
+
+
+def test_probe_corrupted_heartbeat_treated_as_stale(reaper_workspace):
+    """验证损坏的 last_heartbeat_wall_utc 在文件陈旧时不误判为 HEALTHY。"""
+    ws = reaper_workspace
+    dev_tasks_checkout(ws, task_file="2026-09-24_demo.md", task_id="1.1")
+
+    base_time = 1700000000.0
+    app_file = os.path.join(ws, "src", "app.py")
+    os.utime(app_file, (base_time - 2000, base_time - 2000))
+    now_wall = datetime.fromtimestamp(base_time, tz=timezone.utc).isoformat()
+
+    m = load_manifest(ws)
+    rec = m.records["2026-09-24_demo::1.1"]
+    touch_heartbeat(
+        ws,
+        task_id="2026-09-24_demo::1.1",
+        holder_token=rec.holder_token,
+        generation=rec.generation,
+        now_wall_utc="corrupted-ts",
+    )
+
+    ev = probe_lease_health(ws, task_id="2026-09-24_demo::1.1", now_wall_utc=now_wall)
+    assert ev.verdict == HealthVerdict.STALE_SUSPECT
+    assert ev.heartbeat_silence_seconds > 900.0

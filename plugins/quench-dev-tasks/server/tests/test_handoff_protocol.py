@@ -29,10 +29,7 @@ from project_config import (
     ReviewerEngineConfig,
     load_project_config,
 )
-from reviewer_engine import (
-    DeepSeekClient,
-    ReviewerClient,
-)
+from reviewer_engine import ReviewerClient
 from server import (
     _resolve_handoff_envelope,
     dev_tasks_checkout,
@@ -80,7 +77,11 @@ def test_workspace(tmp_path):
 
 def test_reviewer_client_decoupling():
     """Verify ReviewerClient is decoupled as generic client and backward-compatible with DeepSeekClient."""
-    assert issubclass(ReviewerClient, DeepSeekClient)
+    import reviewer_engine
+
+    with pytest.warns(DeprecationWarning):
+        deprecated_cls = reviewer_engine.DeepSeekClient
+    assert issubclass(ReviewerClient, deprecated_cls)
 
     cfg = ReviewerEngineConfig(
         mode="engine",

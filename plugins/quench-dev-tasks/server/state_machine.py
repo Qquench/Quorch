@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 import filelock
@@ -30,6 +32,7 @@ from task_status import (
 )
 
 SLOW_PATH_HASH_QUOTA_DEFAULT: int = 100  # 合法大范围 refactor 在此上调；配置化旋钮延后 step08
+_logger = logging.getLogger("quench_dev_tasks.state_machine")
 
 VALID_TRANSITIONS: Dict[str, List[str]] = {
     STATUS_PENDING: [STATUS_CONFIRMED, STATUS_SKIPPED, STATUS_REWORK],
@@ -77,17 +80,47 @@ def _normalize_status(status_str: str) -> str:
     return res if res != STATUS_UNKNOWN else status_str.strip()
 
 
+def _iter_non_fenced_lines(lines: List[str]):
+    """Yield (idx, line, stripped_text) skipping fenced code blocks (```/~~~) and blockquotes (>)."""
+    in_fence_char: Optional[str] = None
+    in_fence_len: int = 0
+    for idx, line in enumerate(lines):
+        check_line = line[1:] if (idx == 0 and line.startswith("\ufeff")) else line
+        stripped_left = check_line.lstrip(" ")
+        indent = len(check_line) - len(stripped_left)
+
+        if indent <= 3 and (stripped_left.startswith("```") or stripped_left.startswith("~~~")):
+            fence_char = stripped_left[0]
+            flen = len(stripped_left) - len(stripped_left.lstrip(fence_char))
+            if in_fence_char is None:
+                in_fence_char = fence_char
+                in_fence_len = flen
+                continue
+            elif in_fence_char == fence_char and flen >= in_fence_len and stripped_left[flen:].strip() == "":
+                in_fence_char = None
+                in_fence_len = 0
+                continue
+
+        if in_fence_char is not None:
+            continue
+
+        if stripped_left.startswith(">"):
+            continue
+
+        yield idx, line, stripped_left.strip()
+
+
 def parse_task_file(filepath: str) -> List[TaskItem]:
     """Parse Markdown task file, extracting all task items and their current statuses. / 解析 Markdown 任务文件，提取所有任务条目及其当前状态。"""
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"Task file not found / 任务文件不存在: {filepath}")
 
     tasks: List[TaskItem] = []
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8", newline="") as f:
         lines = f.readlines()
 
-    for idx, line in enumerate(lines):
-        m = TASK_HEADER_PATTERN.match(line.strip())
+    for idx, line, clean_line in _iter_non_fenced_lines(lines):
+        m = TASK_HEADER_PATTERN.match(clean_line)
         if m:
             t_id = m.group(1).strip()
             raw_status = m.group(2).strip()
@@ -108,29 +141,50 @@ def parse_task_file(filepath: str) -> List[TaskItem]:
 
 def extract_task_whitelist(task_file_content: str, task_id: str) -> list[str]:
     """Extract affected files whitelist from task markdown content."""
-    tid_pattern = re.escape(str(task_id).strip())
+    clean_tid = str(task_id).strip()
+    lines = task_file_content.splitlines(keepends=True)
+    header_re = re.compile(r"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\b", re.IGNORECASE)
+
+    start_idx = -1
+    end_idx = len(lines)
+    for idx, _, clean_line in _iter_non_fenced_lines(lines):
+        m_hdr = header_re.match(clean_line)
+        if m_hdr:
+            cur_id = m_hdr.group(1).strip()
+            if start_idx == -1:
+                if cur_id == clean_tid:
+                    start_idx = idx
+            else:
+                end_idx = idx
+                break
+
+    whitelist: list[str] = []
+    if start_idx == -1:
+        return whitelist
+
+    section_text = "".join(lines[start_idx:end_idx])
     pattern = re.compile(
-        rf"###\s+(?:任务|Task)\s+{tid_pattern}\s+.*?####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```",
+        r"####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```[^\n]*\r?\n?(.*?)```",
         re.DOTALL | re.IGNORECASE,
     )
-    m = pattern.search(task_file_content)
-    whitelist: list[str] = []
+    m = pattern.search(section_text)
     if m:
         raw_block = m.group(1).strip()
         for line in raw_block.splitlines():
             line = line.strip()
             if not line:
                 continue
-            cleaned = re.sub(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*", "", line).strip()
-            cleaned = cleaned.split("（")[0].split("(")[0].strip()
+            cleaned = re.sub(r"^\[(?:MODIFY|NEW|DELETE|RENAME)\]\s*", "", line, flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r"\s*[\(（][^\)）]*[\)）]\s*$", "", cleaned).strip()
             if cleaned:
-                if "->" in cleaned:
-                    for p in cleaned.split("->"):
-                        p = p.strip()
-                        if p:
-                            whitelist.append(p.replace("\\", "/"))
-                else:
-                    whitelist.append(cleaned.replace("\\", "/"))
+                parts = cleaned.split("->") if "->" in cleaned else [cleaned]
+                for p in parts:
+                    p = re.sub(r"\s*[\(（][^\)）]*[\)）]\s*$", "", p).strip()
+                    p = p.replace("\\", "/")
+                    while p.startswith("./"):
+                        p = p[2:]
+                    if p:
+                        whitelist.append(p)
     return whitelist
 
 
@@ -181,8 +235,8 @@ def _verify_scope_reconciliation(
             for pat in configured_unmanaged:
                 if pat not in unmanaged:
                     unmanaged.append(pat)
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.warning("Failed to load project_config in _verify_scope_reconciliation: %s", e)
 
     report = reconcile_workspace_against_whitelist(
         workspace_root=ws,
@@ -225,14 +279,19 @@ def transition_task(
         if not os.path.isfile(filepath):
             raise FileNotFoundError(f"Task file disappeared after acquiring lock / 持有锁后发现任务文件不存在: {filepath}")
 
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        with open(filepath, "rb") as f:
+            raw_bytes = f.read()
+
+        has_bom = raw_bytes.startswith(b"\xef\xbb\xbf")
+        clean_bytes = raw_bytes[3:] if has_bom else raw_bytes
+        text = clean_bytes.decode("utf-8")
+        lines = text.splitlines(keepends=True)
 
         target_item: Optional[TaskItem] = None
         target_idx = -1
 
-        for idx, line in enumerate(lines):
-            m = TASK_HEADER_PATTERN.match(line.strip())
+        for idx, line, clean_line in _iter_non_fenced_lines(lines):
+            m = TASK_HEADER_PATTERN.match(clean_line)
             if m and m.group(1).strip() == str(task_id).strip():
                 t_id = m.group(1).strip()
                 raw_status = m.group(2).strip()
@@ -273,23 +332,44 @@ def transition_task(
             )
 
         old_line = lines[target_idx]
+        line_ending = "\r\n" if old_line.endswith("\r\n") else ("\n" if old_line.endswith("\n") else "")
         new_line = old_line
         m_curr = TASK_HEADER_PATTERN.match(old_line.strip())
         if m_curr:
             raw_match_status = m_curr.group(2)
             new_line = old_line.replace(raw_match_status, norm_new, 1)
         else:
-            new_line = f"### 任务 {target_item.id} {norm_new} — {target_item.title}\n"
+            new_line = f"### 任务 {target_item.id} {norm_new} — {target_item.title}{line_ending}"
 
         lines[target_idx] = new_line
 
+        out_bytes = "".join(lines).encode("utf-8")
+        if has_bom:
+            out_bytes = b"\xef\xbb\xbf" + out_bytes
+
         dir_name = os.path.dirname(os.path.abspath(filepath))
         fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        fd_open = True
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            os.replace(tmp_path, filepath)
+            with os.fdopen(fd, "wb") as f:
+                fd_open = False
+                f.write(out_bytes)
+                f.flush()
+                os.fsync(f.fileno())
+            for attempt in range(5):
+                try:
+                    os.replace(tmp_path, filepath)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.02 * (2 ** attempt))
         except Exception:
+            if fd_open:
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
             if os.path.exists(tmp_path):
                 try:
                     os.remove(tmp_path)

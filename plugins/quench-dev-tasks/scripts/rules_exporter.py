@@ -12,6 +12,7 @@ import argparse
 import io
 import os
 import sys
+import tempfile
 
 # Windows UTF-8 console defense
 if sys.version_info >= (3, 7):
@@ -108,6 +109,26 @@ class RulesExporter:
         except Exception:
             return DEFAULT_FALLBACK_RULES.strip()
 
+    @staticmethod
+    def _atomic_write_text(target_path: str, content: str) -> None:
+        """Atomically write UTF-8 text with LF line endings via mkstemp + os.replace."""
+        abs_target = os.path.abspath(target_path)
+        parent = os.path.dirname(abs_target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=parent or ".")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+            os.replace(tmp_path, abs_target)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
+
     @classmethod
     def export_cursorrules(
         cls, discipline_path: str | None, output_path: str, force: bool = False
@@ -118,13 +139,8 @@ class RulesExporter:
             print(f"ℹ️ {out_abs} 已存在，跳过覆盖（使用 --force 可强制覆盖）。")
             return out_abs
 
-        parent = os.path.dirname(out_abs)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-
         rules_text = cls.extract_condensed_rules(discipline_path)
-        with open(out_abs, "w", encoding="utf-8", newline="\n") as f:
-            f.write(rules_text + "\n")
+        cls._atomic_write_text(out_abs, rules_text + "\n")
 
         print(f"✅ 已生成 Cursor 规则文件: {out_abs}")
         return out_abs
@@ -139,10 +155,6 @@ class RulesExporter:
             print(f"ℹ️ {out_abs} 已存在，跳过覆盖（使用 --force 可强制覆盖）。")
             return out_abs
 
-        parent = os.path.dirname(out_abs)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-
         rules_text = cls.extract_condensed_rules(discipline_path)
 
         mdc_content = (
@@ -153,8 +165,7 @@ class RulesExporter:
             "---\n\n"
             f"{rules_text}\n"
         )
-        with open(out_abs, "w", encoding="utf-8", newline="\n") as f:
-            f.write(mdc_content)
+        cls._atomic_write_text(out_abs, mdc_content)
 
         print(f"✅ 已生成 Cursor MDC 规则文件: {out_abs}")
         return out_abs

@@ -186,14 +186,18 @@ class FileVerdictAuditSink:
             final_line = self._structured_truncate(record, orig_bytes=len(raw_bytes))
 
         dir_path = os.path.dirname(self.path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
 
         try:
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
             with self._lock:
                 with open(self.path, "a", encoding="utf-8") as f:
                     f.write(final_line + "\n")
                     f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except (OSError, AttributeError):
+                        pass
         except Exception as e:
             try:
                 sys.stderr.write(f"[VerdictAuditSink] Failed to write verdict line: {e}\n")
@@ -202,46 +206,74 @@ class FileVerdictAuditSink:
                 pass
 
     def _structured_truncate(self, record: dict[str, Any], orig_bytes: int) -> str:
-        payload_copy = dict(record["payload"])
+        rec_copy = dict(record)
+        payload_copy = dict(rec_copy.get("payload") or {})
         payload_copy["_truncated"] = True
         payload_copy["_orig_bytes"] = orig_bytes
-        record["payload"] = payload_copy
+        rec_copy["payload"] = payload_copy
 
-        candidate = json.dumps(record, ensure_ascii=False)
+        candidate = json.dumps(rec_copy, ensure_ascii=False)
         if len(candidate.encode("utf-8")) <= self.max_record_bytes:
             return candidate
 
-        str_keys = [k for k, v in payload_copy.items() if isinstance(v, str) and not k.startswith("_")]
-        if not str_keys:
-            for k, v in list(payload_copy.items()):
-                if not k.startswith("_"):
-                    payload_copy[k] = str(v)[:100]
-            str_keys = [k for k in payload_copy.keys() if not k.startswith("_")]
-
-        str_keys.sort(key=lambda k: len(str(payload_copy[k])), reverse=True)
-        for key in str_keys:
-            orig_str = str(payload_copy[key])
+        # 1. 按字段序列化字节体积降序，统一压缩最大字段（兼顾字符串与非字符串容器），保留短小字段不误伤
+        all_keys = [k for k in payload_copy.keys() if not k.startswith("_")]
+        all_keys.sort(
+            key=lambda k: len(json.dumps(payload_copy[k], ensure_ascii=False).encode("utf-8")),
+            reverse=True,
+        )
+        for key in all_keys:
+            orig_val = payload_copy[key]
+            is_str = isinstance(orig_val, str)
+            raw_text = orig_val if is_str else json.dumps(orig_val, ensure_ascii=False)
             low = 0
-            high = len(orig_str)
-            best_str = ""
+            high = len(raw_text)
+            best_val: Any = "" if is_str else None
             while low <= high:
                 mid = (low + high) // 2
-                payload_copy[key] = orig_str[:mid]
-                record["payload"] = payload_copy
-                line = json.dumps(record, ensure_ascii=False)
+                payload_copy[key] = raw_text[:mid]
+                rec_copy["payload"] = payload_copy
+                line = json.dumps(rec_copy, ensure_ascii=False)
                 if len(line.encode("utf-8")) <= self.max_record_bytes:
-                    best_str = orig_str[:mid]
+                    best_val = raw_text[:mid]
                     low = mid + 1
                 else:
                     high = mid - 1
-            payload_copy[key] = best_str
-            record["payload"] = payload_copy
-            line = json.dumps(record, ensure_ascii=False)
+            if best_val is not None:
+                payload_copy[key] = best_val
+            else:
+                payload_copy.pop(key, None)
+            rec_copy["payload"] = payload_copy
+            line = json.dumps(rec_copy, ensure_ascii=False)
             if len(line.encode("utf-8")) <= self.max_record_bytes:
                 return line
 
-        record["payload"] = {"_truncated": True, "_orig_bytes": orig_bytes}
-        return json.dumps(record, ensure_ascii=False)
+        # 2. 兜底仅保留截断元信息并保护小 max_record_bytes 下顶层字段不溢出
+        rec_copy["payload"] = {"_truncated": True, "_orig_bytes": orig_bytes}
+        line = json.dumps(rec_copy, ensure_ascii=False)
+        if len(line.encode("utf-8")) <= self.max_record_bytes:
+            return line
+
+        for top_key in ("verdict_hash", "task_id"):
+            val = str(rec_copy.get(top_key, ""))
+            low = 0
+            high = len(val)
+            best = ""
+            while low <= high:
+                mid = (low + high) // 2
+                rec_copy[top_key] = val[:mid]
+                line = json.dumps(rec_copy, ensure_ascii=False)
+                if len(line.encode("utf-8")) <= self.max_record_bytes:
+                    best = val[:mid]
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            rec_copy[top_key] = best
+            line = json.dumps(rec_copy, ensure_ascii=False)
+            if len(line.encode("utf-8")) <= self.max_record_bytes:
+                return line
+
+        return line
 
 
 def make_verdict_sink(path: str, lock_path: Optional[str] = None) -> VerdictAuditSink:
@@ -283,10 +315,33 @@ def make_consultation_telemetry_sink(path: str, lock_path: Optional[str] = None)
     return FileConsultationTelemetrySink(path=path, lock_path=lock_path)
 
 
+class _NormPathKey:
+    """按 normcase+abspath+normpath 判等和哈希，同时保留原始 abspath(normpath) 用于 sink.path。"""
+    __slots__ = ("raw", "norm")
+
+    def __init__(self, path: str) -> None:
+        self.raw = os.path.abspath(os.path.normpath(path))
+        self.norm = os.path.normcase(self.raw)
+
+    def __hash__(self) -> int:
+        return hash(self.norm)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _NormPathKey) and self.norm == other.norm
+
+
 @functools.lru_cache(maxsize=32)
+def _get_consultation_telemetry_sink_cached(key: _NormPathKey) -> ConsultationTelemetrySink:
+    return make_consultation_telemetry_sink(key.raw)
+
+
 def _get_consultation_telemetry_sink(path: str) -> ConsultationTelemetrySink:
-    """按路径缓存的 ConsultationTelemetrySink 单例工厂。"""
-    return make_consultation_telemetry_sink(path)
+    """按归一化路径缓存的 ConsultationTelemetrySink 单例工厂。"""
+    return _get_consultation_telemetry_sink_cached(_NormPathKey(path))
+
+
+_get_consultation_telemetry_sink.cache_info = _get_consultation_telemetry_sink_cached.cache_info  # type: ignore[attr-defined]
+_get_consultation_telemetry_sink.cache_clear = _get_consultation_telemetry_sink_cached.cache_clear  # type: ignore[attr-defined]
 
 
 def reset_consultation_telemetry_sink_cache() -> None:

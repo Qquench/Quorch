@@ -224,13 +224,14 @@ def json_escape_path(path_str: str) -> str:
 
 def atomic_write_file(target_path: str, content: str) -> None:
     """原子化写入文件：先写临时文件后原子替换"""
-    target_dir = os.path.dirname(target_path)
+    abs_target = os.path.abspath(target_path)
+    target_dir = os.path.dirname(abs_target)
     os.makedirs(target_dir, exist_ok=True)
-    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir, text=True)
+    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir)
     try:
         with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
             f.write(content)
-        os.replace(temp_file, target_path)
+        os.replace(temp_file, abs_target)
     except Exception:
         if os.path.exists(temp_file):
             try:
@@ -453,10 +454,23 @@ def rollback_configuration(plugin_dir: str, backup_path: str) -> bool:
     files_map = snapshot.get("files", {})
     p_dir = os.path.normpath(plugin_dir)
     repo_root = os.path.normpath(os.path.join(p_dir, "..", ".."))
+    real_root = os.path.realpath(os.path.abspath(repo_root))
 
     restored_count = 0
     for rel_path, content in files_map.items():
-        full_path = os.path.normpath(os.path.join(repo_root, rel_path))
+        if not isinstance(rel_path, str) or not rel_path.strip() or os.path.isabs(rel_path):
+            print(f"❌ 回滚失败: 非法回滚路径 {rel_path!r}", file=sys.stderr)
+            return False
+        full_path = os.path.realpath(os.path.abspath(os.path.join(real_root, rel_path)))
+        try:
+            common = os.path.commonpath([real_root, full_path])
+        except ValueError:
+            print(f"❌ 回滚失败: 跨驱动器越界路径 {rel_path}", file=sys.stderr)
+            return False
+        if os.path.normcase(common) != os.path.normcase(real_root) or os.path.normcase(full_path) == os.path.normcase(real_root):
+            print(f"❌ 回滚失败: 路径逃逸仓库根目录 {rel_path}", file=sys.stderr)
+            return False
+
         if content is not None:
             atomic_write_file(full_path, content)
             print(f"🔄 已恢复文件: {rel_path}")
@@ -520,7 +534,7 @@ def run_smoke_test(plugin_dir: str, python_exe: str) -> bool:
         print(f"❌ 冒烟测试失败: Server 脚本不存在: {server_script}", file=sys.stderr)
         return False
 
-    cmd = [python_exe, "-c", "import sys; print('PYTHON_READY')"]
+    cmd = [python_exe, "-c", "import sys, fastmcp, yaml, filelock; print('PYTHON_READY')"]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if res.returncode == 0 and "PYTHON_READY" in res.stdout:
@@ -650,7 +664,10 @@ def main() -> int:
         return 1
 
     print("\n📦 [步骤 2/4] 检查核心运行依赖...")
-    check_and_install_dependencies(python_exe, auto_install=not args.no_deps)
+    deps_ok = check_and_install_dependencies(python_exe, auto_install=not args.no_deps)
+    if not deps_ok:
+        print("❌ 核心运行依赖未就绪，安装终止。", file=sys.stderr)
+        return 1
 
     print("\n📝 [步骤 3/4] 根据模板动态渲染配置文件...")
     try:
@@ -679,7 +696,10 @@ def main() -> int:
             cmd = [python_exe, init_script, args.project, "--force", "--ide", effective_ide]
             if args.install_git_hook:
                 cmd.append("--install-git-hook")
-            subprocess.run(cmd)
+            init_res = subprocess.run(cmd)
+            if init_res.returncode != 0:
+                print(f"❌ 项目接入初始化失败 (exit code {init_res.returncode})。", file=sys.stderr)
+                return init_res.returncode
         else:
             print("\n💡 下一步：在任何项目中运行以下命令即可完成接入：")
             init_script = os.path.join(plugin_dir, "scripts", "init_project.py")

@@ -38,7 +38,7 @@ def test_verify_session_integrity_valid_utc():
 
 def test_verify_session_integrity_mixed_timezone_naive():
     # Naive ISO string (without +00:00) should be treated as UTC and not raise TypeError
-    future = datetime.now() + timedelta(hours=2)
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
     naive_iso = future.strftime("%Y-%m-%dT%H:%M:%S")
     bypass_data = {
         "active": True,
@@ -223,4 +223,21 @@ def test_is_agent_brain_artifact_positive_and_escape_defense(tmp_path):
 
     with patch("os.path.realpath", side_effect=fake_realpath):
         assert is_agent_brain_artifact(fake_brain_link, ws_str) is False
+
+
+def test_verify_session_integrity_rejects_missing_incoming_id_when_locked():
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    ok, reason = verify_session_integrity(
+        {"active": True, "session_id": "locked-sess", "expires_at": future},
+        None,
+    )
+    assert ok is False
+    assert "缺失当前会话 ID" in reason
+
+
+def test_matches_pattern_blocks_docs_substring_and_deep_single_star(tmp_path):
+    ws_str = str(tmp_path)
+    assert matches_pattern(str(tmp_path / "backend" / "docs" / "secret.py"), "docs/**", ws_str) is False
+    assert matches_pattern(str(tmp_path / "docs" / "a" / "b" / "c.md"), "docs/*", ws_str) is False
+    assert matches_pattern(str(tmp_path / "docs" / "a.md"), "docs/*", ws_str) is True
 

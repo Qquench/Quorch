@@ -179,3 +179,25 @@ def test_main_workflow(temp_git_repo):
         with patch("git_pre_commit_guard.get_staged_files", return_value=["src/app.py"]):
             with patch("sys.argv", ["git_pre_commit_guard.py", "--workspace", str(temp_git_repo)]):
                 assert main() == 0
+
+
+def test_dotted_task_id_and_strict_violation_matching(temp_git_repo):
+    """点分任务 ID 解析与禁止 basename/endswith 绕过。"""
+    tasks_dir = temp_git_repo / "docs" / "dev_tasks"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    (tasks_dir / "2026-11-26_dotted.md").write_text(
+        """### 任务 36.4 🔨 执行中 — Dotted Task
+#### 【涉及文件】
+```
+[MODIFY] src/core/app.py
+```
+""",
+        encoding="utf-8",
+    )
+    active = find_active_task(str(tasks_dir))
+    assert active is not None
+    assert active[0] == "36.4"
+    assert active[2] == ["src/core/app.py"]
+
+    violations = check_violations(["other/app.py", "x_src/core/app.py", "src/core/app.py"], active[2], str(temp_git_repo))
+    assert violations == ["other/app.py", "x_src/core/app.py"]

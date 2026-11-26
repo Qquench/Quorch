@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import tempfile
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -31,39 +33,57 @@ class LeaseTouchOutcome(Enum):
     CONTENTION = "contention"
 
 
+_logger = logging.getLogger("quench_dev_tasks.workspace_lease")
+
+
 def _atomic_write_json(file_path: Path, data: dict) -> None:
     """原子化写入 JSON 文件，带 Windows WinError 32 共享冲突有界重试与落盘 fsync。"""
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = file_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
-    payload = json.dumps(data, indent=2, ensure_ascii=False)
-    with open(temp_file, "w", encoding="utf-8") as f:
-        f.write(payload)
-        f.flush()
-        os.fsync(f.fileno())
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(file_path.parent),
+        prefix=f".{file_path.name}.",
+        suffix=".tmp",
+    )
+    temp_file = Path(tmp_name)
+    fd_open = True
+    try:
+        payload = json.dumps(data, indent=2, ensure_ascii=False)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd_open = False
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
 
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            os.replace(temp_file, file_path)
-            # 尝试 fsync 父目录（POSIX）
+        max_retries = 5
+        for attempt in range(max_retries):
             try:
-                dir_fd = os.open(str(file_path.parent), os.O_RDONLY)
+                os.replace(temp_file, file_path)
+                # 尝试 fsync 父目录（POSIX）
                 try:
-                    os.fsync(dir_fd)
-                finally:
-                    os.close(dir_fd)
-            except Exception:
-                pass
-            return
-        except (PermissionError, OSError):
-            if attempt == max_retries - 1:
-                try:
-                    if temp_file.exists():
-                        temp_file.unlink()
+                    dir_fd = os.open(str(file_path.parent), os.O_RDONLY)
+                    try:
+                        os.fsync(dir_fd)
+                    finally:
+                        os.close(dir_fd)
                 except Exception:
                     pass
-                raise
-            time.sleep(0.02 * (2 ** attempt))
+                return
+            except (PermissionError, OSError):
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(0.02 * (2 ** attempt))
+    except Exception:
+        if fd_open:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            if temp_file.exists():
+                temp_file.unlink()
+        except Exception:
+            pass
+        raise
 
 
 class WorkspaceLeaseGuard:
@@ -142,7 +162,8 @@ class WorkspaceLeaseGuard:
                 if self._lease_file.is_file():
                     try:
                         with open(self._lease_file, "r", encoding="utf-8") as f:
-                            data = json.load(f)
+                            loaded = json.load(f)
+                        data = loaded if isinstance(loaded, dict) else {}
                     except Exception:
                         data = {}
 
@@ -155,22 +176,31 @@ class WorkspaceLeaseGuard:
                         _atomic_write_json(self._lease_file, data)
                         self._is_held = True
                         self._boot_nonce = boot_nonce
-                        self._generation = int(data.get("generation", 1))
+                        try:
+                            self._generation = int(data.get("generation", 1))
+                        except (ValueError, TypeError):
+                            self._generation = 1
                         self._last_touch_monotonic = time.monotonic()
                         return True
 
                     # 若已存在租约持有者，仅以 TTL 超时判定是否可接管（不再嗅探进程）
                     if owner_pid is not None:
                         now_wall = time.time()
-                        updated_at = float(data.get("updated_at") or 0.0)
-                        is_stale = (now_wall - updated_at) > (self._lease_ttl_s * self._take_over_stale_multiplier)
+                        try:
+                            updated_at = float(data.get("updated_at") or 0.0)
+                            is_stale = (now_wall - updated_at) > (self._lease_ttl_s * self._take_over_stale_multiplier)
+                        except (ValueError, TypeError):
+                            is_stale = True
                         if not is_stale:
                             self._is_held = False
                             return False
 
                 # 租约空闲或原持有者已确认超时，安全接管，递增 generation
                 now = time.time()
-                old_gen = int(data.get("generation", 0))
+                try:
+                    old_gen = int(data.get("generation", 0))
+                except (ValueError, TypeError):
+                    old_gen = 0
                 new_gen = old_gen + 1
                 data = {
                     "pid": os.getpid(),
@@ -201,13 +231,16 @@ class WorkspaceLeaseGuard:
             return LeaseTouchOutcome.LOST
 
         try:
-            with FileLock(str(self._lock_file), timeout=1.0):
+            with self._lock:
                 if not self._lease_file.is_file():
                     self._is_held = False
                     return LeaseTouchOutcome.LOST
                 try:
                     with open(self._lease_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
+                    if not isinstance(data, dict):
+                        self._is_held = False
+                        return LeaseTouchOutcome.LOST
                 except Exception:
                     self._is_held = False
                     return LeaseTouchOutcome.LOST
@@ -219,7 +252,7 @@ class WorkspaceLeaseGuard:
                 if (
                     disk_pid != os.getpid()
                     or disk_nonce != self._boot_nonce
-                    or (self._generation and disk_gen != self._generation)
+                    or (self._generation is not None and disk_gen != self._generation)
                 ):
                     self._is_held = False
                     return LeaseTouchOutcome.LOST
@@ -245,6 +278,7 @@ class WorkspaceLeaseGuard:
         """破坏性清理操作上下文门禁。必须持有有效租约方可执行。"""
         if not self.is_held():
             raise WorkspaceLeaseNotHeldError("Destructive workspace operations require an active workspace lease.")
+        self.renew_or_die()
         yield
 
     def force_release_lease(self, reason: str = "") -> bool:
@@ -273,10 +307,10 @@ class WorkspaceLeaseGuard:
                             data = json.load(f)
                         if data.get("pid") == os.getpid() and data.get("boot_nonce") == self._boot_nonce:
                             self._lease_file.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as exc:
+                        _logger.warning("Failed to inspect/unlink workspace lease during release: %s", exc)
+        except Exception as exc:
+            _logger.warning("Failed to acquire/release workspace lease lock during release: %s", exc)
         finally:
             self._is_held = False
             self._boot_nonce = None

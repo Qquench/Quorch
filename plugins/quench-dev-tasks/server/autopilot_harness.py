@@ -245,6 +245,68 @@ class LastEventSnapshot:
     result_data: Mapping[str, Any]
 
 
+def _is_review_completed_and_passed(last_event: Optional[LastEventSnapshot]) -> bool:
+    """Return True only when last_event represents a terminal, non-degraded, non-rework review pass."""
+    if last_event is None or not last_event.success:
+        return False
+    data = last_event.result_data
+    if not isinstance(data, Mapping):
+        return False
+
+    if last_event.tool_name == "dev_reviewer_poll":
+        if data.get("state") != "COMPLETED":
+            return False
+        if data.get("degraded_reason"):
+            return False
+        inner = data.get("result")
+        if isinstance(inner, Mapping):
+            if str(inner.get("status", "")).strip().lower() == "degraded":
+                return False
+            if inner.get("degraded_reason"):
+                return False
+            verdict = str(inner.get("verdict", "")).strip().upper()
+            if verdict in ("REWORK", "FAIL", "FAILED", "REJECT", "REJECTED", "BLOCKED"):
+                return False
+        return True
+
+    if last_event.tool_name == "dev_tasks_refine_spec":
+        if data.get("ok") is False:
+            return False
+        status_str = str(data.get("status", "")).strip().lower()
+        if status_str in ("error", "rejected", "failed", "rework"):
+            return False
+        if data.get("rework"):
+            return False
+        verdict = str(data.get("verdict", "")).strip().upper()
+        if verdict in ("REWORK", "FAIL", "FAILED", "REJECT", "REJECTED", "BLOCKED"):
+            return False
+        validation = data.get("validation")
+        if isinstance(validation, Mapping) and validation.get("is_valid") is False:
+            return False
+        return True
+
+    return False
+
+
+def _is_review_terminal_completed(last_event: Optional[LastEventSnapshot]) -> bool:
+    """Return True when last_event is a terminal completed review (non-degraded)."""
+    if last_event is None or not last_event.success:
+        return False
+    data = last_event.result_data
+    if not isinstance(data, Mapping):
+        return False
+    if last_event.tool_name == "dev_reviewer_poll":
+        if data.get("state") != "COMPLETED":
+            return False
+        inner = data.get("result")
+        if isinstance(inner, Mapping) and str(inner.get("status", "")).strip().lower() == "degraded":
+            return False
+        return True
+    if last_event.tool_name == "dev_tasks_refine_spec":
+        return _is_review_completed_and_passed(last_event)
+    return False
+
+
 @dataclass(frozen=True)
 class HarnessNextAction:
     action: HarnessActionType
@@ -402,7 +464,7 @@ def compute_next_action(
         current_stage = "before_archive"
     elif last_event is not None and last_event.tool_name == "dev_tasks_confirm":
         current_stage = "after_confirm"
-    elif last_event is not None and last_event.tool_name in ("dev_reviewer_poll", "dev_tasks_refine_spec"):
+    elif _is_review_terminal_completed(last_event):
         current_stage = "after_review"
     elif last_event is not None and last_event.tool_name == "dev_tasks_propose":
         current_stage = "after_propose"
@@ -572,7 +634,23 @@ def compute_next_action(
                 False,
             )
 
-    # D3: Handling pending tasks (require review)
+    # D3: Handling pending tasks that just passed review (CONFIRM before REVIEW)
+    if pending_tasks and _is_review_completed_and_passed(last_event):
+        return (
+            HarnessNextAction(
+                action="CONFIRM",
+                task_file=task_file,
+                task_ids=tuple(t.task_id for t in pending_tasks),
+                candidates=candidates,
+                reason="Review evaluation passed; proceed to confirm tasks / 审查推演通过，推进任务确认",
+                instruction="Confirm approved tasks via dev_tasks_confirm / 调用 dev_tasks_confirm 确认通过审查的任务。",
+                next_batch_tasks=next_batch_tasks,
+                roadmap_file=roadmap_file,
+            ),
+            False,
+        )
+
+    # D4: Handling pending tasks (require review)
     if pending_tasks:
         if effective_mode == "inverted":
             channel = "inverted_main_reviewer"
@@ -590,23 +668,6 @@ def compute_next_action(
                 candidates=candidates,
                 reason=f"Pending tasks require architecture review ({len(pending_tasks)} items pending)",
                 instruction=instruction,
-                next_batch_tasks=next_batch_tasks,
-                roadmap_file=roadmap_file,
-            ),
-            False,
-        )
-
-    # D4: Handling tasks that just passed review and need confirm
-    # (If last event was review and there are no pending or rework tasks, confirm them)
-    if last_event is not None and last_event.tool_name in ("dev_reviewer_poll", "dev_tasks_refine_spec") and not confirmed_tasks:
-        return (
-            HarnessNextAction(
-                action="CONFIRM",
-                task_file=task_file,
-                task_ids=tuple(t.task_id for t in task_states if _norm_status(t.status) == "pending"),
-                candidates=candidates,
-                reason="Review evaluation passed; proceed to confirm tasks / 审查推演通过，推进任务确认",
-                instruction="Confirm approved tasks via dev_tasks_confirm / 调用 dev_tasks_confirm 确认通过审查的任务。",
                 next_batch_tasks=next_batch_tasks,
                 roadmap_file=roadmap_file,
             ),

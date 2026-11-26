@@ -199,3 +199,16 @@ def test_sibling_prefix_defense(tmp_path: Path):
     with pytest.raises(PathTraversalError):
         sanitize_workspace_path(str(ws), "../project-evil/payload.py")
 
+
+def test_canonicalize_path_rejects_win32_drive_relative_ads_trailing_and_reserved(tmp_path: Path):
+    from path_guard import canonicalize_path, is_within_whitelist
+
+    ws = str(tmp_path)
+    for vec in ("C:foo", "file.txt:stream", "dir/foo. ", "dir/foo.", "CON", "sub/lpt1.log"):
+        with pytest.raises(PathTraversalError):
+            canonicalize_path(vec, base_dir=ws)
+
+    assert is_within_whitelist("sub/README.md", ["README.md"]) is False
+    assert is_within_whitelist("README.md", ["README.md"]) is True
+    assert is_within_whitelist("sub/README.md", ["*.md"]) is True
+

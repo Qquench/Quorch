@@ -41,6 +41,20 @@ STATUS_COMPACT_ALWAYS_KEEP: Final[tuple[str, ...]] = (
     "entitlements_hash",
 )
 
+TOOL_DEFAULT_ALWAYS_KEEP: Final[frozenset[str]] = frozenset({
+    "ok",
+    "status",
+    "error",
+    "created",
+    "updated",
+    "reason_code",
+    "task_id",
+    "job_id",
+    "state",
+    "action",
+    "harness_next_action",
+})
+
 # Closed-vocabulary code references derived from leaf SSOT HOOK_LOG_CODES
 _CODE_OTHER: Final[str] = next(c for c in HOOK_LOG_CODES if c == "OTHER")
 _CODE_ASK_MODAL_BLOCKED: Final[str] = next(c for c in HOOK_LOG_CODES if c.startswith("ASK_MODAL"))
@@ -174,7 +188,7 @@ def fit_to_budget(
         list(STATUS_COMPACT_DROP_ORDER) if tool_name == "dev_tasks_status" else []
     )
     effective_always_keep = set(always_keep) if always_keep is not None else (
-        set(STATUS_COMPACT_ALWAYS_KEEP) if tool_name == "dev_tasks_status" else set()
+        set(STATUS_COMPACT_ALWAYS_KEEP) if tool_name == "dev_tasks_status" else set(TOOL_DEFAULT_ALWAYS_KEEP)
     )
 
     truncated_sections: list[str] = []
@@ -215,10 +229,21 @@ def fit_to_budget(
                 return cand
 
     # Step 3: Tier-2 discriminator guarantee & Tier-3 observability marker
-    # Tier-2: Minimize harness_next_action to action-only and drop any remaining non-always_keep keys
+    # Tier-2: Minimize harness_next_action to action-only first and re-measure before dropping business keys
     if "harness_next_action" in result and isinstance(result["harness_next_action"], dict):
-        action_val = result["harness_next_action"].get("action")
-        result["harness_next_action"] = {"action": action_val} if action_val is not None else {}
+        orig_hna = result["harness_next_action"]
+        action_val = orig_hna.get("action")
+        minimized_hna = {"action": action_val} if action_val is not None else {}
+        if orig_hna != minimized_hna:
+            result["harness_next_action"] = minimized_hna
+            truncated_sections.append("harness_next_action")
+            cand = dict(result)
+            uniq_t = list(dict.fromkeys(truncated_sections))
+            if len(uniq_t) > 5:
+                uniq_t = uniq_t[:5]
+            cand["truncated_sections"] = uniq_t
+            if measure_payload_bytes(cand) <= budget:
+                return cand
 
     keys_to_drop = [k for k in result.keys() if k not in effective_always_keep and k != "truncated_sections"]
     for k in keys_to_drop:

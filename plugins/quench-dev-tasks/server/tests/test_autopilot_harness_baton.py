@@ -811,6 +811,106 @@ def test_dispatch_runner_tier_guidance_and_compact_budget(status: str):
     assert measure_payload_bytes(action_hint.to_compact_dict()) < 700
 
 
+@pytest.mark.tier1_fast
+def test_review_completed_and_passed_advances_to_confirm_and_guards_empty():
+    """Task 36.1: CONFIRM is reachable when review passes with pending_tasks, and blocked on non-terminal/degraded/empty."""
+    pending = [
+        TaskStateSnapshot(task_id="1.1", status="pending", title="Task A"),
+        TaskStateSnapshot(task_id="1.2", status="pending", title="Task B"),
+    ]
+
+    # 1. dev_reviewer_poll COMPLETED + PASS -> CONFIRM with all pending task_ids
+    act_confirm, _ = compute_next_action(
+        task_states=pending,
+        effective_mode="standard",
+        reviewer_channel="external_api",
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        task_file="batch.md",
+        last_event=LastEventSnapshot(
+            tool_name="dev_reviewer_poll",
+            success=True,
+            result_data={"state": "COMPLETED", "result": {"verdict": "PASS", "findings": "ok"}},
+        ),
+    )
+    assert act_confirm.action == "CONFIRM"
+    assert tuple(act_confirm.task_ids or ()) == ("1.1", "1.2")
+
+    # 2. dev_tasks_refine_spec ok=True -> CONFIRM with all pending task_ids
+    act_refine_confirm, _ = compute_next_action(
+        task_states=pending,
+        effective_mode="standard",
+        reviewer_channel="external_api",
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        task_file="batch.md",
+        last_event=LastEventSnapshot(
+            tool_name="dev_tasks_refine_spec",
+            success=True,
+            result_data={"ok": True, "refined": True},
+        ),
+    )
+    assert act_refine_confirm.action == "CONFIRM"
+    assert tuple(act_refine_confirm.task_ids or ()) == ("1.1", "1.2")
+
+    # 3. Non-terminal dev_reviewer_poll (QUEUED / RUNNING) must NOT set after_review or advance to CONFIRM
+    for nonterm_state in ("QUEUED", "RUNNING"):
+        act_wait, consume_wait = compute_next_action(
+            task_states=pending,
+            effective_mode="standard",
+            reviewer_channel="external_api",
+            mode_source="default",
+            stop_at="after_review",
+            stop_at_consumed=False,
+            task_file="batch.md",
+            last_event=LastEventSnapshot(
+                tool_name="dev_reviewer_poll",
+                success=True,
+                result_data={"state": nonterm_state},
+            ),
+        )
+        assert act_wait.action == "REVIEW"
+        assert consume_wait is False
+
+    # 4. Degraded or REWORK review result must NOT advance to CONFIRM
+    for bad_data in (
+        {"state": "FAILED", "result": {"status": "degraded", "findings": ""}},
+        {"state": "COMPLETED", "result": {"status": "degraded", "findings": ""}},
+        {"state": "COMPLETED", "result": {"verdict": "REWORK", "findings": "fix"}},
+    ):
+        act_bad, _ = compute_next_action(
+            task_states=pending,
+            effective_mode="standard",
+            reviewer_channel="external_api",
+            mode_source="default",
+            stop_at="none",
+            stop_at_consumed=False,
+            task_file="batch.md",
+            last_event=LastEventSnapshot(tool_name="dev_reviewer_poll", success=True, result_data=bad_data),
+        )
+        assert act_bad.action != "CONFIRM"
+
+    # 5. Empty pending_tasks must NEVER emit CONFIRM with empty task_ids=()
+    act_no_pending, _ = compute_next_action(
+        task_states=[TaskStateSnapshot(task_id="1.1", status="in_progress", title="Working")],
+        effective_mode="standard",
+        reviewer_channel="external_api",
+        mode_source="default",
+        stop_at="none",
+        stop_at_consumed=False,
+        task_file="batch.md",
+        last_event=LastEventSnapshot(
+            tool_name="dev_reviewer_poll",
+            success=True,
+            result_data={"state": "COMPLETED", "result": {"verdict": "PASS"}},
+        ),
+    )
+    assert act_no_pending.action == "CHECKOUT"
+    assert act_no_pending.task_id == "1.1"
+
+
 
 
 

@@ -24,6 +24,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import reviewer_engine
 from check_no_api_bypass import (
     scan_file_for_bypass,
+    scan_workspace_for_bypass,
     main as scanner_main,
 )
 
@@ -192,4 +193,37 @@ def test_crlf_api_bypass_detection(tmp_path: Path):
 
     violations = scan_file_for_bypass(str(crlf_file))
     assert any(v.rule == "FORBIDDEN_PROVIDER_IMPORT" for v in violations)
+
+
+def test_ast_scanner_catches_from_google_import_genai(tmp_path: Path):
+    """AST scanner must catch 'from google import genai'."""
+    bad_file = tmp_path / "bad_google_genai.py"
+    bad_file.write_text("from google import genai\nclient = genai.Client()\n", encoding="utf-8")
+    violations = scan_file_for_bypass(str(bad_file))
+    assert any(v.rule == "FORBIDDEN_PROVIDER_IMPORT" for v in violations)
+
+
+def test_ast_scanner_catches_getenv_keyword_arg(tmp_path: Path):
+    """AST scanner must catch os.getenv(key='OPENAI_API_KEY') via keyword argument."""
+    bad_file = tmp_path / "bad_kw_env.py"
+    bad_file.write_text("import os\nk = os.getenv(key='OPENAI_API_KEY')\n", encoding="utf-8")
+    violations = scan_file_for_bypass(str(bad_file))
+    assert any(v.rule == "FORBIDDEN_ENV_KEY_READ" for v in violations)
+
+
+def test_ast_scanner_ignores_ancestor_tests_dir_outside_workspace(tmp_path: Path):
+    """If workspace itself lives under a 'tests' parent dir, non-test files inside workspace must still be scanned."""
+    ws = tmp_path / "tests" / "fake_repo"
+    srv = ws / "plugins" / "quench-dev-tasks" / "server"
+    srv.mkdir(parents=True)
+    bad_file = srv / "evil_module.py"
+    bad_file.write_text("url = 'https://api.openai.com/v1/chat/completions'\n", encoding="utf-8")
+    violations = scan_workspace_for_bypass(str(ws))
+    assert any(v.rule == "FORBIDDEN_ENDPOINT_LITERAL" for v in violations)
+
+
+def test_workspace_zero_api_bypass():
+    """Real repository governed directories must have zero API bypass violations."""
+    violations = scan_workspace_for_bypass(str(WORKSPACE_ROOT))
+    assert violations == [], f"Unexpected API bypass violations in workspace: {violations}"
 

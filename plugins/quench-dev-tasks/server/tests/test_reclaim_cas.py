@@ -362,3 +362,27 @@ def test_dev_tasks_reclaim_mcp_tool(mock_reclaim_workspace):
         assert res_err["reason"] == "missing_task_id"
 
     asyncio.run(_run_async_checks())
+
+
+def test_reclaim_transition_failure_leaves_manifest_unreleased(mock_reclaim_workspace, monkeypatch):
+    """验证 transition_task 失败时 manifest 维持未释放态，后续重试可恢复。"""
+    ws, md_name = mock_reclaim_workspace
+    namespaced_id = "2026-09-24_reclaim_test::1.1"
+    _setup_stale_lease(ws, namespaced_id, generation=1, holder_token="tok_retry")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated transition failure")
+
+    monkeypatch.setattr("manifest_lease.transition_task", boom)
+    with pytest.raises(RuntimeError, match="simulated transition failure"):
+        reclaim_stale_task(
+            ws,
+            task_id=namespaced_id,
+            expected_generation=1,
+            expected_holder_token="tok_retry",
+            force=False,
+        )
+
+    m = load_manifest(ws)
+    assert m.records[namespaced_id].released is False
+    assert m.records[namespaced_id].generation == 1

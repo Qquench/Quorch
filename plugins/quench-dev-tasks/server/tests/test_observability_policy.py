@@ -213,3 +213,50 @@ def test_verdict_sink_cross_process_file_locking_concurrency(tmp_path: Path):
         assert "task_id" in data
         assert "verdict_hash" in data
         assert "payload" in data
+
+
+def test_verdict_sink_structured_truncate_mixed_payload_and_small_limit(tmp_path: Path):
+    """混合大载荷（含 list/dict 容器）与极小 max_record_bytes=256 下均严格 <= max_record_bytes。"""
+    from observability_policy import FileVerdictAuditSink
+
+    v_path = str(tmp_path / "logs" / "mixed_verdicts.jsonl")
+    sink = FileVerdictAuditSink(v_path, max_record_bytes=512)
+    sink.emit_verdict(
+        task_id="36.9",
+        verdict_hash="sha256:abc",
+        payload={
+            "summary": "critical insight",
+            "huge_list": list(range(500)),
+            "nested": {"blob": "Z" * 1000},
+        },
+    )
+    # 极小上限 256B + 超长 task_id 兜底
+    small_sink = FileVerdictAuditSink(v_path, max_record_bytes=256)
+    small_sink.emit_verdict(
+        task_id="T_" + ("X" * 300),
+        verdict_hash="H_" + ("Y" * 300),
+        payload={"detail": "A" * 500},
+    )
+
+    lines = Path(v_path).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert len(lines[0].encode("utf-8")) <= 512
+    p0 = json.loads(lines[0])
+    assert p0["payload"]["_truncated"] is True
+    assert p0["payload"]["summary"] == "critical insight"
+
+    assert len(lines[1].encode("utf-8")) <= 256
+    p1 = json.loads(lines[1])
+    assert p1["payload"]["_truncated"] is True
+
+
+def test_verdict_sink_emit_makedirs_oserror_fail_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """emit_verdict 中 os.makedirs 抛 OSError 时 fail-open 写入 stderr 而不抛异常。"""
+    v_path = str(tmp_path / "blocked_dir" / "verdicts.jsonl")
+    sink = make_verdict_sink(v_path)
+
+    def _boom_makedirs(*args, **kwargs):
+        raise OSError("Read-only filesystem")
+
+    monkeypatch.setattr(os, "makedirs", _boom_makedirs)
+    sink.emit_verdict(task_id="1.1", verdict_hash="h", payload={"status": "ok"})

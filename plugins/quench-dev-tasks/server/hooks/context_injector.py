@@ -56,7 +56,7 @@ def _atomic_write_json(filepath: str, data: Any) -> None:
     """原子化写入 JSON 文件：先写临时文件后原子替换，防御并发竞争与写入截断。"""
     target_dir = os.path.dirname(filepath)
     os.makedirs(target_dir, exist_ok=True)
-    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir, text=True)
+    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir)
     try:
         with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -102,7 +102,7 @@ def _resolve_harness_baton(
             compute_next_action,
             TaskStateSnapshot,
         )
-        from state_machine import parse_task_file
+        from state_machine import STATUS_IN_PROGRESS, parse_task_file
 
         snapshot = load_runtime_mode(
             workspace_root,
@@ -127,13 +127,22 @@ def _resolve_harness_baton(
             ]
             if md_files:
                 md_files.sort(key=os.path.getmtime, reverse=True)
-                latest_f = md_files[0]
-                tasks = parse_task_file(latest_f)
-                for t in tasks:
+                chosen_file = md_files[0]
+                chosen_tasks = parse_task_file(chosen_file)
+                for f in md_files:
+                    try:
+                        parsed = parse_task_file(f)
+                        if any(t.status == STATUS_IN_PROGRESS for t in parsed):
+                            chosen_file = f
+                            chosen_tasks = parsed
+                            break
+                    except Exception:
+                        continue
+                for t in chosen_tasks:
                     task_states.append(
                         TaskStateSnapshot(task_id=str(t.id), status=t.status, title=t.title)
                     )
-                target_file = os.path.basename(latest_f)
+                target_file = os.path.basename(chosen_file)
 
         if not task_states:
             return None, None
@@ -220,9 +229,20 @@ def _handle_stop_event(payload: dict) -> dict:
         if term_reason != "NO_TOOL_CALL" or fully_idle is not True:
             return {"decision": "allow"}
 
-        # Guardrail 3: 子代理会话零干扰（lastUserInput 含 [QUENCH-DISPATCH:）
-        last_user_input = str(payload.get("lastUserInput") or "")
-        if "[QUENCH-DISPATCH:" in last_user_input:
+        # Guardrail 3: 子代理会话零干扰（lastUserInput / last_user_input 含 [QUENCH-DISPATCH: 或子代理标识为真）
+        combined_user_input = (
+            str(payload.get("lastUserInput") or "")
+            + " "
+            + str(payload.get("last_user_input") or "")
+        )
+        if "[QUENCH-DISPATCH:" in combined_user_input:
+            return {"decision": "allow"}
+        if (
+            payload.get("parentConversationId")
+            or payload.get("parent_conversation_id")
+            or payload.get("isSubagent")
+            or payload.get("subagentType")
+        ):
             return {"decision": "allow"}
 
         # 解析 workspace_root
@@ -245,6 +265,8 @@ def _handle_stop_event(payload: dict) -> dict:
             return {"decision": "allow"}
 
         from project_config import load_project_config
+        from state_machine import STATUS_CONFIRMED, STATUS_IN_PROGRESS, STATUS_PENDING, STATUS_REWORK, parse_task_file
+
         config = load_project_config(workspace_root)
         dev_tasks_dir = config.resolve_path("dev_tasks_dir")
         if not os.path.isdir(dev_tasks_dir):
@@ -257,9 +279,26 @@ def _handle_stop_event(payload: dict) -> dict:
         if not md_files:
             return {"decision": "allow"}
 
-        # 寻找最新任务单
+        # 优先定位含 🔨 执行中任务的文件，其次回退到最近修改时间排序
         md_files.sort(key=os.path.getmtime, reverse=True)
-        target_file = os.path.basename(md_files[0])
+        chosen_path = md_files[0]
+        chosen_tasks: List[Any] = []
+        try:
+            chosen_tasks = parse_task_file(chosen_path)
+        except Exception:
+            chosen_tasks = []
+
+        for f in md_files:
+            try:
+                parsed = parse_task_file(f)
+            except Exception:
+                continue
+            if any(t.status == STATUS_IN_PROGRESS for t in parsed):
+                chosen_path = f
+                chosen_tasks = parsed
+                break
+
+        target_file = os.path.basename(chosen_path)
 
         # Guardrail 5: autopilot.stop_at == "none" 且 harness_state in _STOP_HOOK_RELAY_STATES
         from runtime_mode import load_runtime_mode
@@ -278,7 +317,16 @@ def _handle_stop_event(payload: dict) -> dict:
 
         # Guardrail 6: 基于 .agents/.quench_stop_guard.json（FileLock 保护，最多保留 64 条最近键）记录指纹
         conversation_id = payload.get("conversationId") or payload.get("conversation_id") or "default_session"
-        fingerprint = f"{conversation_id}::{target_file}::{harness_state}"
+        active_or_next_id = next(
+            (
+                str(t.id)
+                for t in chosen_tasks
+                if t.status in (STATUS_IN_PROGRESS, STATUS_CONFIRMED, STATUS_REWORK, STATUS_PENDING)
+            ),
+            "none",
+        )
+        status_summary = ",".join(f"{t.id}:{t.status}" for t in chosen_tasks)
+        fingerprint = f"{conversation_id}::{target_file}::{harness_state}::{active_or_next_id}::{status_summary}"
 
         agents_dir = os.path.join(workspace_root, ".agents")
         os.makedirs(agents_dir, exist_ok=True)

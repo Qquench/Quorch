@@ -25,6 +25,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
+          cache-dependency-path: "plugins/quench-dev-tasks/server/requirements.txt"
 
       - name: Install dependencies
         run: |
@@ -33,7 +34,19 @@ jobs:
 
       - name: Syntax preflight (minimum supported Python)
         run: |
-          python -m compileall -q plugins/quench-dev-tasks/server
+          python -m compileall -q plugins/quench-dev-tasks/server plugins/quench-dev-tasks/scripts scripts
+
+      - name: IDE Schema Snapshot Drift Gate (read-only)
+        run: |
+          python scripts/export_ide_schemas.py --check
+
+      - name: Single Provider Egress AST Gate (INV-9)
+        run: |
+          python plugins/quench-dev-tasks/scripts/check_no_api_bypass.py
+
+      - name: Prompt-Surface Contract Gate (P1~P5)
+        run: |
+          python scripts/check_prompt_surface.py
 
       - name: Run test suite
         env:

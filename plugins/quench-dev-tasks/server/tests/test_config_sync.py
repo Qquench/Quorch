@@ -296,3 +296,89 @@ def test_auto_heal_preserves_third_party_when_plugin_mounted(tmp_path):
     assert "third-party-server" in m_data["mcpServers"]
 
 
+def test_render_agents_mcp_config_preserves_tools_from_core_template(tmp_path):
+    """render_agents_mcp_config 必须从 'core' 模板服务键完整保留 16 个 eager: true 工具声明。"""
+    from config_sync import render_agents_mcp_config
+    from tool_surface_constants import EXPECTED_TOOL_NAMES
+
+    plugin_dir = Path(__file__).resolve().parent.parent.parent
+    rendered = render_agents_mcp_config(
+        project_root=str(tmp_path),
+        python_exe=sys.executable,
+        plugin_dir=str(plugin_dir),
+    )
+    servers = rendered["mcpServers"]
+    assert "quench-dev-tasks" in servers
+    tools = servers["quench-dev-tasks"].get("tools", {})
+    assert set(tools.keys()) == set(EXPECTED_TOOL_NAMES)
+    assert all(tools[name] == {"eager": True} for name in EXPECTED_TOOL_NAMES)
+
+
+def test_auto_heal_heals_stale_bare_entry_and_strips_core_when_mounted(tmp_path):
+    """未挂载时补齐缺失 tools 的旧条目；挂载时同时剥离 'quench-dev-tasks' 与 'core'。"""
+    ws_dir = tmp_path / "workspace"
+    p_dir = ws_dir / "plugins" / "quench-dev-tasks"
+    (p_dir / "server" / "hooks").mkdir(parents=True)
+    (p_dir / "server" / "server.py").write_text("# server", encoding="utf-8")
+    (p_dir / "server" / "hooks" / "file_scope_guard.py").write_text("# guard", encoding="utf-8")
+    (p_dir / "server" / "hooks" / "context_injector.py").write_text("# injector", encoding="utf-8")
+
+    (p_dir / "mcp_config.json.template").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "core": {
+                        "command": "{{PYTHON_EXECUTABLE}}",
+                        "args": ["{{SERVER_SCRIPT_PATH}}"],
+                        "tools": {"dev_tasks_status": {"eager": True}},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (p_dir / "hooks.json.template").write_text('{"quench-file-guard": {}}', encoding="utf-8")
+    auto_heal_configs(plugin_dir=str(p_dir), python_exe="python")
+
+    agents_dir = ws_dir / ".agents"
+    agents_dir.mkdir(parents=True)
+    ws_hooks = agents_dir / "hooks.json"
+    ws_hooks.write_text('{"quench-file-guard": {}}', encoding="utf-8")
+    ws_mcp = agents_dir / "mcp_config.json"
+    ws_mcp.write_text(
+        json.dumps({"mcpServers": {"quench-dev-tasks": {"command": "python", "args": ["s.py"]}}}),
+        encoding="utf-8",
+    )
+    future = time.time() + 60
+    os.utime(ws_hooks, (future, future))
+    os.utime(ws_mcp, (future, future))
+
+    # 1. 未挂载且 mtime 较新但缺少 tools -> 自动补齐 tools
+    healed, affected = auto_heal_configs(plugin_dir=str(p_dir), workspace_root=str(ws_dir), python_exe="python")
+    assert healed is True
+    assert str(ws_mcp) in affected
+    healed_data = json.loads(ws_mcp.read_text(encoding="utf-8"))
+    assert healed_data["mcpServers"]["quench-dev-tasks"]["tools"] == {"dev_tasks_status": {"eager": True}}
+
+    # 2. 挂载插件且存在 'core' 与 'quench-dev-tasks' -> 同时剥离两者并保留第三方
+    (agents_dir / "plugins.json").write_text(json.dumps({"entries": [{"path": "plugins"}]}), encoding="utf-8")
+    ws_mcp.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "core": {"command": "python"},
+                    "quench-dev-tasks": {"command": "python"},
+                    "other": {"command": "node"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    healed2, _ = auto_heal_configs(plugin_dir=str(p_dir), workspace_root=str(ws_dir), python_exe="python")
+    assert healed2 is True
+    stripped = json.loads(ws_mcp.read_text(encoding="utf-8"))
+    assert "core" not in stripped["mcpServers"]
+    assert "quench-dev-tasks" not in stripped["mcpServers"]
+    assert "other" in stripped["mcpServers"]
+
+

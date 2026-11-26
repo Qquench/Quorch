@@ -69,30 +69,54 @@ def norm_registry_key(path: str | os.PathLike[str]) -> str:
     return os.path.normcase(os.path.realpath(base_path))
 
 
+def norm_pure_registry_key(path: str | os.PathLike[str]) -> str:
+    """纯词法路径归一化 registry 键：仅使用 norm_path_pure + 剥离轮转分片后缀，零 stat/realpath 调用。"""
+    base_path = _ROTATION_SUFFIX_REGEX.sub(r"\1", str(path))
+    return norm_path_pure(base_path)
+
+
 class ActiveLogRegistry:
     """线程安全的在途日志文件注册表，防止 GC 回收活跃日志句柄。"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._pinned: set[str] = set()
+        self._pinned_pure: set[str] = set()
+        self._canon_to_pures: dict[str, set[str]] = {}
 
     def pin(self, log_path: str | os.PathLike[str]) -> None:
         key = norm_registry_key(log_path)
+        pure_key = norm_pure_registry_key(log_path)
         with self._lock:
             self._pinned.add(key)
+            self._pinned_pure.add(pure_key)
+            self._canon_to_pures.setdefault(key, set()).add(pure_key)
 
     def unpin(self, log_path: str | os.PathLike[str]) -> None:
         key = norm_registry_key(log_path)
+        pure_key = norm_pure_registry_key(log_path)
         with self._lock:
             self._pinned.discard(key)
+            self._pinned_pure.discard(pure_key)
+            for pk in self._canon_to_pures.pop(key, ()):
+                self._pinned_pure.discard(pk)
 
     def is_pinned(self, log_path: str | os.PathLike[str]) -> bool:
         key = norm_registry_key(log_path)
         with self._lock:
             return key in self._pinned
 
+    def is_pinned_pure(self, log_path: str | os.PathLike[str]) -> bool:
+        """零 stat/realpath 词法匹配判定，供 zero-stat GC 路径使用。"""
+        pure_key = norm_pure_registry_key(log_path)
+        with self._lock:
+            return pure_key in self._pinned_pure
+
     def is_reclaimable(self, log_path: str | os.PathLike[str]) -> bool:
         return not self.is_pinned(log_path)
+
+    def is_reclaimable_pure(self, log_path: str | os.PathLike[str]) -> bool:
+        return not self.is_pinned_pure(log_path)
 
     def snapshot(self) -> frozenset[str]:
         with self._lock:
@@ -121,6 +145,9 @@ class ActiveLogRegistry:
         with self._lock:
             removed = dead_keys & self._pinned
             self._pinned -= removed
+            for k in removed:
+                for pk in self._canon_to_pures.pop(k, ()):
+                    self._pinned_pure.discard(pk)
             return len(removed)
 
 
@@ -276,7 +303,7 @@ def allocate_log_file(
         try:
             # 同步在持有文件且未关闭前完成 pin，消除 TOCTOU
             if registry is not None:
-                registry.pin(norm_registry_key(filepath))
+                registry.pin(filepath)
             os.write(fd, header_bytes)
             os.fsync(fd)
         finally:
@@ -349,23 +376,27 @@ def gc_by_filename_order(
 
     for fname in to_prune:
         fpath = os.path.join(target_dir, fname)
-        if registry is not None and not registry.is_reclaimable(norm_registry_key(fpath)):
+        if registry is not None and not registry.is_reclaimable_pure(fpath):
             continue
 
+        primary_removed_or_missing = False
         try:
             os.remove(fpath)
             pruned.append(fname)
-        except (FileNotFoundError, OSError):
-            pass
+            primary_removed_or_missing = True
+        except FileNotFoundError:
+            primary_removed_or_missing = True
+        except OSError:
+            primary_removed_or_missing = False
 
-        # Cascade delete rotation backup if present (atomic unlink without stat/exists)
-        rot_path = os.path.splitext(fpath)[0] + ".1.log"
-        if registry is not None and not registry.is_reclaimable(norm_registry_key(rot_path)):
-            continue
-        try:
-            os.remove(rot_path)
-        except (FileNotFoundError, OSError):
-            pass
+        if primary_removed_or_missing:
+            # Cascade delete rotation backup if present (atomic unlink without stat/exists)
+            rot_path = os.path.splitext(fpath)[0] + ".1.log"
+            if registry is None or registry.is_reclaimable_pure(rot_path):
+                try:
+                    os.remove(rot_path)
+                except (FileNotFoundError, OSError):
+                    pass
 
     return pruned
 
@@ -449,6 +480,9 @@ def enforce_unified_log_quota(
         if not os.path.isdir(target_dir):
             return QuotaResult()
 
+        norm_protected: set[str] = {norm_path_pure(p) for p in protected_paths}
+        start_mono = time.monotonic()
+
         if purge_legacy:
             new_files = list_log_files(target_dir)
             legacy_files: list[str] = []
@@ -461,34 +495,68 @@ def enforce_unified_log_quota(
                 return QuotaResult()
             excess = total_logs - keep
             pruned_legacy: list[str] = []
+            deleted_count = 0
+            remaining_legacy_count = len(legacy_files)
             while legacy_files and excess > 0:
+                if deleted_count >= max_deletions or (time.monotonic() - start_mono) > timeout_s:
+                    break
                 oldest_legacy = legacy_files.pop(0)
                 fpath = os.path.join(target_dir, oldest_legacy)
-                if registry is not None and not registry.is_reclaimable(norm_registry_key(fpath)):
-                    excess -= 1
+                norm_f = norm_path_pure(fpath)
+                if norm_f in norm_protected or (registry is not None and not registry.is_reclaimable_pure(fpath)):
                     continue
+                primary_removed_or_missing = False
                 try:
                     os.remove(fpath)
                     pruned_legacy.append(oldest_legacy)
-                except (FileNotFoundError, OSError):
-                    pass
-                rot_path = os.path.splitext(fpath)[0] + ".1.log"
-                if registry is None or registry.is_reclaimable(norm_registry_key(rot_path)):
-                    try:
-                        os.remove(rot_path)
-                    except (FileNotFoundError, OSError):
-                        pass
-                excess -= 1
-            remaining_new_allowed = keep - len(legacy_files)
+                    deleted_count += 1
+                    remaining_legacy_count -= 1
+                    primary_removed_or_missing = True
+                except FileNotFoundError:
+                    remaining_legacy_count -= 1
+                    primary_removed_or_missing = True
+                except OSError:
+                    primary_removed_or_missing = False
+                if primary_removed_or_missing:
+                    rot_path = os.path.splitext(fpath)[0] + ".1.log"
+                    norm_rot = norm_path_pure(rot_path)
+                    if norm_rot not in norm_protected and (registry is None or registry.is_reclaimable_pure(rot_path)):
+                        try:
+                            os.remove(rot_path)
+                        except (FileNotFoundError, OSError):
+                            pass
+                    excess -= 1
+            remaining_new_allowed = keep - remaining_legacy_count
             if len(new_files) > remaining_new_allowed and remaining_new_allowed > 0:
-                new_pruned = gc_by_filename_order(
-                    target_dir,
-                    keep=remaining_new_allowed,
-                    registry=registry,
-                    require_lease=False,
-                    lease_guard=lease_guard,
-                )
-                pruned_legacy.extend(new_pruned)
+                reclaimable_new = [
+                    fname for fname in new_files
+                    if norm_path_pure(os.path.join(target_dir, fname)) not in norm_protected
+                    and (registry is None or registry.is_reclaimable_pure(os.path.join(target_dir, fname)))
+                ]
+                new_excess = len(reclaimable_new) - remaining_new_allowed
+                budget_left = max(0, max_deletions - deleted_count)
+                if new_excess > 0 and budget_left > 0:
+                    for fname in reclaimable_new[: min(new_excess, budget_left)]:
+                        if (time.monotonic() - start_mono) > timeout_s:
+                            break
+                        fpath = os.path.join(target_dir, fname)
+                        primary_removed_or_missing = False
+                        try:
+                            os.remove(fpath)
+                            pruned_legacy.append(fname)
+                            primary_removed_or_missing = True
+                        except FileNotFoundError:
+                            primary_removed_or_missing = True
+                        except OSError:
+                            primary_removed_or_missing = False
+                        if primary_removed_or_missing:
+                            rot_path = os.path.splitext(fpath)[0] + ".1.log"
+                            norm_rot = norm_path_pure(rot_path)
+                            if norm_rot not in norm_protected and (registry is None or registry.is_reclaimable_pure(rot_path)):
+                                try:
+                                    os.remove(rot_path)
+                                except (FileNotFoundError, OSError):
+                                    pass
             return QuotaResult(pruned_legacy)
 
         # Standard / Hardened Zero-stat path:
@@ -503,9 +571,6 @@ def enforce_unified_log_quota(
             entries = os.listdir(target_dir)
         except (FileNotFoundError, NotADirectoryError, OSError):
             return QuotaResult()
-
-        # 纯路径规范化保护集
-        norm_protected: set[str] = {norm_path_pure(p) for p in protected_paths}
 
         # 候选枚举：仅匹配 *.log，显式排除 latest-*.log、.1.log、latest.log、.jsonl 等
         candidates: list[str] = []
@@ -527,7 +592,7 @@ def enforce_unified_log_quota(
             norm_f = norm_path_pure(fpath)
             if norm_f in norm_protected:
                 continue
-            if registry is not None and registry.is_pinned(norm_f):
+            if registry is not None and registry.is_pinned_pure(norm_f):
                 continue
             reclaimable_candidates.append(fname)
 
@@ -537,27 +602,31 @@ def enforce_unified_log_quota(
         excess = len(reclaimable_candidates) - keep
         to_delete = reclaimable_candidates[: min(excess, max_deletions)]
 
-        start_mono = time.monotonic()
         pruned: list[str] = []
 
         for fname in to_delete:
             if time.monotonic() - start_mono > timeout_s:
                 break
             fpath = os.path.join(target_dir, fname)
+            primary_removed_or_missing = False
             try:
                 os.remove(fpath)
                 pruned.append(fname)
-            except (FileNotFoundError, OSError):
-                pass
+                primary_removed_or_missing = True
+            except FileNotFoundError:
+                primary_removed_or_missing = True
+            except OSError:
+                primary_removed_or_missing = False
 
-            # 级联删除 .1.log 轮转备份
-            rot_path = os.path.splitext(fpath)[0] + ".1.log"
-            norm_rot = norm_path_pure(rot_path)
-            if norm_rot not in norm_protected and (registry is None or not registry.is_pinned(norm_rot)):
-                try:
-                    os.remove(rot_path)
-                except (FileNotFoundError, OSError):
-                    pass
+            if primary_removed_or_missing:
+                # 级联删除 .1.log 轮转备份
+                rot_path = os.path.splitext(fpath)[0] + ".1.log"
+                norm_rot = norm_path_pure(rot_path)
+                if norm_rot not in norm_protected and (registry is None or not registry.is_pinned_pure(norm_rot)):
+                    try:
+                        os.remove(rot_path)
+                    except (FileNotFoundError, OSError):
+                        pass
 
         return QuotaResult(pruned)
     except Exception:

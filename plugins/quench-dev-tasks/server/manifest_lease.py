@@ -51,17 +51,18 @@ def extract_session_id_from_holder_token(holder_token: str) -> Optional[str]:
 
 def is_workspace_actively_modifying(
     workspace_root: str,
-    files: Sequence[str],
-    window_seconds: int = 300,
+    affected_files: Sequence[str],
+    window_seconds: float = 600.0,
+    now_ts: Optional[float] = None,
     *,
     max_scan: int = 256,
-    now_ts: Optional[float] = None,
+    conservative_on_unreadable: bool = True,
 ) -> bool:
     """检查工作区白名单文件中，是否存在 mtime 距 now 在 window_seconds 内的文件。
     - 纯读函数，无副作用。
     - 进入循环前对每个 path 做 resolve() + is_relative_to(workspace_root) 校验；
       越界/穿越项（如 ../、绝对路径跨盘符等）静默剔除。
-    - 全部 stat 失败 / 非 OSError：返回 True（保守存活，防误杀），stderr 告警。
+    - 全部 stat 失败 / 非 OSError：由 conservative_on_unreadable 决定（默认 True 保守存活，防误杀，stderr 告警；False 时返回 False）。
     - 命中首个新鲜 mtime 即短路返回 True（early-exit）。
     - 扫描数不超过 max_scan（超出截断，记录告警）。
     - 父目录兜底：白名单缺省纳入不存在文件的父目录 mtime，覆盖 [NEW] 文件冷启动场景。
@@ -77,7 +78,7 @@ def is_workspace_actively_modifying(
     candidate_paths: list[Path] = []
     parent_fallbacks: list[Path] = []
 
-    for f in files:
+    for f in affected_files:
         if not f or not isinstance(f, str):
             continue
         try:
@@ -121,6 +122,8 @@ def is_workspace_actively_modifying(
         all_scan_targets = all_scan_targets[:max_scan]
 
     if not all_scan_targets:
+        if not conservative_on_unreadable:
+            return False
         # 如果传入白名单过滤后无任何有效工作区目标，视为全部 stat 失败（保守存活）
         sys.stderr.write(
             "[WARN] is_workspace_actively_modifying: no valid target files to stat, returning True (fail-safe conservative alive).\n"
@@ -134,16 +137,18 @@ def is_workspace_actively_modifying(
         try:
             st = path_obj.stat()
             stat_success_count += 1
-            age = current_time - st.st_mtime
-            if 0.0 <= age <= float(window_seconds):
+            age = max(0.0, current_time - st.st_mtime)
+            if age <= float(window_seconds):
                 # 命中首个新鲜 mtime 即短路返回 True（early-exit）
                 return True
         except (OSError, Exception):
             # stat 失败（文件不存在、权限受限等）
             pass
 
-    # 4. 全部 stat 失败检测（保守存活）
+    # 4. 全部 stat 失败检测
     if stat_success_count == 0:
+        if not conservative_on_unreadable:
+            return False
         sys.stderr.write(
             "[WARN] is_workspace_actively_modifying: all stat calls failed, returning True (fail-safe conservative alive).\n"
         )
@@ -189,7 +194,7 @@ def touch_lease_heartbeat(
     except Exception:
         return False
 
-    # 查找符合 session_id 的活跃未释放任务记录
+    # 查找符合 session_id + holder_token + generation 的活跃未释放任务记录
     target_record: Optional[TaskRecord] = None
 
     for tid, rec in manifest.records.items():
@@ -201,25 +206,26 @@ def touch_lease_heartbeat(
                 continue
 
         # 匹配 session_id：直接匹配 holder_token 或提取 token 中的 session_id
-        if rec.holder_token == clean_sid:
-            target_record = rec
-            break
-        extracted_sid = extract_session_id_from_holder_token(rec.holder_token)
-        if extracted_sid and extracted_sid == clean_sid:
-            target_record = rec
-            break
+        sid_matched = (rec.holder_token == clean_sid)
+        if not sid_matched:
+            extracted_sid = extract_session_id_from_holder_token(rec.holder_token)
+            sid_matched = bool(extracted_sid and extracted_sid == clean_sid)
+        if not sid_matched:
+            continue
+
+        if holder_token is not None and rec.holder_token != holder_token:
+            continue
+        if generation is not None and rec.generation != generation:
+            continue
+
+        target_record = rec
+        break
 
     if target_record is None:
         return False
 
-    # 校验调用方若提供了 holder_token / generation 是否匹配
     token_to_verify = holder_token if holder_token is not None else target_record.holder_token
     gen_to_verify = generation if generation is not None else target_record.generation
-
-    if holder_token is not None and target_record.holder_token != holder_token:
-        return False
-    if generation is not None and target_record.generation != generation:
-        return False
 
     # 立即委托 manifest.touch_heartbeat（在锁内同时原子校验 generation ∧ holder_token）
     # 不在 manifest_lease 侧重复持锁，亦不缓存 generation/holder_token（避免 TOCTOU）
@@ -252,6 +258,52 @@ class ProbeEvidence:
     reasons: Tuple[str, ...]                                 # 结构化判定理由，便于 CLI 渲染
 
 
+def _slice_task_section(content: str, task_id: str) -> Optional[str]:
+    """Slice Markdown content strictly to the target task's ### section, ignoring fenced code blocks and blockquotes."""
+    clean_tid = str(task_id).strip()
+    lines = content.splitlines(keepends=True)
+    if lines and lines[0].startswith("\ufeff"):
+        lines[0] = lines[0].lstrip("\ufeff")
+
+    header_re = re.compile(r"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\b", re.IGNORECASE)
+    fence_char: Optional[str] = None
+    fence_len = 0
+    start_idx = -1
+    end_idx = len(lines)
+
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        fence_m = re.match(r"^(`{3,}|~{3,})", stripped)
+        if fence_m:
+            ch = fence_m.group(1)[0]
+            ln = len(fence_m.group(1))
+            if fence_char is None:
+                fence_char = ch
+                fence_len = ln
+            elif fence_char == ch and ln >= fence_len and stripped[ln:].strip() == "":
+                fence_char = None
+                fence_len = 0
+            continue
+        if fence_char is not None:
+            continue
+        if stripped.startswith(">"):
+            continue
+
+        m = header_re.match(stripped)
+        if m:
+            cur_id = m.group(1).strip()
+            if start_idx == -1:
+                if cur_id == clean_tid:
+                    start_idx = idx
+            else:
+                end_idx = idx
+                break
+
+    if start_idx == -1:
+        return None
+    return "".join(lines[start_idx:end_idx])
+
+
 def _extract_affected_files_from_task(
     dev_tasks_dir: str,
     md_stem: Optional[str],
@@ -282,27 +334,36 @@ def _extract_affected_files_from_task(
         except Exception:
             continue
 
-        tid_pattern = re.escape(clean_tid)
+        section_text = _slice_task_section(content, clean_tid)
+        if section_text is None:
+            return None
+
         pattern = re.compile(
-            rf"###\s+(?:任务|Task)\s+{tid_pattern}\s+.*?####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```",
+            r"####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```[^\n]*\r?\n?(.*?)```",
             re.DOTALL | re.IGNORECASE,
         )
-        m = pattern.search(content)
+        m = pattern.search(section_text)
         if not m:
             return None
 
         raw_block = m.group(1).strip()
-        files = []
+        files: List[str] = []
         for line in raw_block.splitlines():
             line = line.strip()
             if not line:
                 continue
-            for prefix in ("[MODIFY]", "[NEW]", "[DELETE]", "[RENAME]"):
-                if line.startswith(prefix):
-                    line = line[len(prefix):].strip()
-                    break
-            if line:
-                files.append(line)
+            cleaned = re.sub(r"^\[(?:MODIFY|NEW|DELETE|RENAME)\]\s*", "", line, flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r"\s*[\(（][^\)）]*[\)）]\s*$", "", cleaned).strip()
+            if not cleaned:
+                continue
+            parts = cleaned.split("->") if "->" in cleaned else [cleaned]
+            for part in parts:
+                p = re.sub(r"\s*[\(（][^\)）]*[\)）]\s*$", "", part).strip()
+                p = p.replace("\\", "/")
+                while p.startswith("./"):
+                    p = p[2:]
+                if p:
+                    files.append(p)
         return files
     return None
 
@@ -320,12 +381,22 @@ def _evaluate_affected_files_mtime(
     if not affected_files:
         return None, "涉及文件列表为空"
 
+    real_ws = os.path.realpath(os.path.abspath(workspace_root))
     valid_mtimes = []
     for rel_path in affected_files:
-        abs_p = rel_path if os.path.isabs(rel_path) else os.path.join(workspace_root, rel_path)
-        if os.path.isfile(abs_p):
+        if not rel_path or not isinstance(rel_path, str):
+            continue
+        abs_p = rel_path if os.path.isabs(rel_path) else os.path.join(real_ws, rel_path)
+        try:
+            real_p = os.path.realpath(os.path.abspath(abs_p))
+            common = os.path.commonpath([real_ws, real_p])
+            if os.path.normcase(common) != os.path.normcase(real_ws):
+                continue
+        except (ValueError, OSError):
+            continue
+        if os.path.isfile(real_p):
             try:
-                valid_mtimes.append(os.path.getmtime(abs_p))
+                valid_mtimes.append(os.path.getmtime(real_p))
             except Exception:
                 pass
 
@@ -388,9 +459,14 @@ def probe_lease_health(
         actual_tid = clean_tid.split("::", 1)[1]
     else:
         suffix = f"::{clean_tid}"
-        namespaced_id = next((k for k in m.records if k == clean_tid or k.endswith(suffix)), None)
+        candidates = [
+            (k, rec) for k, rec in m.records.items()
+            if k == clean_tid or k.endswith(suffix)
+        ]
+        active_cand = next((k for k, rec in candidates if not rec.released), None)
+        namespaced_id = active_cand if active_cand is not None else (candidates[-1][0] if candidates else None)
         if namespaced_id:
-            md_stem = namespaced_id.split("::", 1)[0]
+            md_stem = namespaced_id.split("::", 1)[0] if "::" in namespaced_id else None
             actual_tid = clean_tid
         else:
             actual_tid = clean_tid
@@ -431,16 +507,21 @@ def probe_lease_health(
             reasons=(f"Task '{namespaced_id}' lease was already released (tombstone) / 租约已被释放 (留痕墓碑)",),
         )
 
-    # 3. 计算心跳静默时间差 (带 max(0.0, ...) 负时长防卫)
-    try:
-        hb_dt = datetime.fromisoformat(record.last_heartbeat_wall_utc.replace("Z", "+00:00"))
-        if hb_dt.tzinfo is None:
-            hb_dt = hb_dt.replace(tzinfo=timezone.utc)
-        hb_silence = max(0.0, (now_dt - hb_dt).total_seconds())
-    except Exception:
-        hb_silence = 0.0
-
-    hb_stale = (hb_silence > hb_thresh)
+    # 3. 计算心跳静默时间差 (仅对合法未来时间戳的负时长夹为 0.0；缺失或损坏视作已超时)
+    raw_hb = (record.last_heartbeat_wall_utc or "").strip()
+    if not raw_hb:
+        hb_silence = hb_thresh + 1.0
+        hb_stale = True
+    else:
+        try:
+            hb_dt = datetime.fromisoformat(raw_hb.replace("Z", "+00:00"))
+            if hb_dt.tzinfo is None:
+                hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+            hb_silence = max(0.0, (now_dt - hb_dt).total_seconds())
+            hb_stale = (hb_silence > hb_thresh)
+        except Exception:
+            hb_silence = hb_thresh + 1.0
+            hb_stale = True
 
     # 4. 计算涉及文件最近一次修改距当前时长
     affected_files = _extract_affected_files_from_task(dev_tasks_dir, md_stem, actual_tid)
@@ -464,7 +545,11 @@ def probe_lease_health(
         actively_modifying = False
         if affected_files:
             actively_modifying = is_workspace_actively_modifying(
-                ws, affected_files, window_seconds=int(mtime_thresh), now_ts=now_ts
+                ws,
+                affected_files,
+                window_seconds=float(mtime_thresh),
+                now_ts=now_ts,
+                conservative_on_unreadable=False,
             )
 
         if actively_modifying:
@@ -532,11 +617,34 @@ def reclaim_stale_task(
         namespaced_id = clean_tid
         md_stem, actual_tid = clean_tid.split("::", 1)
     else:
-        # 1. 尝试从清单中反查命名空间
+        # 1. 尝试从清单中反查命名空间（优先活跃记录及精确令牌/代际匹配，避免旧墓碑遮蔽）
         try:
             m = load_manifest(ws)
             suffix = f"::{clean_tid}"
-            namespaced_id = next((k for k in m.records if k == clean_tid or k.endswith(suffix)), None)
+            candidates = [
+                (k, rec) for k, rec in m.records.items()
+                if k == clean_tid or k.endswith(suffix)
+            ]
+            if candidates:
+                exact_active = next(
+                    (
+                        k for k, rec in candidates
+                        if not rec.released
+                        and rec.generation == expected_generation
+                        and rec.holder_token == expected_holder_token
+                    ),
+                    None,
+                )
+                any_active = next((k for k, rec in candidates if not rec.released), None)
+                exact_any = next(
+                    (
+                        k for k, rec in candidates
+                        if rec.generation == expected_generation
+                        and rec.holder_token == expected_holder_token
+                    ),
+                    None,
+                )
+                namespaced_id = exact_active or any_active or exact_any or candidates[-1][0]
             if namespaced_id and "::" in namespaced_id:
                 md_stem, actual_tid = namespaced_id.split("::", 1)
         except Exception:
@@ -570,13 +678,15 @@ def reclaim_stale_task(
     if not md_path:
         return (False, "no_such_lease")
 
+    md_path = os.path.realpath(os.path.abspath(md_path))
+
     # 严格锁序：先持 Markdown 锁，再持 Manifest 锁，杜绝 AB-BA 死锁
     md_lock_path = md_path + ".lock"
     manifest_lock_path = os.path.join(ws, MANIFEST_REL_PATH + ".lock")
     os.makedirs(os.path.dirname(manifest_lock_path), exist_ok=True)
 
     md_lock = filelock.FileLock(md_lock_path, timeout=5.0, is_singleton=True)
-    manifest_lock = filelock.FileLock(manifest_lock_path, timeout=5.0, is_singleton=True)
+    manifest_lock = filelock.FileLock(manifest_lock_path, timeout=5.0)
 
     with md_lock:
         with manifest_lock:
@@ -604,7 +714,10 @@ def reclaim_stale_task(
                 if evidence.verdict == HealthVerdict.HEALTHY:
                     return (False, "target_is_healthy")
 
-            # 执行回收：递增 generation，设置 released=True 墓碑
+            # 先原子更新任务单状态为 ✅ 已确认 (STATUS_CONFIRMED)，若失败则保留 manifest 未释放态以便重试恢复
+            transition_task(md_path, actual_tid, STATUS_CONFIRMED)
+
+            # 仅在 Markdown 状态流转成功后提交 manifest 释放墓碑与递增代际
             new_generation = record.generation + 1
             git_head_sha, git_index_mtime = _get_git_metadata(ws)
             if not git_head_sha:
@@ -624,9 +737,6 @@ def reclaim_stale_task(
                 released=True,
             )
             atomic_replace_manifest(ws, manifest)
-
-            # 原子更新任务单状态为 ✅ 已确认 (STATUS_CONFIRMED)
-            transition_task(md_path, actual_tid, STATUS_CONFIRMED)
 
             return (True, "reclaimed")
 

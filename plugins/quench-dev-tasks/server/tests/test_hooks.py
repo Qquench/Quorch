@@ -138,7 +138,7 @@ def test_file_scope_guard_layer2_session_bypass(tmp_path):
 
     # Create active session bypass for ui_styling
     bypass_file = agents_dir / ".quench_bypass.json"
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
     exp = now + datetime.timedelta(hours=2)
     bypass_file.write_text(
         json.dumps({
@@ -291,7 +291,7 @@ def test_file_scope_guard_session_lock_match_and_mismatch(tmp_path):
 
     # 1. 创建绑定特定会话 session-101 的旁路配置
     bypass_file = agents_dir / ".quench_bypass.json"
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
     exp = now + datetime.timedelta(hours=2)
     bypass_file.write_text(
         json.dumps({

@@ -2,6 +2,9 @@
 pythonpath = ["plugins/quench-dev-tasks/server"]
 markers = [
     "tier1_fast: fast unit and smoke tests for rapid inner-loop feedback (<=5s budget)",
+    "slow: heavy cross-platform CLI integration cases",
+    "concurrent_moat: heavy concurrency and CAS race moat tests",
+    "heavy: heavyweight integration or stress tests",
 ]
 
 [tool.pyrefly]

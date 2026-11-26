@@ -95,7 +95,7 @@ def cmd_status(workspace_root: str, plain: bool = False) -> int:
     try:
         from server import dev_tasks_status
 
-        st = dev_tasks_status(ws)
+        st = dev_tasks_status(ws, verbosity="full")
     except Exception as e:
         print(c.red(f"❌ 获取任务状态失败: {e}"), file=sys.stderr)
         return 1
@@ -324,7 +324,7 @@ def cmd_archive(workspace_root: str, yes: bool = False) -> int:
     try:
         from server import dev_tasks_archive, dev_tasks_status
 
-        st = dev_tasks_status(ws)
+        st = dev_tasks_status(ws, verbosity="full")
         files = st.get("files", [])
         if not files:
             print("ℹ️ 当前没有找到需要归档的任务单据。")
@@ -335,13 +335,14 @@ def cmd_archive(workspace_root: str, yes: bool = False) -> int:
             fname = f.get("name", "")
             summary = f.get("summary", {})
             pending = summary.get("⬜ 待确认", 0)
+            confirmed = summary.get("✅ 已确认", 0)
             in_prog = summary.get("🔨 执行中", 0)
             rework = summary.get("🔄 需返工", 0)
 
-            if pending > 0 or in_prog > 0 or rework > 0:
+            if pending > 0 or confirmed > 0 or in_prog > 0 or rework > 0:
                 print(
                     f"⚠️ 任务单 [{fname}] 仍有未闭环任务 "
-                    f"(待确认:{pending}, 执行中:{in_prog}, 需返工:{rework})，跳过归档。"
+                    f"(待确认:{pending}, 已确认:{confirmed}, 执行中:{in_prog}, 需返工:{rework})，跳过归档。"
                 )
                 continue
 
@@ -438,10 +439,33 @@ def cmd_reviewer_debug(
                 print(c.red(f"❌ Reviewer 客户端不可用：凭据缺失或配置不完整 (provider='{re_cfg.provider}')"), file=sys.stderr)
             return 1
 
+        timeout_bound = min(int(getattr(re_cfg, "timeout_seconds", 10) or 10), 10)
+        probe_res = client.complete(
+            [{"role": "user", "content": query}],
+            timeout=timeout_bound,
+            total_deadline_s=float(timeout_bound),
+        )
+        if isinstance(probe_res, dict) and probe_res.get("error"):
+            err_detail = str(probe_res.get("error"))
+            if as_json:
+                print(json.dumps({"status": "error", "provider": re_cfg.provider, "model": re_cfg.model, "error": err_detail}, ensure_ascii=False))
+            else:
+                print(c.red(f"❌ Reviewer 出网探测返回错误: {err_detail}"), file=sys.stderr)
+            return 1
+
+        content_preview = str((probe_res or {}).get("content") or "")[:200]
         if as_json:
-            print(json.dumps({"status": "available", "provider": re_cfg.provider, "model": re_cfg.model, "api_key": masked_key}, ensure_ascii=False))
+            print(json.dumps({
+                "status": "execute_success",
+                "provider": re_cfg.provider,
+                "model": re_cfg.model,
+                "api_key": masked_key,
+                "response_preview": content_preview,
+            }, ensure_ascii=False))
         else:
-            print(c.green(f"✅ Reviewer 客户端凭据有效且就绪 (provider='{re_cfg.provider}', model='{re_cfg.model}')"))
+            print(c.green(f"✅ Reviewer 客户端连通探测成功 (provider='{re_cfg.provider}', model='{re_cfg.model}')"))
+            if content_preview:
+                print(f"  • Response Preview: {content_preview}")
         return 0
     except Exception as e:
         if as_json:

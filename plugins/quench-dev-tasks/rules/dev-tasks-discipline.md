@@ -17,13 +17,13 @@ As an AI coding assistant operating within Quench governance, you MUST adhere to
 
 - **Strict Adherence to Whitelist / 严格遵循【涉及文件】清单**：Only touch files listed in `[Affected Files] / 【涉及文件】` of the active `🔨 执行中` task.
 - **Six Core Fields Preservation / 六核心字段规约**：Every task must define:
-  1. `【任务目标】 / Objective`
-  2. `【上下文与现状】 / Context & Status`
-  3. `【涉及文件】 / Touched Files`
-  4. `【改动计划】 / Implementation Plan`
-  5. `【单测断言】 / Unit Test Assertions`
-  6. `【交付物与验证】 / Deliverables & Verification`
-- **Mandatory Test Assertions / 改逻辑必加单测断言**：Modifications to core logic, algorithms, or API contracts MUST include unit test assertions, verified via `【交付物与验证】 / Deliverables & Verification` commands.
+  1. `#### 【涉及文件】 / #### [Affected Files]` *(legacy alias: `【涉及文件】 / Touched Files`)*
+  2. `#### 【缺陷根因与修改目标】 / #### [Root Cause & Target]` *(legacy aliases: `【任务目标】 / Objective`, `【上下文与现状】 / Context & Status`)*
+  3. `#### 【目标签名与类型契约】 / #### [Type Contracts]`
+  4. `#### 【分步改造指引】 / #### [Step-by-Step Instructions]` *(legacy alias: `【改动计划】 / Implementation Plan`)*
+  5. `#### 【防御与边缘校验】 / #### [Defensive & Edge Checks]` *(legacy alias: `【单测断言】 / Unit Test Assertions`)*
+  6. `#### 【DoD 验证命令】 / #### [DoD Verification Commands]` *(legacy alias: `【交付物与验证】 / Deliverables & Verification`)*
+- **Mandatory Test Assertions / 改逻辑必加单测断言**：Modifications to core logic, algorithms, or API contracts MUST include unit test assertions, verified via `#### 【DoD 验证命令】 / #### [DoD Verification Commands]` (`【交付物与验证】 / Deliverables & Verification`) commands.
 - **Physical Feasibility Gate (INV-7)**: Draft tasks must pass path & test dry-runs before promotion.
 - **Context Budget Cap (INV-8)**: Injection context is bounded by `max_total_injection_chars`.
 - **Preserve Architecture & Comments / 保持代码风格与注释完整**：Preserve docstrings, architectural rationale, and system constraints.
@@ -121,10 +121,10 @@ Pre-commit guard blocks commits modifying out-of-scope files or without an activ
 
 ### ② 审查凭据通道与来源策略 (Attestation Channels & Accepted Sources)
 - **审查凭据通道**:
-  1. `dev_reviewer_poll`: 异步审查轮询终态记录；
-  2. `dev_tasks_refine_spec`: 规约强化与 AST 审查引擎生成的审查记录 (`source="refine_spec"`)。
+  1. `dev_reviewer_poll` / `dev_tasks_refine_spec`: 外部 `ReviewerClient` 审查记录 (`source="reviewer_client"`)；
+  2. `host_subagent`: 委派模式 (`inverted`) 下宿主原生 Reviewer 子代理审查记录 (`source="host_subagent"`)。
 - **accepted_sources 来源控制**:
-  由 `quench_stack.yaml` 中 `audit_gate.accepted_sources` 配置（默认 `["reviewer_poll", "refine_spec"]`）。仅受信任来源的审查记录被接纳为有效放行凭据。
+  由 `quench_stack.yaml` 中 `audit_gate.accepted_sources` 配置（`standard` 模式默认 `["reviewer_client"]`，`inverted` 模式可配置为 `["reviewer_client", "host_subagent"]`），并配合 `on_degraded`、`max_tail_bytes` 与 `max_age_minutes` 控制日志审计窗口。仅受信任来源的审查记录被接纳为有效放行凭据。
 - **SAFETY_DOWNGRADE_DENIED 防降级膨胀**:
   当审查记录来源不在 `accepted_sources` 时阻断（拒绝原因 `record_source_not_accepted`）；当自动回退来源不被接纳时阻断（拒绝原因 `record_auto_fallback_not_accepted`）；当审查判定包含需返工结论时阻断（拒绝原因 `record_rework`）。
 

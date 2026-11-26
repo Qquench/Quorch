@@ -15,7 +15,7 @@ This manifest completely decouples the governance engine from specific project b
 │   ├── plugins.json            # Registers quench-dev-tasks plugin
 │   ├── quench_stack.yaml       # Project governance manifest (Single Source of Truth)
 │   └── logs/reviewer/          # Real-time thinking stream logs (Auto-created)
-│       └── thinking.log
+│       └── YYYYMMDD_NNN_<slug>.log
 └── docs/dev_tasks/             # Task lifecycle workflow sheets
     └── archive/                # Completed task archives
 ```
@@ -89,16 +89,16 @@ The audit gate verifies that tasks touching managed scope have genuine external 
 ```yaml
 audit_gate:
   enabled: true
-  # Accepted review attestation sources for pre-confirm gate
-  # "reviewer_poll": Async Reviewer jobs polled to terminal verdict
-  # "refine_spec": Spec refinement via ReviewerEngine AST exploration
+  # Accepted review attestation sources for pre-confirm gate:
+  # - Standard mode default: ["reviewer_client"] (from dev_reviewer_poll / dev_tasks_refine_spec)
+  # - Inverted mode allowed: ["reviewer_client", "host_subagent"]
   accepted_sources:
-    - "reviewer_poll"
-    - "refine_spec"
+    - "reviewer_client"
   on_missing_record: "block"      # "block" | "warn" | "allow"
-  effective_on_degraded: "block"  # "block" | "warn" | "allow"
-  tail_records_window: 50
-  record_ttl_seconds: 86400
+  on_degraded: "block"            # "block" | "warn" | "allow"
+  on_internal_error: "allow"      # "allow" | "warn"
+  max_tail_bytes: 1048576
+  max_age_minutes: 1440
 ```
 
 
@@ -162,11 +162,10 @@ To maintain absolute vendor neutrality and guard against rapidly obsolescing mod
 ## 6. Observability & Thinking Stream Logs
 
 When external reasoning models stream Chain-of-Thought thoughts, Quench automatically:
-1. Pipes task refinement thoughts into `.agents/logs/reviewer/thinking.log`;
-2. Pipes ad-hoc consultation thoughts into `.agents/logs/reviewer/latest-<session_id>.log`;
-3. Enforces a **1024KB hard cap** with automated single-backup rotation (`*.log.1`);
-4. Performs streaming regex redaction across chunk boundaries (masking API keys, secrets, and private tokens);
-5. Emits ~1.0s throttled progress heartbeats back to the IDE, keeping the MCP `sys.stdout` JSON-RPC transport completely unpolluted.
+1. Streams task refinement and consultation thoughts into `.agents/logs/reviewer/YYYYMMDD_NNN_<slug>.log`;
+2. Enforces a **1024KB hard cap** with automated single-backup rotation (`*.log.1`);
+3. Performs streaming regex redaction across chunk boundaries (masking API keys, secrets, and private tokens);
+4. Emits ~1.0s throttled progress heartbeats back to the IDE, keeping the MCP `sys.stdout` JSON-RPC transport completely unpolluted.
 
 ---
 
@@ -226,10 +225,10 @@ Quench v1.25+ supports dynamic orchestration mode switching without restarting t
 
 | Field | Type | Values | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `mode` | `string` | `"standard"` \| `"inverted"` | `"standard"` | Orchestration topology mode. |
-| `reviewer_channel` | `string` | `"direct_api"` \| `"subagent_delegate"` | `"direct_api"` | External reviewer transport channel. |
+| `orchestration_mode` | `string` | `"standard"` \| `"inverted"` | `"standard"` | Orchestration topology mode. |
+| `reviewer_channel` | `string` | `"external_api"` \| `"host_subagent"` | `"external_api"` | External reviewer transport channel. |
 
-Switching can be executed dynamically via `dev_tasks_status(switch_mode="inverted", switch_reviewer_channel="subagent_delegate")`.
+Switching can be executed dynamically via `dev_tasks_status(workspace_root=".", switch_mode="inverted", switch_reviewer_channel="host_subagent")`.
 
 ---
 

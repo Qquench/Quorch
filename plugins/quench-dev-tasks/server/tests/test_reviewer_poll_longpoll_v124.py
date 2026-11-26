@@ -382,3 +382,51 @@ async def test_zero_capacity_limiter_consumption(tmp_path):
     assert final_tokens == initial_tokens, (
         f"Capacity limiter was polluted by poll: initial={initial_tokens}, final={final_tokens}"
     )
+
+
+def test_windows_zero_inode_key_isolation_and_maxsize(tmp_path, monkeypatch):
+    """Windows (0, 0) inode 碰撞隔离与 _ExemptInodeTracker._maxsize 上限强制校验。"""
+    from types import SimpleNamespace
+
+    ws = Path(tmp_path)
+    f1 = ws / "file_a.log"
+    f2 = ws / "file_b.log"
+    f3 = ws / "file_c.log"
+    f1.write_text("aaa", encoding="utf-8")
+    f2.write_text("bbbb", encoding="utf-8")
+    f3.write_text("ccccc", encoding="utf-8")
+
+    # 模拟 Windows 下 st_dev=0, st_ino=0 的统计对象
+    orig_path_stat = Path.stat
+
+    def zero_inode_path_stat(self, *args, **kwargs):
+        real = orig_path_stat(self, *args, **kwargs)
+        return SimpleNamespace(
+            st_dev=0,
+            st_ino=0,
+            st_size=real.st_size,
+            st_mtime_ns=real.st_mtime_ns,
+            st_mode=real.st_mode,
+        )
+
+    monkeypatch.setattr(Path, "stat", zero_inode_path_stat)
+
+    tracker = _new_tracker_for_poll(maxsize=2)
+    tracker.register(f1)
+    tracker.register(f2)
+    tracker.register(f3)  # 超出 maxsize=2 应被拒绝
+
+    assert len(tracker._baseline_fp) == 2
+
+    k1 = (0, 0, os.path.normcase(os.path.abspath(str(f1))))
+    k2 = (0, 0, os.path.normcase(os.path.abspath(str(f2))))
+    k3 = (0, 0, os.path.normcase(os.path.abspath(str(f3))))
+    st1 = f1.stat()
+    st2 = f2.stat()
+    st3 = f3.stat()
+
+    assert tracker.is_exempt(k1, st1.st_size, st1.st_mtime_ns) is True
+    assert tracker.is_exempt(k2, st2.st_size, st2.st_mtime_ns) is True
+    assert tracker.is_exempt(k3, st3.st_size, st3.st_mtime_ns) is False
+    # 互不串键：f1 指纹不可豁免 f2
+    assert tracker.is_exempt(k2, st1.st_size, st1.st_mtime_ns) is False

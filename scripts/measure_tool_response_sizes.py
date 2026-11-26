@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -89,7 +91,19 @@ def main() -> int:
         bench_dir = REPO_ROOT / ".agents" / "bench"
         bench_dir.mkdir(parents=True, exist_ok=True)
         bench_file = bench_dir / "tool_response_sizes.json"
-        bench_file.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        payload_text = json.dumps(results, indent=2, ensure_ascii=False)
+        fd, tmp_path = tempfile.mkstemp(dir=str(bench_dir), prefix=".tmp_sizes_", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload_text)
+            os.replace(tmp_path, bench_file)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
         print(f"\nBenchmark results recorded to {bench_file}")
 
     if args.check and not all_passed:

@@ -266,7 +266,7 @@ def get_staged_files(cwd: Optional[str] = None) -> List[str]:
     """通过 git diff --cached --name-only 获取本次暂存（staged）文件相对路径列表。"""
     try:
         out = subprocess.check_output(
-            ["git", "diff", "--cached", "--name-only"],
+            ["git", "-c", "core.quotePath=false", "diff", "--cached", "--name-only"],
             cwd=cwd or os.getcwd(),
             stderr=subprocess.DEVNULL,
             timeout=5.0,
@@ -299,6 +299,63 @@ def is_antigravity_environment(workspace_root: str) -> bool:
     return False
 
 
+def _parse_affected_files_block(section_lines: List[str]) -> List[str]:
+    """Extract normalized affected file paths from a task section, ignoring outer fences."""
+    allowed_files: List[str] = []
+    in_fence_char: Optional[str] = None
+    in_fence_len = 0
+    found_heading = False
+    in_affected_fence = False
+
+    for line in section_lines:
+        stripped_left = line.lstrip(" ")
+        indent = len(line) - len(stripped_left)
+
+        if indent <= 3 and (stripped_left.startswith("```") or stripped_left.startswith("~~~")):
+            fence_char = stripped_left[0]
+            flen = len(stripped_left) - len(stripped_left.lstrip(fence_char))
+            if in_fence_char is None:
+                in_fence_char = fence_char
+                in_fence_len = flen
+                if found_heading:
+                    in_affected_fence = True
+                continue
+            elif in_fence_char == fence_char and flen >= in_fence_len:
+                in_fence_char = None
+                in_fence_len = 0
+                if in_affected_fence:
+                    break
+                continue
+
+        if in_affected_fence:
+            item = line.strip()
+            if not item:
+                continue
+            item = re.sub(r"^(?:[-*+]\s+)+", "", item).strip()
+            item = re.sub(r"^\[(?:MODIFY|NEW|DELETE|RENAME)\]\s*", "", item, flags=re.IGNORECASE).strip()
+            item = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", item).strip()
+            for part in re.split(r"\s*(?:->|➔)\s*", item):
+                cleaned = part.strip().strip("`").strip().replace("\\", "/")
+                while cleaned.startswith("./"):
+                    cleaned = cleaned[2:]
+                if cleaned:
+                    allowed_files.append(cleaned)
+            continue
+
+        if in_fence_char is not None:
+            continue
+
+        if re.match(r"^####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*$", stripped_left, re.IGNORECASE):
+            found_heading = True
+        elif found_heading and stripped_left and not stripped_left.startswith("#"):
+            # Allow non-empty non-fence content? No, reset if another section starts
+            pass
+        elif found_heading and stripped_left.startswith("####"):
+            break
+
+    return allowed_files
+
+
 def find_active_task(dev_tasks_dir: str) -> Optional[Tuple[str, str, List[str]]]:
     """在 dev_tasks 目录中查找处于 🔨 执行中 的任务。
 
@@ -309,6 +366,8 @@ def find_active_task(dev_tasks_dir: str) -> Optional[Tuple[str, str, List[str]]]
         return None
 
     md_files = sorted(glob.glob(os.path.join(dev_tasks_dir, "*.md")), reverse=True)
+    header_re = re.compile(r"^###\s+(?:任务|Task)\s+([0-9a-zA-Z\._\-]+)\s+([^\n]+)$", re.IGNORECASE)
+
     for md_path in md_files:
         if os.path.basename(md_path).lower() == "readme.md":
             continue
@@ -319,42 +378,111 @@ def find_active_task(dev_tasks_dir: str) -> Optional[Tuple[str, str, List[str]]]
         except Exception:
             continue
 
-        # 匹配任务条目：### 任务/Task <id> <状态> — <标题>
-        task_blocks = re.split(r"(?=^###\s+(?:任务|Task)\s+)", content, flags=re.MULTILINE)
-        for block in task_blocks:
-            if not block.strip():
+        # Fence-aware scan for ### 任务/Task headers
+        in_fence_char: Optional[str] = None
+        in_fence_len = 0
+        lines = content.splitlines()
+        active_info: Optional[Tuple[str, str]] = None
+        section_lines: List[str] = []
+
+        for line in lines:
+            stripped_left = line.lstrip(" ")
+            indent = len(line) - len(stripped_left)
+
+            if indent <= 3 and (stripped_left.startswith("```") or stripped_left.startswith("~~~")):
+                fence_char = stripped_left[0]
+                flen = len(stripped_left) - len(stripped_left.lstrip(fence_char))
+                if in_fence_char is None:
+                    in_fence_char = fence_char
+                    in_fence_len = flen
+                elif in_fence_char == fence_char and flen >= in_fence_len:
+                    in_fence_char = None
+                    in_fence_len = 0
+                if active_info is not None:
+                    section_lines.append(line)
                 continue
 
-            header_match = re.search(
-                r"^###\s+(?:任务|Task)\s+(\d+)\s+([^\n—\-]+)[—\-]\s*([^\n]+)",
-                block,
-                re.MULTILINE,
-            )
-            if not header_match:
+            if in_fence_char is not None:
+                if active_info is not None:
+                    section_lines.append(line)
                 continue
 
-            task_id = header_match.group(1).strip()
-            status_text = header_match.group(2).strip()
-            task_title = header_match.group(3).strip()
+            if stripped_left.startswith(">"):
+                if active_info is not None:
+                    section_lines.append(line)
+                continue
 
-            if "执行中" in status_text or "🔨" in status_text or "in progress" in status_text.lower():
-                # 提取【涉及文件】/ [Affected Files]
-                allowed_files: List[str] = []
-                files_match = re.search(r"####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```", block, re.DOTALL | re.IGNORECASE)
-                if files_match:
-                    raw_block = files_match.group(1).strip()
-                    for line in raw_block.splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        cleaned = re.sub(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*", "", line).strip()
-                        cleaned = cleaned.split("（")[0].split("(")[0].strip()
-                        if cleaned:
-                            allowed_files.append(cleaned.replace("\\", "/"))
+            if stripped_left.startswith("###") and not stripped_left.startswith("####"):
+                if active_info is not None:
+                    return (active_info[0], active_info[1], _parse_affected_files_block(section_lines))
 
-                return (task_id, task_title, allowed_files)
+                m = header_re.match(stripped_left)
+                if m:
+                    task_id = m.group(1).strip()
+                    rest = m.group(2).strip()
+                    sep_match = re.match(r"^(.+?)\s*[—]\s*(.*)$", rest) or re.match(r"^(.+?)\s+-\s+(.*)$", rest)
+                    if sep_match:
+                        status_text = sep_match.group(1).strip()
+                        task_title = sep_match.group(2).strip()
+                    else:
+                        status_text = rest
+                        task_title = ""
+
+                    status_lower = status_text.lower()
+                    if (
+                        "执行中" in status_text
+                        or "🔨" in status_text
+                        or "in progress" in status_lower
+                        or "in-progress" in status_lower
+                    ):
+                        active_info = (task_id, task_title)
+                        section_lines = []
+                        continue
+
+            if active_info is not None:
+                section_lines.append(line)
+
+        if active_info is not None:
+            return (active_info[0], active_info[1], _parse_affected_files_block(section_lines))
 
     return None
+
+
+def _match_anchored_glob(rel_path: str, pattern: str) -> bool:
+    """Segment-aware anchored glob matching for pre-commit whitelist patterns."""
+    path_parts = [p for p in rel_path.replace("\\", "/").strip("/").split("/") if p]
+    raw_pat_parts = [p for p in pattern.replace("\\", "/").strip("/").split("/") if p]
+    if not raw_pat_parts:
+        return not path_parts
+
+    pat_parts: List[str] = []
+    for part in raw_pat_parts:
+        if part == "**" and pat_parts and pat_parts[-1] == "**":
+            continue
+        pat_parts.append(part)
+
+    n_pat = len(pat_parts)
+    n_path = len(path_parts)
+    memo: dict[Tuple[int, int], bool] = {}
+
+    def _dp(i: int, j: int) -> bool:
+        state = (i, j)
+        if state in memo:
+            return memo[state]
+        if i == n_pat:
+            res = j == n_path
+        elif pat_parts[i] == "**":
+            res = _dp(i + 1, j) or (j < n_path and _dp(i, j + 1))
+        else:
+            res = (
+                j < n_path
+                and fnmatch.fnmatchcase(os.path.normcase(path_parts[j]), os.path.normcase(pat_parts[i]))
+                and _dp(i + 1, j + 1)
+            )
+        memo[state] = res
+        return res
+
+    return _dp(0, 0)
 
 
 def is_file_unmanaged(rel_path: str) -> bool:
@@ -382,30 +510,39 @@ def check_violations(
     """校验是否有超出任务白名单的代码文件。返回违规文件列表。"""
     violations: List[str] = []
 
-    # 规范化白名单集合
-    norm_allowed = set()
-    allowed_basenames = set()
+    norm_exact: set[str] = set()
+    glob_patterns: List[str] = []
+    ws_norm = os.path.normpath(workspace_root).replace("\\", "/").rstrip("/") if workspace_root else ""
+
     for af in allowed_files:
-        clean_af = af.replace("\\", "/").strip().lower()
-        norm_allowed.add(clean_af)
-        allowed_basenames.add(os.path.basename(clean_af))
+        clean_af = af.replace("\\", "/").strip()
+        while clean_af.startswith("./"):
+            clean_af = clean_af[2:]
+        if ws_norm and clean_af.lower().startswith(ws_norm.lower() + "/"):
+            clean_af = clean_af[len(ws_norm) + 1:]
+        clean_af = clean_af.lstrip("/")
+        if not clean_af:
+            continue
+        if "*" in clean_af or "?" in clean_af:
+            glob_patterns.append(clean_af)
+        else:
+            norm_exact.add(os.path.normcase(clean_af))
 
     for sf in staged_files:
-        norm_sf = sf.replace("\\", "/").strip().lower()
+        norm_sf = sf.replace("\\", "/").strip()
+        while norm_sf.startswith("./"):
+            norm_sf = norm_sf[2:]
+        norm_sf = norm_sf.lstrip("/")
 
         # 1. 免管文件天然放行
-        if is_file_unmanaged(norm_sf):
+        if is_file_unmanaged(norm_sf.lower()):
             continue
 
-        # 2. 比对白名单
-        matched = False
-        if norm_sf in norm_allowed:
-            matched = True
-        elif os.path.basename(norm_sf) in allowed_basenames:
-            matched = True
-        else:
-            for af in norm_allowed:
-                if fnmatch.fnmatch(norm_sf, af) or norm_sf.endswith(af) or af.endswith(norm_sf):
+        # 2. 精确相对路径或锚定通配符比对（禁止 basename 与双向 endswith 绕过）
+        matched = os.path.normcase(norm_sf) in norm_exact
+        if not matched:
+            for pat in glob_patterns:
+                if _match_anchored_glob(norm_sf, pat):
                     matched = True
                     break
 
@@ -415,10 +552,42 @@ def check_violations(
     return violations
 
 
+def _resolve_git_dir(project_root: str) -> Optional[str]:
+    """Resolve .git directory for standard repos and git worktrees."""
+    dot_git = os.path.join(project_root, ".git")
+    if os.path.isdir(dot_git):
+        return dot_git
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=project_root,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+        ).decode("utf-8", errors="ignore").strip()
+        if out:
+            candidate = out if os.path.isabs(out) else os.path.normpath(os.path.join(project_root, out))
+            if os.path.isdir(candidate):
+                return candidate
+    except Exception:
+        pass
+    if os.path.isfile(dot_git):
+        try:
+            with open(dot_git, "r", encoding="utf-8", errors="ignore") as f:
+                first_line = f.readline().strip()
+            if first_line.lower().startswith("gitdir:"):
+                raw_dir = first_line.split(":", 1)[1].strip()
+                candidate = raw_dir if os.path.isabs(raw_dir) else os.path.normpath(os.path.join(project_root, raw_dir))
+                if os.path.isdir(candidate):
+                    return candidate
+        except Exception:
+            pass
+    return None
+
+
 def install_hook(project_root: str) -> int:
     """一键安装 Pre-commit Guard 到目标项目的 .git/hooks/pre-commit。"""
-    git_dir = os.path.join(project_root, ".git")
-    if not os.path.isdir(git_dir):
+    git_dir = _resolve_git_dir(project_root)
+    if not git_dir:
         print(f"❌ 错误: 目标路径不是有效的 Git 仓库根目录: {project_root}", file=sys.stderr)
         return 1
 

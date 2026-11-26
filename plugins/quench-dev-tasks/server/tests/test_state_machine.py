@@ -101,3 +101,44 @@ def test_transition_invalid():
             os.remove(f_path)
         if os.path.exists(f_path + ".lock"):
             os.remove(f_path + ".lock")
+
+
+def test_parse_and_transition_skip_fences_and_preserve_bom_crlf(tmp_path):
+    """验证 parse_task_file/transition_task 跳过代码围栏与引用块，且保留 UTF-8 BOM 与 CRLF。"""
+    from state_machine import extract_task_whitelist
+
+    md_path = tmp_path / "bom_crlf.md"
+    raw_text = (
+        "\ufeff# Tasks\r\n\r\n"
+        "> ### 任务 1.1 ✅ 已确认 — 引用块伪标题\r\n\r\n"
+        "```markdown\r\n"
+        "### 任务 1.1 ✅ 已确认 — 围栏内伪标题\r\n"
+        "```\r\n\r\n"
+        "### 任务 1.1 ⬜ 待确认 — 真实任务\r\n"
+        "#### 【涉及文件】\r\n"
+        "```\r\n"
+        "[modify] ./src/real.py (说明)\r\n"
+        "```\r\n\r\n"
+        "### 任务 1.2 ⬜ 待确认 — 下一任务\r\n"
+        "#### 【涉及文件】\r\n"
+        "```\r\n"
+        "[NEW] src/other.py\r\n"
+        "```\r\n"
+    )
+    md_path.write_bytes(raw_text.encode("utf-8"))
+
+    tasks = parse_task_file(str(md_path))
+    assert [(t.id, t.status, t.title) for t in tasks] == [
+        ("1.1", STATUS_PENDING, "真实任务"),
+        ("1.2", STATUS_PENDING, "下一任务"),
+    ]
+    assert extract_task_whitelist(raw_text, "1.1") == ["src/real.py"]
+
+    res = transition_task(str(md_path), "1.1", STATUS_CONFIRMED)
+    assert res.status == STATUS_CONFIRMED
+    out_bytes = md_path.read_bytes()
+    assert out_bytes.startswith(b"\xef\xbb\xbf")
+    out_str = out_bytes.decode("utf-8")
+    assert "\r\n" in out_str
+    assert "\n" not in out_str.replace("\r\n", "")
+    assert "> ### 任务 1.1 ✅ 已确认 — 引用块伪标题" in out_str

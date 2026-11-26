@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Final, NamedTuple
 
-from path_guard import PathTraversalError, assert_dir_contained
+from path_guard import PathTraversalError, assert_dir_contained, is_reparse_point_or_symlink
 from tool_surface_constants import (
     EXPECTED_TOOL_NAMES,
     MAX_TOOL_SCHEMA_BYTES,
@@ -199,7 +199,7 @@ def validate_schema_doc(schemas: dict[str, Any]) -> None:
     assert_no_sentinel_leak(schemas)
 
     try:
-        json.dumps(schemas, allow_nan=False)
+        json.dumps(schemas, allow_nan=False, sort_keys=True)
     except (TypeError, ValueError) as e:
         raise SchemaExportError(f"Schemas document contains non-JSON-serializable content: {e}")
 
@@ -352,9 +352,19 @@ def run_cli(
     args = parser.parse_args(argv)
     cache_dir_cand = Path(args.cache_dir)
 
-    # Confinement assertion: must be within repo root
+    # Confinement assertion: check unresolved segments for symlinks/reparse points before resolve()
     try:
-        # If cache_dir does not exist, resolve its parent or path to check containment
+        unresolved_cand = Path(os.path.abspath(cache_dir_cand))
+        repo_norm = Path(os.path.normcase(str(_REPO_ROOT)))
+        cand_norm = Path(os.path.normcase(str(unresolved_cand)))
+        cand_norm.relative_to(repo_norm)
+
+        curr = unresolved_cand
+        while os.path.normcase(str(curr)) != os.path.normcase(str(_REPO_ROOT)) and curr != curr.parent:
+            if is_reparse_point_or_symlink(curr):
+                raise PathTraversalError(f"Symlink or reparse point detected in cache-dir path: {curr}")
+            curr = curr.parent
+
         cand_resolved = cache_dir_cand.resolve()
         assert_dir_contained(_REPO_ROOT, cand_resolved)
     except (PathTraversalError, ValueError, OSError) as e:

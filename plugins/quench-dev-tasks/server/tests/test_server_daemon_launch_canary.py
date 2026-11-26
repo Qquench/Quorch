@@ -114,7 +114,7 @@ def test_server_daemon_launch_canary_and_lock_isolation() -> None:
         _terminate_process_tree(proc)
 
     # Lock freedom assertion: verify manifest filelock can be acquired immediately without contention
-    manifest_lock_path = repo_root / ".agents" / ".quorch" / "manifest.lock"
+    manifest_lock_path = repo_root / ".agents" / ".quorch" / "manifest.json.lock"
     if manifest_lock_path.parent.is_dir():
         lock = filelock.FileLock(str(manifest_lock_path), timeout=0.5)
         with lock:

@@ -83,6 +83,8 @@ REQUIRED_MARKERS = [
     "INV-6",
     "INV-7",
     "INV-8",
+    "INV-9",
+    "INV-10",
 ]
 
 

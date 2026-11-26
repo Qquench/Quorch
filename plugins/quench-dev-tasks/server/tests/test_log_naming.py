@@ -455,3 +455,93 @@ def test_norm_registry_key_rotation_folding(tmp_path: Path):
     assert norm_registry_key(txt_path) == os.path.normcase(os.path.realpath(str(txt_path)))
 
 
+def test_gc_with_active_registry_zero_stat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """启用 ActiveLogRegistry 时，gc_by_filename_order 与 enforce_unified_log_quota 零 stat/realpath。"""
+    from log_naming import ActiveLogRegistry
+
+    reg = ActiveLogRegistry()
+    pinned_path, _ = allocate_log_file(tmp_path, "pinned_sess", registry=reg)
+    for i in range(2, 6):
+        (tmp_path / f"20990101_{i:03d}_old.log").write_text("x", encoding="utf-8")
+
+    real_stat = os.stat
+    real_lstat = getattr(os, "lstat", real_stat)
+    real_realpath = os.path.realpath
+
+    def _boom_stat(path, *a, **k):
+        base = os.path.basename(os.fspath(path))
+        if base.endswith(".log") or base.endswith(".1.log"):
+            raise RuntimeError(f"stat/lstat called on {base}")
+        return real_stat(path, *a, **k)
+
+    def _boom_lstat(path, *a, **k):
+        base = os.path.basename(os.fspath(path))
+        if base.endswith(".log") or base.endswith(".1.log"):
+            raise RuntimeError(f"lstat called on {base}")
+        return real_lstat(path, *a, **k)
+
+    def _boom_realpath(path, *a, **k):
+        base = os.path.basename(os.fspath(path))
+        if base.endswith(".log") or base.endswith(".1.log"):
+            raise RuntimeError(f"realpath called on {base}")
+        return real_realpath(path, *a, **k)
+
+    monkeypatch.setattr(os, "stat", _boom_stat)
+    monkeypatch.setattr(os, "lstat", _boom_lstat)
+    monkeypatch.setattr(os.path, "realpath", _boom_realpath)
+
+    pruned = gc_by_filename_order(tmp_path, keep=2, registry=reg)
+    assert os.path.exists(pinned_path)
+    assert len(pruned) >= 1
+
+    enforce_unified_log_quota(tmp_path, keep=1, registry=reg)
+    assert os.path.exists(pinned_path)
+
+
+def test_gc_preserves_rotation_backup_on_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """主日志删除遇 PermissionError 时，必须保留对应 .1.log 轮转备份。"""
+    base = tmp_path / "20260924_001_locked.log"
+    rot = tmp_path / "20260924_001_locked.1.log"
+    base.write_text("locked", encoding="utf-8")
+    rot.write_text("rot", encoding="utf-8")
+    for i in range(2, 5):
+        (tmp_path / f"20260924_{i:03d}_ok.log").write_text("ok", encoding="utf-8")
+
+    real_remove = os.remove
+
+    def _deny_primary(path):
+        if os.path.basename(str(path)) == "20260924_001_locked.log":
+            raise PermissionError("WinError 32 locked")
+        return real_remove(path)
+
+    monkeypatch.setattr(os, "remove", _deny_primary)
+    pruned = gc_by_filename_order(tmp_path, keep=2)
+    assert "20260924_001_locked.log" not in pruned
+    assert rot.exists()
+
+
+def test_purge_legacy_respects_protected_paths_and_max_deletions(tmp_path: Path):
+    """purge_legacy 严格遵守 protected_paths 与 max_deletions，跳过受保护文件时不递减 excess。"""
+    base_time = 1700000000.0
+    protected_files = []
+    for i in range(1, 6):
+        legacy = tmp_path / f"latest-leg_{i}.log"
+        legacy.write_text(f"leg {i}", encoding="utf-8")
+        os.utime(legacy, (base_time + i * 10, base_time + i * 10))
+        if i <= 2:
+            protected_files.append(str(legacy))
+
+    pruned = enforce_unified_log_quota(
+        tmp_path,
+        keep=2,
+        purge_legacy=True,
+        protected_paths=frozenset(protected_files),
+        max_deletions=2,
+    )
+    for pf in protected_files:
+        assert os.path.exists(pf)
+    assert len(pruned) == 2
+    assert "latest-leg_3.log" in pruned
+    assert "latest-leg_4.log" in pruned
+
+

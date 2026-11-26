@@ -25,45 +25,63 @@ LF = bytes([10])
 
 @pytest.mark.slow
 def test_cli_write_and_check_clean() -> None:
-    # 1. Run --write
-    res_write = subprocess.run(
-        [sys.executable, str(_SCRIPT_PATH), "--write"],
-        cwd=str(_REPO_ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    assert res_write.returncode == 0, f"Write failed: {res_write.stderr}"
+    import shutil
 
-    # 2. Verify snapshot file existence and byte properties
-    assert _SNAPSHOT_PATH.is_file()
-    data_bytes = _SNAPSHOT_PATH.read_bytes()
-    assert CR not in data_bytes, "CR byte found in snapshot file"
-    assert data_bytes.endswith(LF), "Snapshot file must end with LF"
-    assert not data_bytes.endswith(LF * 2), "Snapshot file must not end with multiple LFs"
-    assert data_bytes.count(LF) > 1
+    test_cache_dir = _REPO_ROOT / "docs" / "architecture" / ".test_write_clean_cache"
+    test_cache_dir.mkdir(parents=True, exist_ok=True)
+    temp_snapshot = test_cache_dir / "ide_tool_schemas.json"
 
-    # 3. Mode check (platform-aware)
-    st = _SNAPSHOT_PATH.stat()
-    mode = stat.S_IMODE(st.st_mode)
-    if sys.platform != "win32":
-        assert mode == 0o644, f"Expected 0o644, got {oct(mode)}"
-    else:
-        assert (mode & 0o600) == 0o600, f"Expected user rw permissions, got {oct(mode)}"
+    try:
+        # 1. Run --write against isolated temporary cache-dir (never overwrite committed snapshot)
+        res_write = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--write", "--cache-dir", str(test_cache_dir)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert res_write.returncode == 0, f"Write failed: {res_write.stderr}"
 
-    # 4. No temporary files left behind
-    tmp_files = list(_SNAPSHOT_PATH.parent.glob(".ide_tool_schemas.json.*.tmp"))
-    assert not tmp_files, f"Temporary files leaked: {tmp_files}"
+        # 2. Verify snapshot file existence and byte properties
+        assert temp_snapshot.is_file()
+        data_bytes = temp_snapshot.read_bytes()
+        assert CR not in data_bytes, "CR byte found in snapshot file"
+        assert data_bytes.endswith(LF), "Snapshot file must end with LF"
+        assert not data_bytes.endswith(LF * 2), "Snapshot file must not end with multiple LFs"
+        assert data_bytes.count(LF) > 1
 
-    # 5. Run --check
-    res_check = subprocess.run(
-        [sys.executable, str(_SCRIPT_PATH), "--check"],
-        cwd=str(_REPO_ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    assert res_check.returncode == 0, f"Check failed: {res_check.stderr}"
+        # 3. Mode check (platform-aware)
+        st = temp_snapshot.stat()
+        mode = stat.S_IMODE(st.st_mode)
+        if sys.platform != "win32":
+            assert mode == 0o644, f"Expected 0o644, got {oct(mode)}"
+        else:
+            assert (mode & 0o600) == 0o600, f"Expected user rw permissions, got {oct(mode)}"
+
+        # 4. No temporary files left behind
+        tmp_files = list(test_cache_dir.glob(".ide_tool_schemas.json.*.tmp"))
+        assert not tmp_files, f"Temporary files leaked: {tmp_files}"
+
+        # 5. Run --check on isolated dir and on committed snapshot (read-only)
+        res_check_tmp = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--check", "--cache-dir", str(test_cache_dir)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert res_check_tmp.returncode == 0, f"Check on temp dir failed: {res_check_tmp.stderr}"
+
+        res_check = subprocess.run(
+            [sys.executable, str(_SCRIPT_PATH), "--check"],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert res_check.returncode == 0, f"Check on committed snapshot failed: {res_check.stderr}"
+    finally:
+        shutil.rmtree(test_cache_dir, ignore_errors=True)
 
 
 @pytest.mark.slow

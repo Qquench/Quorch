@@ -77,6 +77,12 @@ def _ensure_tool_surface_constants(repo_root: Path) -> None:
         sys.path.insert(0, s_str)
 
 
+def _extract_tool_param_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    """Extract non-injected parameter names including posonly, regular, and kwonly args."""
+    all_args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+    return [a.arg for a in all_args if a.arg not in INJECTED_FRAMEWORK_PARAMS]
+
+
 def extract_server_signatures(server_py: Path) -> dict[str, frozenset[str]]:
     """Extract tool names and their non-injected parameter names via pure AST."""
     if not server_py.is_file():
@@ -92,8 +98,7 @@ def extract_server_signatures(server_py: Path) -> dict[str, frozenset[str]]:
                 for d in node.decorator_list
             )
             if is_tool:
-                params = [a.arg for a in node.args.args if a.arg not in INJECTED_FRAMEWORK_PARAMS]
-                sigs[node.name] = frozenset(params)
+                sigs[node.name] = frozenset(_extract_tool_param_names(node))
     return sigs
 
 
@@ -190,7 +195,7 @@ def check_docstring_args(server_py: Path, expected_tools: frozenset[str]) -> lis
             continue
 
         documented = _parse_docstring_args(doc)
-        sig_params = [a.arg for a in node.args.args if a.arg not in INJECTED_FRAMEWORK_PARAMS]
+        sig_params = _extract_tool_param_names(node)
 
         for p in sig_params:
             if p not in documented:
@@ -252,7 +257,11 @@ def check_schema_descriptions(snapshot: Path, expected_tools: frozenset[str]) ->
         findings.append(LintFinding("P2_SNAPSHOT_INVALID_JSON", str(snapshot), 1, f"Failed to parse JSON: {e}"))
         return findings
 
-    repo_root = snapshot.parent.parent if snapshot.parent.name == "architecture" else snapshot.parent
+    repo_root = (
+        snapshot.parents[2]
+        if snapshot.parent.name == "architecture" and len(snapshot.parents) >= 3
+        else snapshot.parent
+    )
     _ensure_tool_surface_constants(repo_root)
     from tool_surface_constants import SNAPSHOT_SCHEMA_VERSION, TOOL_COUNT
 
@@ -312,6 +321,25 @@ def check_schema_descriptions(snapshot: Path, expected_tools: frozenset[str]) ->
     return findings
 
 
+_SKIP_SCAN_DIRS: Final[frozenset[str]] = frozenset({".venv", "venv", ".git", "node_modules"})
+
+
+def _parse_fence_marker(stripped_line: str) -> tuple[str, int, str] | None:
+    """Parse markdown code fence marker (` ``` ` or `~~~`, length >= 3)."""
+    if not stripped_line or stripped_line[0] not in ("`", "~"):
+        return None
+    ch = stripped_line[0]
+    length = 0
+    while length < len(stripped_line) and stripped_line[length] == ch:
+        length += 1
+    if length < 3:
+        return None
+    rest = stripped_line[length:].strip()
+    if ch == "`" and "`" in rest:
+        return None
+    return ch, length, rest
+
+
 def check_live_doc_call_keywords(doc_roots: Sequence[Path]) -> list[LintFinding]:
     """P3: Inspect live doc whitelist code fences. Any occurrence of CALL_KEYWORD_RE is a violation."""
     findings: list[LintFinding] = []
@@ -321,13 +349,22 @@ def check_live_doc_call_keywords(doc_roots: Sequence[Path]) -> list[LintFinding]
             if not target.is_file():
                 continue
             lines = target.read_text(encoding="utf-8").splitlines()
-            in_fence = False
+            fence_char: str | None = None
+            fence_len = 0
             for line_no, line in enumerate(lines, start=1):
                 stripped = line.strip()
-                if stripped.startswith("```"):
-                    in_fence = not in_fence
-                    continue
-                if in_fence and CALL_KEYWORD_RE.search(line):
+                marker = _parse_fence_marker(stripped)
+                if marker is not None:
+                    ch, mlen, rest = marker
+                    if fence_char is None:
+                        fence_char = ch
+                        fence_len = mlen
+                        continue
+                    if ch == fence_char and mlen >= fence_len and rest == "":
+                        fence_char = None
+                        fence_len = 0
+                        continue
+                if fence_char is not None and CALL_KEYWORD_RE.search(line):
                     findings.append(
                         LintFinding(
                             "P3_LIVE_DOC_KEYWORD_LEAK",
@@ -346,6 +383,9 @@ def check_example_call_keywords(
     findings: list[LintFinding] = []
     for root in doc_roots:
         for md_file in sorted(root.rglob("*.md")):
+            rel_parts = md_file.relative_to(root).parts
+            if any(part in _SKIP_SCAN_DIRS for part in rel_parts[:-1]):
+                continue
             rel_str = md_file.relative_to(root).as_posix()
             if any(rel_str.startswith(prefix) for prefix in EXCLUDED_PATH_PREFIXES):
                 continue
@@ -353,7 +393,8 @@ def check_example_call_keywords(
                 continue
 
             lines = md_file.read_text(encoding="utf-8", errors="replace").splitlines()
-            in_fence = False
+            fence_char: str | None = None
+            fence_len = 0
             fence_lang = ""
             fence_start_line = 0
             fence_has_exemption = False
@@ -361,16 +402,20 @@ def check_example_call_keywords(
 
             for line_no, line in enumerate(lines, start=1):
                 stripped = line.strip()
-                if stripped.startswith("```"):
-                    if not in_fence:
-                        in_fence = True
+                marker = _parse_fence_marker(stripped)
+                if marker is not None:
+                    ch, mlen, rest = marker
+                    if fence_char is None:
+                        fence_char = ch
+                        fence_len = mlen
                         fence_start_line = line_no
-                        tag = stripped[3:].strip()
-                        fence_lang = tag.split()[0].lower() if tag else ""
+                        fence_lang = rest.split()[0].lower() if rest else ""
                         fence_has_exemption = EXEMPTION_MARKER in line
                         fence_lines = []
-                    else:
-                        in_fence = False
+                        continue
+                    elif ch == fence_char and mlen >= fence_len and rest == "":
+                        fence_char = None
+                        fence_len = 0
                         if fence_has_exemption:
                             continue
                         if fence_lines and EXEMPTION_MARKER in fence_lines[0]:
@@ -415,7 +460,8 @@ def check_example_call_keywords(
                                                         f"Call to '{func_name}' has unknown keyword argument '{kw.arg}'. Allowed: {sorted(allowed)}",
                                                     )
                                                 )
-                elif in_fence:
+                        continue
+                if fence_char is not None:
                     fence_lines.append(line)
 
     return findings

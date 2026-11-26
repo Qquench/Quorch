@@ -14,12 +14,15 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import math
+import os
 import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Final, Mapping, NamedTuple, Sequence
@@ -178,32 +181,60 @@ def next_baseline(prev: float, robust_est: float) -> float:
     return max(TIER2_ABSOLUTE_FLOOR_S, min(float(prev), float(robust_est)))
 
 
-def load_tier2_baseline(state_path: Path | None = None) -> float:
-    """从侧车文件读取基线；若不存在或损坏则 fail-safe 返回 TIER2_DEFAULT_BASELINE_S。"""
+def load_tier2_state(state_path: Path | None = None) -> tuple[float, int]:
+    """从侧车文件读取基线与连续超限计数；缺失或损坏时 fail-safe 返回 (TIER2_DEFAULT_BASELINE_S, 0)。"""
     p = state_path if state_path is not None else BASELINE_STATE_PATH
     try:
         if p.is_file():
             data = json.loads(p.read_text(encoding="utf-8"))
             val = float(data.get("baseline_s", TIER2_DEFAULT_BASELINE_S))
+            streak = int(data.get("panic_streak", 0) or 0)
             if math.isfinite(val) and val >= TIER2_ABSOLUTE_FLOOR_S:
-                return val
+                return val, max(0, streak)
     except Exception:
         pass
-    return TIER2_DEFAULT_BASELINE_S
+    return TIER2_DEFAULT_BASELINE_S, 0
 
 
-def save_tier2_baseline(baseline: float, state_path: Path | None = None) -> bool:
-    """原子写入侧车文件（tmp -> replace）；失败时不阻断。"""
+def load_tier2_baseline(state_path: Path | None = None) -> float:
+    """从侧车文件读取基线；若不存在或损坏则 fail-safe 返回 TIER2_DEFAULT_BASELINE_S。"""
+    val, _ = load_tier2_state(state_path)
+    return val
+
+
+def save_tier2_baseline(
+    baseline: float,
+    state_path: Path | None = None,
+    *,
+    panic_streak: int = 0,
+) -> bool:
+    """原子写入侧车文件（mkstemp -> replace）；失败时不阻断。"""
     p = state_path if state_path is not None else BASELINE_STATE_PATH
+    tmp_path: str | None = None
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        content = json.dumps({"baseline_s": round(baseline, 3), "updated_at": time.time()}, indent=2)
-        tmp.write_text(content, encoding="utf-8")
-        tmp.replace(p)
+        content = json.dumps(
+            {
+                "baseline_s": round(baseline, 3),
+                "panic_streak": max(0, int(panic_streak)),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+        )
+        fd, tmp_path = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, p)
+        tmp_path = None
         return True
     except Exception:
         return False
+    finally:
+        if tmp_path is not None and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def classify_tier2(
@@ -524,23 +555,43 @@ def run_tier2_benchmark(
         return False, elapsed, logs
 
     state_p = (repo_root / baseline_path) if baseline_path else (repo_root / BASELINE_STATE_PATH)
-    active_baseline = load_tier2_baseline(state_p)
-    warn_line = active_baseline * TIER2_WARN_MULTIPLIER
+    if state_p.is_file():
+        active_baseline, prev_streak = load_tier2_state(state_p)
+        warn_line = active_baseline * TIER2_WARN_MULTIPLIER
+        panic_line = active_baseline * TIER2_PANIC_MULTIPLIER
+        new_streak = (prev_streak + 1) if elapsed > panic_line else 0
+        verdict = classify_tier2(elapsed, baseline=active_baseline, panic_streak=max(1, new_streak))
+        save_tier2_baseline(active_baseline, state_p, panic_streak=new_streak)
 
-    verdict = classify_tier2(elapsed, baseline=active_baseline, panic_streak=1)
-    if verdict == "panic" or elapsed > TIER2_PANIC_S:
-        logs.append(
-            f"Tier-2 panic threshold exceeded: took {elapsed:.2f}s > panic threshold {TIER2_PANIC_S:.1f}s (PANIC, exit 1)"
-        )
-        return False, elapsed, logs
-    elif elapsed > active_baseline:
-        logs.append(
-            f"Tier-2 baseline warning: took {elapsed:.2f}s > warn envelope {active_baseline:.1f}s (WARN, exit 0)"
-        )
+        if verdict == "panic" or elapsed > TIER2_PANIC_S:
+            logs.append(
+                f"Tier-2 panic threshold exceeded: took {elapsed:.2f}s > panic threshold {min(panic_line, TIER2_PANIC_S):.1f}s (PANIC, exit 1)"
+            )
+            return False, elapsed, logs
+        elif elapsed > warn_line:
+            logs.append(
+                f"Tier-2 baseline warning: took {elapsed:.2f}s > warn envelope {warn_line:.1f}s (WARN, exit 0)"
+            )
+        else:
+            logs.append(
+                f"Tier-2 baseline OK: took {elapsed:.2f}s <= warn envelope {warn_line:.1f}s"
+            )
     else:
-        logs.append(
-            f"Tier-2 baseline OK: took {elapsed:.2f}s <= warn envelope {warn_line:.1f}s"
-        )
+        warn_line = TIER2_WARN_S
+        verdict = classify_tier2(elapsed, baseline=None)
+        if verdict == "PANIC" or elapsed > TIER2_PANIC_S:
+            logs.append(
+                f"Tier-2 panic threshold exceeded: took {elapsed:.2f}s > panic threshold {TIER2_PANIC_S:.1f}s (PANIC, exit 1)"
+            )
+            return False, elapsed, logs
+        elif elapsed > warn_line:
+            logs.append(
+                f"Tier-2 baseline warning: took {elapsed:.2f}s > warn envelope {warn_line:.1f}s (WARN, exit 0)"
+            )
+        else:
+            logs.append(
+                f"Tier-2 baseline OK: took {elapsed:.2f}s <= warn envelope {warn_line:.1f}s"
+            )
 
     return True, elapsed, logs
 

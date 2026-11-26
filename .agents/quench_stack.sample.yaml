@@ -9,13 +9,13 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 示例 1: DeepSeek 官方 API（推荐，高性价比推理引擎）
+# 示例 1: OpenAI 兼容推理引擎（自定义端点声明）
 # ------------------------------------------------------------------------------
 # reviewer_engine:
-#   provider: "deepseek"
-#   model: "deepseek-flash"           # 或 "deepseek-reasoner"
-#   base_url: "https://api.deepseek.com"
-#   api_key_env: "DEEPSEEK_API_KEY"   # 环境变量名，严禁硬编码明文密钥
+#   provider: "custom"
+#   model: "your-reasoning-model"
+#   base_url: "https://api.example.com/v1"
+#   api_key_env: "REVIEWER_API_KEY"   # 环境变量名，严禁硬编码明文密钥
 #   thinking: true                    # 开启思维链推导流输出
 #   reasoning_effort: "high"
 #   timeout_seconds: 180
@@ -68,7 +68,11 @@
 # ------------------------------------------------------------------------------
 # audit_gate:
 #   enabled: true
+#   accepted_sources:
+#     - "reviewer_client"              # inverted 模式可追加 "host_subagent"
 #   on_missing_record: "block"
 #   on_degraded: "block"               # 比基线的 warn 更严（合法）
 #   on_internal_error: "allow"
+#   max_tail_bytes: 1048576
+#   max_age_minutes: 1440
 

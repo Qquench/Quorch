@@ -371,3 +371,43 @@ async def test_watch_zero_lock_during_await(tmp_path, monkeypatch):
         assert len(active_locks) == 0, f"Lock held during yield: {active_locks}"
 
     assert ticks >= 3
+
+
+@pytest.mark.tier1_fast
+@pytest.mark.anyio
+async def test_watch_forwards_custom_liveness_probe_interval(tmp_path, monkeypatch):
+    """watch() 透传 liveness_probe_interval_s 至两处 _read_snapshot_sync 调用。"""
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    rec = _make_record(supervisor, state=JobState.RUNNING)
+
+    seen_intervals: list[float] = []
+    orig_read = supervisor._read_snapshot_sync
+
+    def spy_read(job_id: str, clock=time.monotonic, liveness_probe_interval_s: float = 2.0):
+        seen_intervals.append(liveness_probe_interval_s)
+        return orig_read(job_id, clock=clock, liveness_probe_interval_s=liveness_probe_interval_s)
+
+    monkeypatch.setattr(supervisor, "_read_snapshot_sync", spy_read)
+
+    ticks = 0
+    orig_sleep = anyio.sleep
+
+    async def fast_sleep(seconds: float):
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 2:
+            supervisor._save_job_record(replace(rec, state=JobState.COMPLETED))
+        await orig_sleep(0.001)
+
+    monkeypatch.setattr(anyio, "sleep", fast_sleep)
+
+    async for _ in supervisor.watch(
+        rec.job_id,
+        deadline_monotonic=time.monotonic() + 5.0,
+        min_interval_s=0.01,
+        liveness_probe_interval_s=0.05,
+    ):
+        pass
+
+    assert len(seen_intervals) >= 2
+    assert all(iv == pytest.approx(0.05) for iv in seen_intervals)

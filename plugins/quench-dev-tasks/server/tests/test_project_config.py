@@ -415,5 +415,38 @@ def test_match_glob_multi_segment_double_star():
     assert _match_glob("frontend/src_other/App.vue", "frontend/src/**/*.vue") is False
 
 
+def test_local_override_hardening_and_protected_backslash(temp_workspace):
+    """验证 enabled:0/'false'、缺省基线注入 unmanaged_paths:['**'] 拦截及 POSIX 反斜杠受保护配置识别。"""
+    import yaml
+    from project_config import ConfigFault, is_protected_config_path
+
+    agents_dir = temp_workspace / ".agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    yaml_file = agents_dir / "quench_stack.yaml"
+    local_yaml = agents_dir / "quench_stack.local.yaml"
+
+    yaml_file.write_text(
+        yaml.dump({
+            "project_name": "hardened",
+            "audit_gate": {"enabled": True},
+        }),
+        encoding="utf-8",
+    )
+
+    for bad_enabled in (0, "false"):
+        local_yaml.write_text(yaml.dump({"audit_gate": {"enabled": bad_enabled}}), encoding="utf-8")
+        with pytest.raises(ConfigError) as exc:
+            load_project_config(str(temp_workspace))
+        assert ConfigFault.SAFETY_DOWNGRADE_DENIED.value in str(exc.value)
+
+    local_yaml.write_text(yaml.dump({"governance_scope": {"unmanaged_paths": ["**"]}}), encoding="utf-8")
+    with pytest.raises(ConfigError) as exc:
+        load_project_config(str(temp_workspace))
+    assert ConfigFault.SAFETY_DOWNGRADE_DENIED.value in str(exc.value)
+
+    assert is_protected_config_path(".agents\\quench_stack.yaml") is True
+    assert is_protected_config_path("dir\\quench_stack.local.yaml") is True
+
+
 
 

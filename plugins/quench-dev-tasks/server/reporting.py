@@ -11,7 +11,10 @@ from __future__ import annotations
 import datetime
 import os
 import re
+import tempfile
 from typing import Any, Dict, List, Optional
+
+from filelock import FileLock
 
 from state_machine import TaskItem
 
@@ -37,35 +40,59 @@ def append_changelog_entry(
         entry_lines.append("- （无独立任务条目或全部跳过）\n")
     entry_lines.append("\n")
 
-    if not os.path.exists(changelog_path):
-        header = [
-            "# 变更记录 (CHANGELOG)\n",
-            "\n",
-            "> 本文件记录由 Quench DevTasks 自动同步与人工补充的项目变更日志。\n",
-            "\n",
-        ]
-        all_content = header + entry_lines
-        with open(changelog_path, "w", encoding="utf-8") as f:
-            f.writelines(all_content)
-        return
+    abs_changelog = os.path.abspath(changelog_path)
+    parent_dir = os.path.dirname(abs_changelog)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
 
-    with open(changelog_path, "r", encoding="utf-8") as f:
-        existing = f.readlines()
+    lock = FileLock(f"{abs_changelog}.lock", timeout=5.0)
+    with lock:
+        if not os.path.exists(changelog_path):
+            header = [
+                "# 变更记录 (CHANGELOG)\n",
+                "\n",
+                "> 本文件记录由 Quench DevTasks 自动同步与人工补充的项目变更日志。\n",
+                "\n",
+            ]
+            lines_to_write = header + entry_lines
+        else:
+            with open(changelog_path, "r", encoding="utf-8") as f:
+                existing = f.readlines()
 
-    insert_idx = -1
-    for idx, line in enumerate(existing):
-        if line.startswith("## "):
-            insert_idx = idx
-            break
+            insert_idx = -1
+            for idx, line in enumerate(existing):
+                if line.startswith("## "):
+                    insert_idx = idx
+                    break
 
-    if insert_idx == -1:
-        # 没有二级标题，直接追加到末尾
-        existing.extend(["\n"] + entry_lines)
-    else:
-        existing = existing[:insert_idx] + entry_lines + existing[insert_idx:]
+            if insert_idx == -1:
+                # 没有二级标题，直接追加到末尾
+                existing.extend(["\n"] + entry_lines)
+            else:
+                existing = existing[:insert_idx] + entry_lines + existing[insert_idx:]
+            lines_to_write = existing
 
-    with open(changelog_path, "w", encoding="utf-8") as f:
-        f.writelines(existing)
+        fd, tmp_path = tempfile.mkstemp(dir=parent_dir or ".", prefix=".tmp_changelog_", suffix=".tmp")
+        fd_open = True
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                fd_open = False
+                f.writelines(lines_to_write)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, changelog_path)
+        except Exception:
+            if fd_open:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
 
 
 def _extract_spec_section(spec_text: str, header_keyword: str) -> Optional[str]:

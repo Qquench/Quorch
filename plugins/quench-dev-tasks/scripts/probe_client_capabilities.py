@@ -95,7 +95,7 @@ async def _probe_stdio_async(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
     except (FileNotFoundError, PermissionError, OSError):
         return "unavailable", {}
@@ -306,8 +306,53 @@ def probe_client_capabilities(
 
         try:
             with urllib.request.urlopen(req, timeout=timeout_sec) as response:
-                body = response.read().decode("utf-8", errors="replace")
-                data = json.loads(body)
+                headers_obj = getattr(response, "headers", None)
+                content_type = ""
+                if headers_obj is not None and hasattr(headers_obj, "get"):
+                    ct_val = headers_obj.get("Content-Type")
+                    if isinstance(ct_val, str):
+                        content_type = ct_val.lower()
+
+                data: Any = None
+                if "text/event-stream" in content_type:
+                    max_sse_lines = 256
+                    max_sse_bytes = 1024 * 1024
+                    total_bytes = 0
+                    data_lines: list[str] = []
+                    if hasattr(response, "readline"):
+                        for _ in range(max_sse_lines):
+                            raw_line = response.readline(65536)
+                            if not raw_line:
+                                break
+                            total_bytes += len(raw_line)
+                            if total_bytes > max_sse_bytes:
+                                break
+                            line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                            if line.startswith("data:"):
+                                data_lines.append(line[5:].lstrip())
+                            elif line == "" and data_lines:
+                                payload_str = "\n".join(data_lines)
+                                data_lines = []
+                                try:
+                                    cand = json.loads(payload_str)
+                                    if isinstance(cand, dict) and ("result" in cand or "error" in cand):
+                                        data = cand
+                                        break
+                                except json.JSONDecodeError:
+                                    pass
+                        if data is None and data_lines:
+                            data = json.loads("\n".join(data_lines))
+                    else:
+                        body = response.read(max_sse_bytes).decode("utf-8", errors="replace")
+                        for line in body.splitlines():
+                            if line.startswith("data:"):
+                                data_lines.append(line[5:].lstrip())
+                        if data_lines:
+                            data = json.loads("\n".join(data_lines))
+                else:
+                    body = response.read(1024 * 1024).decode("utf-8", errors="replace")
+                    data = json.loads(body)
+
                 if isinstance(data, dict) and "result" in data and isinstance(data["result"], dict):
                     status = "ok"
                     result = data["result"]

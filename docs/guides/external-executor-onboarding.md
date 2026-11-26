@@ -20,7 +20,7 @@ The Quench DevTasks architecture enforces strict engineering discipline on autom
 
 ### 2.1 Python Runtime Setup
 
-Quench FastMCP server requires Python 3.10+ in a dedicated virtual environment.
+Quench FastMCP server requires Python 3.12+ in a dedicated virtual environment.
 
 ```bash
 # Initialize and activate project virtual environment
@@ -104,9 +104,9 @@ When spawned by an IDE or CLI harness as a stdio child process:
 
 ---
 
-## 4. The 17 FastMCP Tools Reference
+## 4. The 16 FastMCP Tools Reference
 
-The Quench DevTasks MCP server exposes exactly 17 specialized tools:
+The Quench DevTasks MCP server exposes exactly 16 specialized tools:
 
 | # | Tool Name | Scope / Role Hint | Primary Function |
 |---|-----------|-------------------|------------------|

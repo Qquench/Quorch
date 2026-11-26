@@ -339,6 +339,36 @@ async def test_no_stdout_pollution_during_consultation(capsys, tmp_path: Path, m
 
 
 @pytest.mark.anyio
+async def test_stream_auth_timeout_and_not_configured_errors_degrade_cleanly(tmp_path: Path, monkeypatch):
+    """ReviewerAuthError / ReviewerTimeoutError / ReviewerNotConfiguredError 均继承 ReviewerEngineError 且被捕获降级。"""
+    from reviewer_engine import (
+        ReviewerAuthError,
+        ReviewerEngineError,
+        ReviewerNotConfiguredError,
+        ReviewerTimeoutError,
+    )
+
+    assert issubclass(ReviewerAuthError, ReviewerEngineError)
+    assert issubclass(ReviewerTimeoutError, ReviewerEngineError)
+    assert issubclass(ReviewerNotConfiguredError, ReviewerEngineError)
+
+    for err, expected_reason in [
+        (ReviewerAuthError("401 unauthorized"), "auth_401"),
+        (ReviewerTimeoutError("stream timed out"), "timeout"),
+        (ReviewerNotConfiguredError("missing key"), "reviewer_not_configured"),
+    ]:
+        fake_client = FakeReviewerClient(raise_err=err)
+        monkeypatch.setattr("consultation.create_reviewer_client", lambda cfg, sink=None, _fc=fake_client: _fc)
+        res = await server.dev_reviewer_consult(
+            workspace_root=str(tmp_path),
+            query="Test error hierarchy",
+        )
+        assert res["status"] == "degraded"
+        assert res["findings"] == ""
+        assert res["degraded_reason"] == expected_reason
+
+
+@pytest.mark.anyio
 async def test_concurrent_same_session_serializes_log_writes(tmp_path: Path, monkeypatch):
     """断言以同一 session_id 并发调用时，进程锁保障日志写入完全序列化，无半截行交错。"""
     chunks1 = [

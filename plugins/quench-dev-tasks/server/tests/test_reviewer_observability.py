@@ -18,7 +18,7 @@ if SERVER_DIR not in sys.path:
 
 from reviewer_engine import (
     AdaptiveHeartbeatSink,
-    DeepSeekClient,
+    ReviewerClient,
     ReviewerEngineConfig,
     RotatingFileSink,
     TelemetryRecord,
@@ -241,7 +241,7 @@ def test_deepseek_client_streaming_and_soft_ceiling(tmp_path):
         api_key_env="DUMMY_KEY",
         timeout_seconds=10,
     )
-    client = DeepSeekClient(config)
+    client = ReviewerClient(config)
     client.resolve_api_key = lambda: "dummy-key"
 
     sse_lines = [
@@ -299,7 +299,7 @@ def test_deepseek_client_soft_ceiling_trigger(tmp_path):
         api_key_env="DUMMY_KEY",
         timeout_seconds=10,
     )
-    client = DeepSeekClient(config)
+    client = ReviewerClient(config)
     client.resolve_api_key = lambda: "dummy-key"
 
     # Generate 10 chunks of 100 characters each

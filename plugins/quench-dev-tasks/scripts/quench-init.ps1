@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Quench DevTasks 一键初始化与环境体检脚本 (PowerShell)
 
@@ -46,7 +46,7 @@ if (-not $ScriptDirectory) {
 $InitPy = Join-Path $ScriptDirectory "init_project.py"
 if (-not (Test-Path $InitPy)) {
     Write-Error "❌ 未找到 init_project.py: $InitPy"
-    return
+    exit 1
 }
 
 # 查找可用 Python 解释器（优先虚拟环境）
@@ -77,6 +77,7 @@ if ($ProjectName) {
 }
 
 & $PythonExe $CallArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 function global:quench-init {
     [CmdletBinding()]

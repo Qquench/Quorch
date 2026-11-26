@@ -430,5 +430,44 @@ def test_resolve_harness_baton_forwards_runner_model_hint_e2e(tmp_path: Path):
     assert "model_hint=custom-fast-tier" in inst_b
 
 
+def test_stop_event_subagent_variants_and_in_progress_file_priority(tmp_path: Path, monkeypatch):
+    """验证 snake_case last_user_input / isSubagent 放行以及优先定位含执行中任务的文件。"""
+    ws = tmp_path / "ws_prio"
+    agents_dir = ws / ".agents"
+    dev_tasks_dir = ws / "docs" / "dev_tasks"
+    agents_dir.mkdir(parents=True)
+    dev_tasks_dir.mkdir(parents=True)
+    (agents_dir / "quench_stack.yaml").write_text("project_name: test\ndev_tasks_dir: docs/dev_tasks\n", encoding="utf-8")
+
+    assert _handle_stop_event({
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "isSubagent": True,
+        "workspacePaths": [str(ws)],
+    }) == {"decision": "allow"}
+
+    f_active = dev_tasks_dir / "2026-11-25_active.md"
+    f_active.write_text("### 任务 1.1 🔨 执行中 — Active\n", encoding="utf-8")
+    f_newer_pending = dev_tasks_dir / "2026-11-26_pending.md"
+    f_newer_pending.write_text("### 任务 2.1 ⬜ 待确认 — Newer\n", encoding="utf-8")
+    os.utime(f_active, (1000, 1000))
+    os.utime(f_newer_pending, (2000, 2000))
+
+    seen_files = []
+    def _fake_baton(w, d, active_task_file=None):
+        seen_files.append(active_task_file)
+        return ("DISPATCH_RUNNER", "continue")
+
+    monkeypatch.setattr(context_injector, "_resolve_harness_baton", _fake_baton)
+    res = _handle_stop_event({
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+        "conversationId": "conv_prio",
+        "workspacePaths": [str(ws)],
+    })
+    assert res["decision"] == "continue"
+    assert seen_files == ["2026-11-25_active.md"]
+
+
 
 

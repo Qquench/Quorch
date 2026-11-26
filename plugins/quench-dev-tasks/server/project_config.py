@@ -528,6 +528,23 @@ def _coerce_positive_int(raw: object, *, default: int, lo: int, hi: int) -> int:
         return default
 
 
+def _coerce_strict_bool(val: Any, default: bool = True) -> bool:
+    """Strictly parse YAML scalar booleans (recognizing False/0/'0'/'false'/'no'/'off' and True/1/'1'/'true'/'yes'/'on')."""
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    if isinstance(val, str):
+        s = val.strip().lower()
+        if s in ("false", "0", "no", "off"):
+            return False
+        if s in ("true", "1", "yes", "on"):
+            return True
+    return default
+
+
 @dataclass
 class ReviewerEngineConfig:
     mode: str = "auto"  # "auto" | "subagent" | "engine" | "manual"
@@ -671,12 +688,18 @@ class ReaperPolicyConfig:
 def canonical_artifact_ref(workspace_root: str, task_file: str, task_id: str) -> str:
     """SSOT 复合键：f"{posix_relpath(workspace_root, task_file)}#{task_id}"。
     task_id 必须复用 TaskItem.id，禁止在此二次派生或归一化。"""
-    ws = os.path.abspath(workspace_root)
+    ws = os.path.realpath(os.path.abspath(workspace_root))
     if not os.path.isabs(task_file):
-        abs_task_file = os.path.abspath(os.path.join(ws, task_file))
+        abs_task_file = os.path.realpath(os.path.abspath(os.path.join(ws, task_file)))
     else:
-        abs_task_file = os.path.abspath(task_file)
-    rel = os.path.relpath(abs_task_file, ws)
+        abs_task_file = os.path.realpath(os.path.abspath(task_file))
+    try:
+        rel = os.path.relpath(abs_task_file, ws)
+    except ValueError as e:
+        raise ConfigError(
+            f"Cross-drive path cannot be relativized to workspace '{workspace_root}': '{task_file}' ({e}) / "
+            f"任务单路径与工作区跨盘符，无法计算相对引用: '{task_file}'"
+        ) from e
     rel_posix = rel.replace(os.sep, "/").replace("\\", "/")
     while rel_posix.startswith("./"):
         rel_posix = rel_posix[2:]
@@ -950,6 +973,7 @@ KNOWN_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset({
     "fast_track_rules",
     "governance_scope",
     "reviewer_engine",
+    "reviewer_jobs",
     "reaper_policy",
     "governance",
     "runner_profile",
@@ -979,8 +1003,9 @@ def is_protected_config_path(path: str, faults: list[ConfigFault] | None = None)
         if ":" in rest:
             rest = rest.split(":", 1)[0]
         cleaned = prefix + rest.rstrip(". ")
-        lexical_match = os.path.basename(cleaned).lower() in PROTECTED_CONFIG_NAMES
-        real_match = os.path.basename(os.path.realpath(cleaned)).lower() in PROTECTED_CONFIG_NAMES
+        cleaned_posix = cleaned.replace("\\", "/")
+        lexical_match = os.path.basename(cleaned_posix).lower() in PROTECTED_CONFIG_NAMES
+        real_match = os.path.basename(os.path.realpath(cleaned).replace("\\", "/")).lower() in PROTECTED_CONFIG_NAMES
         return lexical_match or real_match
     except Exception:
         return True  # 词法 ∪ realpath 双错 fail-closed
@@ -1115,6 +1140,14 @@ def _build_quench_stack_config(
     ag_raw = data.get("audit_gate")
     if isinstance(ag_raw, dict):
         ag_dict = dict(ag_raw)
+        for safety_key in (
+            "on_missing_record",
+            "on_degraded",
+            "tail_window_exhausted_policy",
+            "on_internal_error",
+        ):
+            if safety_key in ag_dict and ag_dict[safety_key] is not None:
+                ag_dict[safety_key] = str(ag_dict[safety_key]).strip().lower()
         if ag_dict.get("audit_log_path") is None:
             ag_dict["audit_log_path"] = observability.verdict_path
         audit_gate = AuditGatePolicy(**ag_dict)
@@ -1220,98 +1253,116 @@ def migrate_config_if_needed(yaml_path: str, data: dict) -> Tuple[dict, bool]:
     """纯文本级追加缺失字段，零注释破坏。
 
     读取文件原文本，用正则检测缺失的顶层字段，在文件末尾追加补丁文本块。
-    使用 tempfile + os.replace 原子写回。
+    使用 FileLock + mkstemp + fsync + os.replace 原子写回，保留 UTF-8 BOM。
     返回: (migrated_data, has_changes)
     """
     if not os.path.isfile(yaml_path):
         return data, False
 
-    try:
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            raw_text = f.read()
-    except Exception:
-        return data, False
+    from filelock import FileLock
 
-    # 剥离 UTF-8 BOM
-    clean_text = raw_text.lstrip("\ufeff")
-    if not clean_text.strip():
-        raise ValueError(f"配置文件为空或仅包含空白字符: {yaml_path}")
-
-    current_ver = str(data.get("schema_version", "")).strip()
-    if current_ver:
+    lock_path = f"{yaml_path}.lock"
+    with FileLock(lock_path, timeout=5.0):
         try:
-            # 若配置版本高于当前支持版本，不降级，仅发出警告
-            if float(current_ver) > float(CURRENT_SCHEMA_VERSION):
-                warnings.warn(
-                    f"配置文件版本 '{current_ver}' 高于当前系统支持版本 '{CURRENT_SCHEMA_VERSION}'，跳过自动降级迁移。",
-                    stacklevel=2,
-                )
-                return data, False
-        except (ValueError, TypeError):
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+        except Exception:
+            return data, False
+
+        # 保留并剥离 UTF-8 BOM
+        has_bom = raw_text.startswith("\ufeff")
+        clean_text = raw_text.lstrip("\ufeff")
+        if not clean_text.strip():
+            raise ValueError(f"配置文件为空或仅包含空白字符: {yaml_path}")
+
+        current_ver = str(data.get("schema_version", "")).strip()
+        if current_ver:
+            try:
+                # 若配置版本高于当前支持版本，不降级，仅发出警告
+                if float(current_ver) > float(CURRENT_SCHEMA_VERSION):
+                    warnings.warn(
+                        f"配置文件版本 '{current_ver}' 高于当前系统支持版本 '{CURRENT_SCHEMA_VERSION}'，跳过自动降级迁移。",
+                        stacklevel=2,
+                    )
+                    return data, False
+            except (ValueError, TypeError):
+                pass
+
+        cfg_ver = data.get("config_version")
+        if cfg_ver is not None:
+            try:
+                if int(cfg_ver) > CURRENT_CONFIG_VERSION:
+                    raise ConfigError(
+                        f"Configuration version '{cfg_ver}' is higher than current supported version '{CURRENT_CONFIG_VERSION}' / "
+                        f"配置版本 '{cfg_ver}' 高于当前系统支持版本 '{CURRENT_CONFIG_VERSION}'"
+                    )
+            except (ValueError, TypeError) as e:
+                if isinstance(e, ConfigError):
+                    raise
+
+        has_changes = False
+        patch_blocks: list[str] = []
+
+        # 1. 检查顶层零缩进 schema_version
+        if not re.search(r"^schema_version\s*:", clean_text, flags=re.MULTILINE):
+            patch_blocks.append(_DEFAULT_SCHEMA_VERSION_PATCH.strip("\n"))
+            data["schema_version"] = CURRENT_SCHEMA_VERSION
+            has_changes = True
+
+        # 2. 检查顶层零缩进 fast_track_rules
+        if not re.search(r"^fast_track_rules\s*:", clean_text, flags=re.MULTILINE):
+            patch_blocks.append(_DEFAULT_FAST_TRACK_PATCH.strip("\n"))
+            data["fast_track_rules"] = {"allow_untracked_patterns": []}
+            has_changes = True
+
+        if not has_changes:
+            return data, False
+
+        updated_text = clean_text
+        if not updated_text.endswith("\n"):
+            updated_text += "\n"
+        for pb in patch_blocks:
+            updated_text += "\n" + pb + "\n"
+
+        out_text = ("\ufeff" + updated_text) if has_bom else updated_text
+
+        # 原子写回（使用 mkstemp + flush + fsync + os.replace）
+        yaml_dir = os.path.dirname(os.path.abspath(yaml_path))
+        temp_fd: Optional[int] = None
+        temp_file: Optional[str] = None
+        try:
+            temp_fd, temp_file = tempfile.mkstemp(dir=yaml_dir)
+            with os.fdopen(temp_fd, "w", encoding="utf-8") as tf:
+                temp_fd = None
+                tf.write(out_text)
+                tf.flush()
+                os.fsync(tf.fileno())
+            os.replace(temp_file, yaml_path)
+            temp_file = None
+        except OSError as e:
+            warnings.warn(f"自动升级配置文件写回失败（可能是只读文件系统）: {e}，将在内存中维持升级状态。", stacklevel=2)
+            return data, False
+        finally:
+            if temp_fd is not None:
+                try:
+                    os.close(temp_fd)
+                except OSError:
+                    pass
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+
+        # 重新从更新文本解析 data 保持完全一致
+        try:
+            reloaded = yaml.safe_load(updated_text)
+            if isinstance(reloaded, dict):
+                data = reloaded
+        except Exception:
             pass
 
-    cfg_ver = data.get("config_version")
-    if cfg_ver is not None:
-        try:
-            if int(cfg_ver) > CURRENT_CONFIG_VERSION:
-                raise ConfigError(
-                    f"Configuration version '{cfg_ver}' is higher than current supported version '{CURRENT_CONFIG_VERSION}' / "
-                    f"配置版本 '{cfg_ver}' 高于当前系统支持版本 '{CURRENT_CONFIG_VERSION}'"
-                )
-        except (ValueError, TypeError) as e:
-            if isinstance(e, ConfigError):
-                raise
-
-    has_changes = False
-    patch_blocks: list[str] = []
-
-    # 1. 检查 schema_version
-    if not re.search(r"^\s*schema_version\s*:", clean_text, flags=re.MULTILINE):
-        patch_blocks.append(_DEFAULT_SCHEMA_VERSION_PATCH.strip("\n"))
-        data["schema_version"] = CURRENT_SCHEMA_VERSION
-        has_changes = True
-
-    # 2. 检查 fast_track_rules
-    if not re.search(r"^\s*fast_track_rules\s*:", clean_text, flags=re.MULTILINE):
-        patch_blocks.append(_DEFAULT_FAST_TRACK_PATCH.strip("\n"))
-        data["fast_track_rules"] = {"allow_untracked_patterns": []}
-        has_changes = True
-
-    if not has_changes:
-        return data, False
-
-    updated_text = clean_text
-    if not updated_text.endswith("\n"):
-        updated_text += "\n"
-    for pb in patch_blocks:
-        updated_text += "\n" + pb + "\n"
-
-    # 原子写回（使用 tempfile + os.replace）
-    yaml_dir = os.path.dirname(os.path.abspath(yaml_path))
-    temp_file = None
-    try:
-        with tempfile.NamedTemporaryFile("w", dir=yaml_dir, delete=False, encoding="utf-8") as tf:
-            temp_file = tf.name
-            tf.write(updated_text)
-        os.replace(temp_file, yaml_path)
-    except OSError as e:
-        warnings.warn(f"自动升级配置文件写回失败（可能是只读文件系统）: {e}，将在内存中维持升级状态。", stacklevel=2)
-        if temp_file and os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
-        return data, False
-
-    # 重新从更新文本解析 data 保持完全一致
-    try:
-        reloaded = yaml.safe_load(updated_text)
-        if isinstance(reloaded, dict):
-            data = reloaded
-    except Exception:
-        pass
-
-    return data, True
+        return data, True
 
 
 def load_project_config(workspace_root: str) -> QuenchStackConfig:
@@ -1362,6 +1413,17 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         data = _apply_global_layer(data, global_data, global_cfg_path)
 
     # 检查本地私有覆盖配置 .agents/quench_stack.local.yaml (已在 .gitignore 中忽略)
+    # 支持确定性测试隔离标志：
+    # - QUORCH_DISABLE_LOCAL_OVERRIDE=1: 全局禁用 local.yaml 覆盖
+    # - QUORCH_IGNORE_REPO_ROOT_LOCAL_OVERRIDE=1: 仅当 workspace_root 为真仓根目录时跳过 local.yaml
+    _self_repo_root = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+    )
+    _disable_local_env = os.environ.get("QUORCH_DISABLE_LOCAL_OVERRIDE", "").strip().lower() in ("1", "true", "yes", "on")
+    _ignore_repo_local_env = os.environ.get("QUORCH_IGNORE_REPO_ROOT_LOCAL_OVERRIDE", "").strip().lower() in ("1", "true", "yes", "on")
+    _is_self_repo_root = os.path.normcase(os.path.realpath(root)) == os.path.normcase(os.path.realpath(_self_repo_root))
+    _skip_local_override = _disable_local_env or (_ignore_repo_local_env and _is_self_repo_root)
+
     def _merge_local_override(base: dict, overlay: dict) -> dict:
         """对安全与治理字段执行单调收紧硬门禁与基线锁定；其余字段走深合并。"""
         def _as_dict(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
@@ -1371,11 +1433,15 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
         audit_order = {"block": 2, "warn": 1, "allow": 0}
         base_ag = _as_dict(base, "audit_gate")
         over_ag = _as_dict(overlay, "audit_gate")
-        if base_ag.get("enabled") is True and over_ag.get("enabled") is False:
-            raise ConfigError(
-                f"Local override cannot disable audit_gate when enabled in baseline ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
-                "本地覆盖不得在基线已启用的情况下关闭 audit_gate"
-            )
+        default_ag_enabled = bool(AuditGatePolicy.model_fields["enabled"].default)
+        base_enabled = _coerce_strict_bool(base_ag.get("enabled"), default=default_ag_enabled)
+        if "enabled" in over_ag:
+            over_enabled = _coerce_strict_bool(over_ag.get("enabled"), default=False)
+            if base_enabled and not over_enabled:
+                raise ConfigError(
+                    f"Local override cannot disable audit_gate when enabled in baseline ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                    "本地覆盖不得在基线已启用的情况下关闭 audit_gate"
+                )
 
         for policy in ("on_missing_record", "on_degraded", "on_internal_error"):
             if policy in over_ag:
@@ -1389,9 +1455,16 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
                         f"本地覆盖不得将 audit_gate.{policy} 从 '{base_val}' 放宽至 '{over_val}'"
                     )
 
-        if "accepted_sources" in over_ag and "accepted_sources" in base_ag:
-            base_acc = set(base_ag.get("accepted_sources") or ["reviewer_client"])
-            over_acc = set(over_ag.get("accepted_sources") or ["reviewer_client"])
+        if "accepted_sources" in over_ag:
+            if "accepted_sources" in base_ag and base_ag.get("accepted_sources") is not None:
+                raw_base_acc = base_ag.get("accepted_sources")
+                base_acc = {raw_base_acc} if isinstance(raw_base_acc, str) else set(raw_base_acc or ["reviewer_client"])
+            else:
+                base_mode = str(base.get("orchestration_mode", "standard")).strip().lower()
+                base_acc = set(_MODE_ACCEPTED_SOURCES.get(base_mode, frozenset({"reviewer_client"})))
+
+            raw_over_acc = over_ag.get("accepted_sources")
+            over_acc = {raw_over_acc} if isinstance(raw_over_acc, str) else set(raw_over_acc or ["reviewer_client"])
             if not over_acc.issubset(base_acc):
                 widened = over_acc - base_acc
                 raise ConfigError(
@@ -1401,9 +1474,14 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
         base_scope = _as_dict(base, "governance_scope")
         over_scope = _as_dict(overlay, "governance_scope")
-        if "managed_paths" in over_scope and "managed_paths" in base_scope:
+        if "managed_paths" in over_scope:
+            if "managed_paths" not in base_scope or not base_scope.get("managed_paths"):
+                raise ConfigError(
+                    f"Local override cannot narrow governance_scope.managed_paths when baseline governs full workspace ({ConfigFault.SAFETY_DOWNGRADE_DENIED.value}) / "
+                    "基线未限制 managed_paths 时，本地覆盖不得擅自注入窄化受管路径"
+                )
             base_managed = set(base_scope["managed_paths"])
-            over_managed = set(over_scope["managed_paths"])
+            over_managed = set(over_scope.get("managed_paths") or [])
             if not base_managed.issubset(over_managed):
                 missing = base_managed - over_managed
                 raise ConfigError(
@@ -1411,9 +1489,9 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
                     "本地覆盖不得收窄基线受管路径"
                 )
 
-        if "unmanaged_paths" in over_scope and "unmanaged_paths" in base_scope:
-            base_unmanaged = set(base_scope["unmanaged_paths"])
-            over_unmanaged = set(over_scope["unmanaged_paths"])
+        if "unmanaged_paths" in over_scope:
+            base_unmanaged = set(base_scope.get("unmanaged_paths") or [])
+            over_unmanaged = set(over_scope.get("unmanaged_paths") or [])
             if not over_unmanaged.issubset(base_unmanaged):
                 added = over_unmanaged - base_unmanaged
                 raise ConfigError(
@@ -1433,13 +1511,18 @@ def load_project_config(workspace_root: str) -> QuenchStackConfig:
 
     local_yaml_path = os.path.join(root, ".agents", "quench_stack.local.yaml")
     local_override_loaded = False
-    if os.path.isfile(local_yaml_path):
+    if not _skip_local_override and os.path.isfile(local_yaml_path):
         try:
             with open(local_yaml_path, "r", encoding="utf-8") as f:
                 raw_local = f.read().lstrip("\ufeff")
             if raw_local.strip():
                 local_data = yaml.safe_load(raw_local)
-                if isinstance(local_data, dict):
+                if local_data is not None:
+                    if not isinstance(local_data, dict):
+                        raise ConfigError(
+                            f"Invalid local override configuration format in {local_yaml_path} (expected mapping, got {type(local_data).__name__}) / "
+                            f"本地覆盖配置文件格式无效 ({local_yaml_path})：预期为 YAML 字典键值对"
+                        )
                     _assert_no_plaintext_api_key(local_data, local_yaml_path)
                     data = _merge_local_override(data, local_data)
                     local_override_loaded = True

@@ -203,3 +203,23 @@ def test_renew_or_die(temp_workspace):
     guard.lease_file.unlink()
     with pytest.raises(WorkspaceLeaseNotHeldError):
         guard.renew_or_die()
+
+
+def test_destructive_context_calls_renew_or_die_and_recovers_corrupt_json(temp_workspace):
+    """destructive_context 入口校验续租，且 acquire_or_probe 对非数字损坏字段安全恢复。"""
+    guard = WorkspaceLeaseGuard(temp_workspace, lease_ttl_s=10.0, heartbeat_interval_s=1.0)
+    guard._lease_dir.mkdir(parents=True, exist_ok=True)
+    guard.lease_file.write_text(
+        json.dumps({"pid": 12345, "boot_nonce": "bad", "updated_at": "NaN-bad", "generation": "NaN"}),
+        encoding="utf-8",
+    )
+
+    assert guard.acquire_or_probe("recovered_nonce") is True
+    assert guard.generation == 1
+
+    # Remove lease file while is_held() is locally True -> destructive_context must reject via renew_or_die()
+    guard.lease_file.unlink()
+    assert guard.is_held() is True
+    with pytest.raises(WorkspaceLeaseNotHeldError):
+        with guard.destructive_context():
+            pass

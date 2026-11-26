@@ -455,3 +455,41 @@ def test_generate_agents_mcp_config_idempotency(tmp_path):
     assert os.path.getmtime(cfg_path) > old_time
 
 
+def test_diagnose_environment_is_readonly_and_handles_windows_unquoted_paths(tmp_path, monkeypatch):
+    """diagnose_environment (--check) 保持工作区纯只读，且在 Windows 下正确解析无引号反斜杠路径。"""
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    from init_project import diagnose_environment, init_project
+
+    proj_dir = tmp_path / "ro_diag_proj"
+    proj_dir.mkdir()
+    subprocess.run(["git", "init"], cwd=str(proj_dir), capture_output=True, check=True)
+
+    init_project(str(proj_dir), project_name="RODiag")
+    hooks_file = proj_dir / ".agents" / "hooks.json"
+    mcp_file = proj_dir / ".agents" / "mcp_config.json"
+    assert hooks_file.is_file()
+    assert mcp_file.is_file()
+    hooks_before = hooks_file.read_text(encoding="utf-8")
+    mcp_before = mcp_file.read_text(encoding="utf-8")
+
+    diag = diagnose_environment(str(proj_dir))
+    assert diag["hooks_json_valid"] is True
+    assert diag["agents_mcp_config_valid"] is True
+    assert diag["python_valid"] is True
+    # 工作区文件未被删除或改写
+    assert hooks_file.read_text(encoding="utf-8") == hooks_before
+    assert mcp_file.read_text(encoding="utf-8") == mcp_before
+
+    # 测试 Python 3.12 最低门槛
+    class _FakeVersionInfo(tuple):
+        major = property(lambda self: self[0])
+        minor = property(lambda self: self[1])
+        micro = property(lambda self: self[2])
+
+    monkeypatch.setattr(sys, "version_info", _FakeVersionInfo((3, 11, 9, "final", 0)))
+    diag_old_py = diagnose_environment(str(proj_dir))
+    assert diag_old_py["python_valid"] is False
+    assert any("3.12" in issue for issue in diag_old_py["issues"])
+
+

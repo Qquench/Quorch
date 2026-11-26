@@ -257,3 +257,26 @@ def test_reviewer_poll_terminal_phase_budget_exemption():
     # Terminal phase is exempt
     clamped_terminal = fit_to_budget("dev_reviewer_poll", large_terminal_poll, phase="terminal")
     assert clamped_terminal == large_terminal_poll
+
+
+def test_fit_to_budget_preserves_discriminators_for_non_status_tools():
+    """Task 36.2: TOOL_DEFAULT_ALWAYS_KEEP retains core keys on aggressive Step 3 truncation."""
+    oversized_checkout = {
+        "ok": True,
+        "status": "checked_out",
+        "task_id": "36.2",
+        "action": "DISPATCH_RUNNER",
+        "spec": "Very long spec " * 300,
+        "harness_next_action": {
+            "action": "DISPATCH_RUNNER",
+            "instruction": "Very long instruction " * 100,
+        },
+    }
+    clamped = fit_to_budget("dev_tasks_checkout", oversized_checkout)
+    assert measure_payload_bytes(clamped) <= RESPONSE_BUDGET_BYTES["dev_tasks_checkout"]
+    assert clamped["ok"] is True
+    assert clamped["status"] == "checked_out"
+    assert clamped["task_id"] == "36.2"
+    assert clamped["action"] == "DISPATCH_RUNNER"
+    assert clamped["harness_next_action"] == {"action": "DISPATCH_RUNNER"}
+    assert "spec" not in clamped

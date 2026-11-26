@@ -1,12 +1,46 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "quench-dev-tasks-server"
-version = "0.1.0"
+version = "1.36.0"
 description = "FastMCP Server for Quench DevTasks Orchestrator"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=2.0",
     "pyyaml>=6.0",
     "filelock>=3.0",
+    "pydantic>=2.0",
+    "anyio>=4.0",
+]
+
+[tool.setuptools]
+py-modules = [
+    "autopilot_harness",
+    "cli",
+    "code_explorer",
+    "consultation",
+    "ide_schema_export",
+    "log_naming",
+    "manifest",
+    "manifest_lease",
+    "observability_policy",
+    "path_guard",
+    "progress_bridge",
+    "project_config",
+    "reporting",
+    "response_compactor",
+    "reviewer_engine",
+    "reviewer_jobs",
+    "runtime_mode",
+    "schema_validator",
+    "server",
+    "state_machine",
+    "task_status",
+    "task_writer",
+    "tool_surface_constants",
+    "workspace_lease",
 ]
 
 [project.optional-dependencies]

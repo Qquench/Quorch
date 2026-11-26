@@ -45,7 +45,7 @@ To adapt to both single-model agile development and multi-agent team workflows, 
 
 1. **Standard Mode (`standard`)**:
    - Primary IDE session acts as the agile **Runner**, executing sequential task implementations.
-   - Architectural review is delegated on demand to an external model endpoint (`direct_api`) or an isolated subagent (`subagent_delegate`).
+   - Architectural review is delegated on demand to an external model endpoint (`external_api`) or an isolated subagent (`host_subagent`).
 
 2. **Inverted Mode (`inverted`)**:
    - Primary IDE session acts as the strategic **Reviewer / Orchestrator**, coordinating tasks, assessing risks, and planning evolution.
@@ -69,7 +69,7 @@ To adapt to both single-model agile development and multi-agent team workflows, 
 ┌──────────────────────────────────────────────────────────────────┐
 │  Tier 1: Client Awareness & Interception Layer                   │
 │  (IDE Adapters & Hooks)                                          │
-│  • Antigravity PreToolUse / PostToolUse hooks                    │
+│  • Antigravity PreToolUse & PreInvocation/Stop hooks             │
 │  • Cursor MCP Rules injection (rules_exporter.py)                │
 │  • Git Pre-Commit Guard (git_pre_commit_guard.py)                │
 │  • Cross-IDE AGENTS.md router card                               │
@@ -100,7 +100,7 @@ To adapt to both single-model agile development and multi-agent team workflows, 
 │  Tier 4: Model Abstraction & Thinking-Stream Engine              │
 │  (ReviewerClient & Observability)                                │
 │  • Vendor-neutral adapter (reviewer_engine.py, adapters/)        │
-│  • Provider presets: DeepSeek, OpenAI, Ollama, vLLM, Subagent   │
+│  • Declarative OpenAI-compatible endpoints & host subagent dispatch │
 │  • 1024KB safe-rotation log stream (log_naming.py)               │
 │  • Adaptive heartbeat liveness guard                             │
 │  • Observability policy & verdict sink (observability_policy.py) │
@@ -150,7 +150,7 @@ To adapt to both single-model agile development and multi-agent team workflows, 
               └──────────────┘  └──────────────────┘
 ```
 
-**Additional terminal states**: `⏭️ Skipped` (via `confirm action=skip`), `🔄 Rework` (via `confirm action=rework`), `🚫 Revoked` (via `confirm action=revoke`).
+**Additional terminal states**: `⏭️ Skipped` (via `confirm action=skip`), `🔄 Rework` (via `confirm action=rework`), while `dev_tasks_confirm(action="revoke")` reverts tasks back to `⬜ Pending`.
 
 ### 3.2 Physical Interception & Workspace Scope Reconciliation
 
@@ -205,7 +205,7 @@ Quench establishes a unified asynchronous Reviewer execution path, converging al
                            ▼ ReviewerClient.run_async()
  ┌────────────────────────────────────────────────────────┐
  │ Execution & Observability                              │
- │ • Streaming chunks → latest-<session_id>.log           │
+ │ • Streaming chunks → YYYYMMDD_NNN_<slug>.log           │
  │ • 1024KB hard-cap rotation (log_naming)                │
  │ • File-based heartbeat logging (Pull Model)            │
  └─────────────────────────┬──────────────────────────────┘
@@ -292,14 +292,14 @@ To permanently guard against model prompt surface drift, IDE schema divergence, 
 | **INV-6** | Review is read-only (no production file writes during review) | Consultation sandbox guard; read-only path assertions | `test_consultation_context_guard.py` |
 | **INV-7** | Physical feasibility gate (path + pytest dry-run before promotion) | `dev_tasks_promote_draft` enforces checks; lint gate blocks invalid paths | `test_draft_lint.py` |
 | **INV-8** | Context budget cap (`max_total_injection_chars`) | `project_config.py` enforces cap before injection; truncation tested | `test_consultation_context_guard.py` |
-| **INV-9** | Single Provider Egress (no raw API bypass) | CI & test static AST scanner (`check_no_api_bypass.py`) asserts all Reviewer model calls transit through `ReviewerClient` | `test_architecture_hygiene.py`, `test_no_api_bypass.py` |
+| **INV-9** | Single Provider Egress (no raw API bypass) | CI & test static AST scanner (`plugins/quench-dev-tasks/scripts/check_no_api_bypass.py`) asserts all Reviewer model calls transit through `ReviewerClient` | `test_architecture_hygiene.py`, `test_no_api_bypass.py` |
 | **INV-10** | Response Budget SSOT (Declared & Test-Anchored) | Leaf SSOT (`tool_surface_constants.py`) declares response byte budgets for all 16 tools; runtime clamp enforced from 33.1; asserted in `test_response_compactor.py` | `test_response_budget_ssot.py`, `test_response_compactor.py` |
 
 ---
 
 ## 5. Source Code Mapping (Module Topology)
 
-Production modules are organized under `plugins/quench-dev-tasks/` across `server/` (MCP daemon, domain governance engine, reviewer engine), `server/hooks/` (IDE hooks), `server/adapters/` (vendor adapters), and `scripts/` (client-side export and pre-commit guards).
+Production modules are organized across `plugins/quench-dev-tasks/server/` (MCP daemon, domain governance engine, reviewer engine), `plugins/quench-dev-tasks/server/hooks/` (IDE hooks), `plugins/quench-dev-tasks/server/adapters/` (vendor adapters), `plugins/quench-dev-tasks/scripts/` (plugin CLI, export, bypass & pre-commit guards), and repo-root `scripts/` (schema snapshot, prompt-surface & CI gates).
 
 | Module | Tier | Responsibility | Key Constraints |
 |--------|------|----------------|-----------------|
@@ -314,6 +314,7 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `workspace_lease.py` | T3/T4 | Reviewer workspace mutex lease guard, TTL + generation CAS takeover, touch checkpoint contract | FileLock-backed; pure TTL timeout & generation CAS |
 | `reviewer_engine.py` | T4 | `ReviewerClient`; streaming adapter dispatch; `format_heartbeat_line` SSOT | Vendor-neutral; sole authorized provider network egress |
 | `consultation.py` | T4 | Reviewer sandbox guards (`assert_read_only_sandbox`), context slice assembly (`assemble_reviewer_context`), premises parsing (`parse_premises`, `PremiseRecord`), and consultation audit emission (`_emit_consultation_audit`) | Read-only guard enforced before any context injection; structured premises parsing with override precedence |
+| `code_explorer.py` | T3/T4 | AST symbol & slice explorer (`explore_codebase_slices`, `CodeSlice`, `ExplorationReport`) with deterministic cursor pagination | Read-only workspace exploration; bounded character/line budget |
 | `manifest_lease.py` | T3 | Lease management, liveness probing (`probe_lease_health`), and CAS stale task reclamation (`reclaim_stale_task`) | Strict lock ordering (Markdown -> Manifest); generation CAS |
 | `log_naming.py` | T4 | Reviewer log naming, rotation, and zero-stat GC primitives (`gc_by_filename_order`, `enforce_unified_log_quota`) | Zero-stat contract; strict slug sanitization; deterministic quota |
 | `runtime_mode.py` | T2/T3 | Dynamic runtime mode state management (`.quench_runtime_mode.json`), mode & reviewer channel switching | In-memory atomic cache; fallback-safe |
@@ -326,13 +327,13 @@ Production modules are organized under `plugins/quench-dev-tasks/` across `serve
 | `cli.py` | T2 | Unified developer CLI entrypoint (`status`, `check`, `init`, `archive`, `reviewer debug`) | Interactive ANSI formatting; non-AI operator gateway |
 | `hooks/file_scope_guard.py` | T1 | PreToolUse whitelist enforcement for mutating tools (`write_file`, `edit_file`, `run_command`), built-in agent `brain/` runtime artifact whitelist (`DEFAULT_AGENT_BRAIN_PATTERNS`, `is_agent_brain_artifact`), segment-aware multi-level `**` glob matching & task status tamper guard | Must respond in < 50ms; no heavy imports |
 | `hooks/context_injector.py` | T1 | PreInvocation relay guidance injection & Stop Hook 1-shot circuit-breaker (`.quench_stop_guard.json`) | Read-only injection; non-blocking fail-safe |
-| `scripts/config_sync.py` | T1 | Cross-repository dynamic config sync, single-source plugin deduplication & self-healing | Zero network calls; atomic writes |
-| `scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |
+| `plugins/quench-dev-tasks/scripts/config_sync.py` | T1 | Cross-repository dynamic config sync, single-source plugin deduplication & self-healing | Zero network calls; atomic writes |
+| `plugins/quench-dev-tasks/scripts/check_no_api_bypass.py` | T1 | Static AST scanner enforcing zero provider API bypasses (INV-9) | Zero third-party runtime dependencies |
 | `scripts/check_test_tiering_invariants.py` | T1 | Physical test tiering gate invariant scanner asserting H ∩ Tier-1 = ∅ and collection integrity | Clean subprocess invocation with sanitized environment |
 | `scripts/check_test_duration_baselines.py` | T1 | Test suite timing baseline & variance benchmark gate ($CV \le 15\%$, 8s hard fail / 5s warn, Tier-2 1.15x warn / 1.30x panic dynamic envelope with 30s floor) | 1 warmup + 3 measured iterations, ddof=1, reentrancy-safe subprocess runner |
-| `scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
+| `plugins/quench-dev-tasks/scripts/rules_exporter.py` | T1 | Cursor MCP rules and IDE instruction exporter | Pure export; idempotent |
 | `plugins/quench-dev-tasks/scripts/git_pre_commit_guard.py` | T1 | Pre-commit hook enforcing Quench discipline & active task checks | Standalone script; zero external framework deps |
-| `scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |
+| `plugins/quench-dev-tasks/scripts/init_project.py` | T1 | Project onboarding, environment diagnostics & hook installer | Idempotent; supports `--ide` and `--install-git-hook` |
 | `adapters/` | T4 | Per-vendor HTTP adapter implementations | Each adapter: stateless, vendor-isolated |
 | `tool_surface_constants.py` | T2 | Single Source of Truth for tool names, counts, versions, and MISSING sentinel | Zero third-party dependencies; immutable frozensets |
 | `ide_schema_export.py` | T2 | Pure functions for schema canonicalization, validation, envelope parsing & CLI | Zero dependencies on fastmcp/yaml/subprocess |

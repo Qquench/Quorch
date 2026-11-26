@@ -524,3 +524,40 @@ def test_no_ctx_leak_into_reviewer_jobs():
     assert "tokens" not in fields
 
 
+def test_reconcile_recovers_cancelled_pending_reap(tmp_path):
+    """reconcile_on_load() 纳入异代超时的 CANCELLED_PENDING_REAP 任务，迁至 ORPHANED 并释放 pin。"""
+    from datetime import timedelta
+
+    supervisor = ReviewerJobSupervisor(tmp_path)
+    now_mono = time.monotonic()
+    old_wall = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
+    pending_reap_rec = JobRecord(
+        job_id="reap_job_1",
+        session_id="reap_sess_1",
+        workspace_root=str(tmp_path),
+        mode="critique",
+        owner_pid=999998,
+        owner_boot_nonce="nonce_crashed_proc",
+        generation=2,
+        state=JobState.CANCELLED_PENDING_REAP,
+        created_monotonic=now_mono - 700,
+        updated_monotonic=now_mono - 600,
+        created_wall_utc=old_wall,
+        updated_wall_utc=old_wall,
+        log_path=str(tmp_path / "reap_test.log"),
+        progress=JobProgress(20.0, 15, ReviewerPhase.STREAMING, 1.0),
+        result_ref=None,
+        degraded_reason="cancelled",
+    )
+    supervisor._save_job_record(pending_reap_rec)
+    supervisor.registry.pin(pending_reap_rec.log_path)
+    assert supervisor.registry.is_pinned(pending_reap_rec.log_path)
+
+    orphaned = supervisor.reconcile_on_load()
+    assert "reap_job_1" in orphaned
+    updated = supervisor._load_job_record("reap_sess_1", "reap_job_1")
+    assert updated is not None
+    assert updated.state == JobState.ORPHANED
+    assert not supervisor.registry.is_pinned(pending_reap_rec.log_path)
+
+

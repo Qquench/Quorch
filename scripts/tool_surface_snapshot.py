@@ -12,7 +12,9 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 import sys
+import tempfile
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -229,7 +231,18 @@ def main() -> int:
     if args.emit:
         out_file.parent.mkdir(parents=True, exist_ok=True)
         normalized = rendered.replace("\r\n", "\n")
-        out_file.write_text(normalized, encoding="utf-8", newline="\n")
+        fd, tmp_path = tempfile.mkstemp(dir=str(out_file.parent), prefix=".tmp_surface_", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write(normalized)
+            os.replace(tmp_path, out_file)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
         print(f"ToolSurface snapshot emitted: {out_file} (hash: {report.canonical_hash})")
         return 0
 

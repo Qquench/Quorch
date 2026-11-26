@@ -133,7 +133,7 @@ User Request ──▶ Strategic Plan & Spec (6 Core Fields) ──▶ ✅ Confi
 - **Two Role Topologies (`inverted` & `standard`)**:
   - **Delegated Mode (`inverted`)**: Main IDE session holds frontier architectural context and dispatches `Runner` subagents with zero external API keys (ideal when the host subagent selector does not expose the top frontier tier).
   - **Standard Mode (`standard`)**: Main IDE session uses an agile model for fast execution and triggers a higher-tier `Reviewer` on demand—through a higher-tier IDE subagent, manual same-IDE model switch, or an external frontier API (`OpenAI` / `DeepSeek` / enterprise OpenAI-compatible clusters such as full-weight `vLLM` endpoints) configured in `.agents/quench_stack.local.yaml`.
-- **Vendor-Neutral Reviewer Engine (`ReviewerClient`)**: Backed by an automated AST egress scan (`scripts/check_no_api_bypass.py`) ensuring zero ad-hoc provider API bypasses and zero hardcoded vendor literals in core modules.
+- **Vendor-Neutral Reviewer Engine (`ReviewerClient`)**: Backed by an automated AST egress scan (`plugins/quench-dev-tasks/scripts/check_no_api_bypass.py`) ensuring zero ad-hoc provider API bypasses and zero hardcoded vendor literals in core modules.
 - **Strict Anti-Roleplaying & Structured Contracts**: Non-terminal poll responses obey a strict <= 1KB snapshot contract; terminal verdicts are bounded at 40,000 characters; unavailable engines return explicit degraded cards with empty findings.
 - **Observable Thinking Stream**: Streaming logs under `.agents/logs/reviewer/` with 1024KB hard-cap rotation and cross-chunk redaction while keeping MCP `stdout` strictly pure for JSON-RPC.
 - **Atomic State Machine & Lease Governance**: Cross-process `filelock`, baseline git-diff reconciliation, and six-field schema validation (`Affected Files`, `Root Cause & Target`, `Type Contracts`, `Step-by-Step Instructions`, `Defensive Checks`, `DoD Verification Commands`).
@@ -148,7 +148,7 @@ User Request ──▶ Strategic Plan & Spec (6 Core Fields) ──▶ ✅ Confi
 > **Transparency Notice**  
 > This project originated from my personal engineering workflow while building software on **Windows using Google Antigravity IDE**. The core state machine, task governance engine, and Antigravity hook integration have been battle-tested in daily local development.
 >
-> Support for other host tools (such as **Cursor**, Windsurf, etc.) and POSIX platforms was built against the existing adapter abstractions by AI agents, as I do not actively use those environments day to day. Although the repository includes an automated test suite (**1,318 collected tests** under `pytest`), real-world edge cases across other IDEs or operating systems may still surface.
+> Support for other host tools (such as **Cursor**, Windsurf, etc.) and POSIX platforms was built against the existing adapter abstractions by AI agents, as I do not actively use those environments day to day. Although the repository includes an automated test suite (**1,300+ collected tests** under `pytest`), real-world edge cases across other IDEs or operating systems may still surface.
 >
 > Community feedback, bug reports, and Pull Requests from users of Cursor, Linux, and macOS are warmly appreciated!
 

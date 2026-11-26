@@ -654,3 +654,38 @@ def test_tool_count_preserved_16():
     assert "persist" in ref_props
     assert ref_props["persist"]["default"] is False
     assert "task_file" in ref_props
+
+
+def test_overwrite_preserves_rework_status_and_rejects_disk_duplicates(mock_workspace):
+    """overwrite 省略 status 时保留 STATUS_REWORK 与未改动已完成块，并阻断磁盘已有重复 ID。"""
+    from task_status import STATUS_REWORK
+
+    ws = mock_workspace
+    task_file = "2026-10-20_rework_keep.md"
+    abs_path = os.path.join(ws, "docs", "dev_tasks", task_file)
+
+    write_task_file_guarded(ws, task_file, [SAMPLE_VALID_TASK_1, SAMPLE_VALID_TASK_2], mode="append")
+    text = Path(abs_path).read_text(encoding="utf-8")
+    text = text.replace("### 任务 1.1 ⬜ 待确认", f"### 任务 1.1 {STATUS_REWORK}")
+    text = text.replace("### 任务 1.2 ⬜ 待确认", f"### 任务 1.2 {STATUS_COMPLETED}")
+    Path(abs_path).write_text(text, encoding="utf-8")
+
+    # Omit 'status' on both rework (1.1) and completed (1.2)
+    t1_no_status = {k: v for k, v in SAMPLE_VALID_TASK_1.items() if k != "status"}
+    t1_no_status["root_cause_and_goal"] = "返工修订后目标"
+    t2_no_status = {k: v for k, v in SAMPLE_VALID_TASK_2.items() if k != "status"}
+
+    res = write_task_file_guarded(ws, task_file, [t1_no_status, t2_no_status], mode="overwrite")
+    assert res["ok"] is True
+    new_doc = split_task_document(Path(abs_path).read_text(encoding="utf-8"))
+    assert new_doc.blocks[0].status == STATUS_REWORK
+    assert new_doc.blocks[1].status == STATUS_COMPLETED
+
+    # Duplicate task_id already on disk must raise DuplicateTaskIdError
+    dup_path = os.path.join(ws, "docs", "dev_tasks", "2026-10-20_dup_disk.md")
+    Path(dup_path).write_text(
+        f"### 任务 1.1 {STATUS_COMPLETED} — A\n\n### 任务 1.1 {STATUS_PENDING} — B\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(DuplicateTaskIdError):
+        write_task_file_guarded(ws, "2026-10-20_dup_disk.md", [SAMPLE_VALID_TASK_1], mode="overwrite")

@@ -7,6 +7,7 @@ from enum import Enum
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
 import subprocess
@@ -26,6 +27,21 @@ from observability_policy import MAX_RECORD_BYTES
 from path_guard import is_within_whitelist
 
 MANIFEST_REL_PATH = ".agents/.quorch/manifest.json"
+MANIFEST_WARN_BYTES: Final[int] = 256 * 1024
+MANIFEST_WARN_RECORDS: Final[int] = 500
+_logger = logging.getLogger("quench_dev_tasks.manifest")
+
+
+def _warn_manifest_bounds(record_count: int, total_bytes: int) -> None:
+    """Log warning if manifest exceeds Phase-0 soft warning thresholds."""
+    if total_bytes > MANIFEST_WARN_BYTES or record_count > MANIFEST_WARN_RECORDS:
+        _logger.warning(
+            "Manifest size warning: %d records, %d bytes (thresholds: %d records, %d bytes)",
+            record_count,
+            total_bytes,
+            MANIFEST_WARN_RECORDS,
+            MANIFEST_WARN_BYTES,
+        )
 
 
 class FencedTokenError(Exception):
@@ -66,9 +82,12 @@ def compute_manifest_metrics(manifest: Manifest) -> ManifestMetrics:
     records_dict = {tid: asdict(rec) for tid, rec in manifest.records.items()}
     payload = {"schema_version": manifest.schema_version, "records": records_dict}
     content_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    total_bytes = len(content_bytes)
+    record_count = len(manifest.records)
+    _warn_manifest_bounds(record_count, total_bytes)
     return ManifestMetrics(
-        record_count=len(manifest.records),
-        total_bytes=len(content_bytes),
+        record_count=record_count,
+        total_bytes=total_bytes,
         max_record_bytes=MAX_RECORD_BYTES,
     )
 
@@ -231,6 +250,7 @@ def atomic_replace_manifest(workspace_root: str, manifest: Manifest) -> None:
         "records": records_dict,
     }
     content = json.dumps(payload, ensure_ascii=False, indent=2)
+    _warn_manifest_bounds(len(records_dict), len(content.encode("utf-8")))
 
     prefix = f".tmp_manifest_{os.getpid()}_"
     temp_fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix=prefix, suffix=".tmp")
@@ -256,11 +276,17 @@ def _resolve_namespaced_id(manifest: Manifest, task_id: str, md_path: Optional[s
     if md_path:
         stem = Path(md_path).stem
         return f"{stem}::{task_id}"
-    # 若未传 md_path，尝试在 manifest 现有记录中匹配
+    # 若未传 md_path，尝试在 manifest 现有记录中匹配（优先活跃记录，避免被已释放墓碑遮蔽）
     suffix = f"::{task_id}"
-    for k in manifest.records:
-        if k == task_id or k.endswith(suffix):
-            return k
+    matches = [
+        (k, rec) for k, rec in manifest.records.items()
+        if k == task_id or k.endswith(suffix)
+    ]
+    if matches:
+        active = [k for k, rec in matches if not rec.released]
+        if active:
+            return active[-1]
+        return matches[-1][0]
     return task_id
 
 
@@ -399,7 +425,20 @@ def compare_and_swap(
         return False
 
     def _mutator(manifest: Manifest) -> Tuple[Manifest, bool]:
-        namespaced_id = _resolve_namespaced_id(manifest, task_id)
+        if "::" not in task_id:
+            suffix = f"::{task_id}"
+            exact_cand = next(
+                (
+                    k for k, rec in manifest.records.items()
+                    if (k == task_id or k.endswith(suffix))
+                    and not rec.released
+                    and rec.generation == expected_generation
+                ),
+                None,
+            )
+            namespaced_id = exact_cand if exact_cand is not None else _resolve_namespaced_id(manifest, task_id)
+        else:
+            namespaced_id = task_id
         record = manifest.records.get(namespaced_id)
         if record is None:
             return manifest, False
@@ -433,7 +472,23 @@ def release_lease(
 ) -> bool:
     """释放租约：采用留痕墓碑（released=True），保留 generation，代际永不回退 (B5)。"""
     def _mutator(manifest: Manifest) -> Tuple[Manifest, bool]:
-        namespaced_id = _resolve_namespaced_id(manifest, task_id)
+        if "::" not in task_id:
+            suffix = f"::{task_id}"
+            cands = [
+                (k, rec) for k, rec in manifest.records.items()
+                if (k == task_id or k.endswith(suffix))
+                and rec.generation == generation
+                and rec.holder_token == holder_token
+            ]
+            active_cand = next((k for k, rec in cands if not rec.released), None)
+            if active_cand is not None:
+                namespaced_id = active_cand
+            elif cands:
+                namespaced_id = cands[-1][0]
+            else:
+                namespaced_id = _resolve_namespaced_id(manifest, task_id)
+        else:
+            namespaced_id = task_id
         record = manifest.records.get(namespaced_id)
         if record is None:
             return manifest, False
@@ -476,7 +531,21 @@ def touch_heartbeat(
     若代际失效或租约已释放，返回 False（fail-closed），防已回收的旧持有者误续命。
     """
     def _mutator(manifest: Manifest) -> Tuple[Manifest, bool]:
-        namespaced_id = _resolve_namespaced_id(manifest, task_id)
+        if "::" not in task_id:
+            suffix = f"::{task_id}"
+            exact_cand = next(
+                (
+                    k for k, rec in manifest.records.items()
+                    if (k == task_id or k.endswith(suffix))
+                    and not rec.released
+                    and rec.generation == generation
+                    and rec.holder_token == holder_token
+                ),
+                None,
+            )
+            namespaced_id = exact_cand if exact_cand is not None else _resolve_namespaced_id(manifest, task_id)
+        else:
+            namespaced_id = task_id
         record = manifest.records.get(namespaced_id)
         if record is None:
             return manifest, False
@@ -567,10 +636,25 @@ def register_proposal(workspace_root: str, *, task_id: str, md_path: str) -> str
     return mutate_manifest_under_lock(workspace_root, _mutator)
 
 
+def _safe_relpath(target_path: str, real_ws: str) -> str:
+    """Compute workspace-relative POSIX path with realpath + ValueError protection and leading './' stripping."""
+    real_target = os.path.realpath(os.path.abspath(target_path))
+    try:
+        rel = os.path.relpath(real_target, real_ws).replace("\\", "/")
+    except ValueError:
+        rel = real_target.replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    return rel
+
+
 def _get_git_tracked_files(workspace_root: str, target_dir: str) -> set[str]:
     """获取 target_dir 下被 Git 明确跟踪的文件集合（相对 workspace_root）。"""
     try:
-        rel_target_dir = os.path.relpath(target_dir, workspace_root).replace("\\", "/")
+        real_ws = os.path.realpath(os.path.abspath(workspace_root))
+        rel_target_dir = _safe_relpath(target_dir, real_ws)
+        if rel_target_dir.startswith(".."):
+            return set()
         res = subprocess.run(
             ["git", "-C", workspace_root, "ls-files", rel_target_dir],
             capture_output=True,
@@ -581,7 +665,14 @@ def _get_git_tracked_files(workspace_root: str, target_dir: str) -> set[str]:
             timeout=5.0,
         )
         if res.returncode == 0:
-            return {line.strip().replace("\\", "/") for line in res.stdout.splitlines() if line.strip()}
+            cleaned = set()
+            for line in res.stdout.splitlines():
+                item = line.strip().replace("\\", "/")
+                while item.startswith("./"):
+                    item = item[2:]
+                if item:
+                    cleaned.add(item)
+            return cleaned
         return set()
     except Exception:
         return set()
@@ -593,6 +684,7 @@ def reconcile_workspace(workspace_root: str, dev_tasks_dir: str) -> ReconcileRep
     if not os.path.isdir(resolved_dir):
         return ReconcileReport(entries=(), bypass_queue=(), drift_queue=(), matched_queue=())
 
+    real_ws = os.path.realpath(os.path.abspath(workspace_root))
     manifest = load_manifest(workspace_root)
     git_head_sha, _ = _get_git_metadata(workspace_root)
     tracked_files = _get_git_tracked_files(workspace_root, resolved_dir)
@@ -608,7 +700,7 @@ def reconcile_workspace(workspace_root: str, dev_tasks_dir: str) -> ReconcileRep
         if basename.lower() == "readme.md":
             continue
 
-        rel_path = os.path.relpath(md_path, workspace_root).replace("\\", "/")
+        rel_path = _safe_relpath(md_path, real_ws)
         stem = Path(md_path).stem
 
         try:
@@ -850,7 +942,7 @@ def capture_baseline(
         dirs[:] = [
             d for d in dirs if d not in EXCLUDED_WORKSPACE_DIRS and not d.startswith(".tmp_")
         ]
-        rel_root = os.path.relpath(root, real_ws).replace("\\", "/")
+        rel_root = _safe_relpath(root, real_ws)
         if rel_root.startswith(".agents/.quorch/baselines"):
             continue
 
@@ -858,7 +950,7 @@ def capture_baseline(
             if fname.endswith(".lock") or fname.endswith(".tmp") or fname.startswith(".tmp_"):
                 continue
             abs_path = os.path.join(root, fname)
-            rel_path = os.path.relpath(abs_path, real_ws).replace("\\", "/")
+            rel_path = _safe_relpath(abs_path, real_ws)
             try:
                 st = os.stat(abs_path)
                 mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
@@ -989,7 +1081,7 @@ def reconcile_workspace_against_whitelist(
         dirs[:] = [
             d for d in dirs if d not in EXCLUDED_WORKSPACE_DIRS and not d.startswith(".tmp_")
         ]
-        rel_root = os.path.relpath(root, real_ws).replace("\\", "/")
+        rel_root = _safe_relpath(root, real_ws)
         if rel_root.startswith(".agents/.quorch/baselines"):
             continue
 
@@ -997,7 +1089,7 @@ def reconcile_workspace_against_whitelist(
             if fname.endswith(".lock") or fname.endswith(".tmp") or fname.startswith(".tmp_"):
                 continue
             abs_p = os.path.join(root, fname)
-            rel_p = os.path.relpath(abs_p, real_ws).replace("\\", "/")
+            rel_p = _safe_relpath(abs_p, real_ws)
             if rel_p not in snapshot.fingerprints:
                 if is_within_whitelist(rel_p, effective_unmanaged, case_sensitive=cs):
                     continue

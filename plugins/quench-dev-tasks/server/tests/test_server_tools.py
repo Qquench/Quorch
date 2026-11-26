@@ -619,6 +619,102 @@ pytest
     assert rec_after.released is False
 
 
+@pytest.mark.anyio
+async def test_dev_reviewer_poll_with_quench_stack_yaml_preserves_contracts(mock_workspace):
+    """Task 36.1: With quench_stack.yaml present, non-terminal poll stays 6 keys/<=1024B and terminal preserves POLL_TERMINAL_FIELDS."""
+    from reviewer_jobs import (
+        MAX_NONTERMINAL_SNAPSHOT_BYTES,
+        POLL_NONTERMINAL_FIELDS,
+        POLL_TERMINAL_FIELDS,
+        JobState,
+        ReviewerJobSupervisor,
+        _durable_write_json,
+        canonical_snapshot_bytes,
+    )
+    from runtime_mode import load_runtime_mode, update_runtime_mode
+
+    ws = mock_workspace
+    supervisor = ReviewerJobSupervisor.for_workspace(ws)
+    rec = supervisor.submit({"query": "q", "session_id": "yaml_poll_sess"})
+
+    # 1. Non-terminal QUEUED: strictly 6 keys, no harness_next_action, <= 1024B
+    non_term = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="yaml_poll_sess",
+        wait_max_s=0,
+    )
+    assert set(non_term.keys()) == POLL_NONTERMINAL_FIELDS
+    assert "harness_next_action" not in non_term
+    assert canonical_snapshot_bytes(non_term) <= MAX_NONTERMINAL_SNAPSHOT_BYTES
+
+    # 2. Non-terminal RUNNING: strictly 6 keys, <= 1024B
+    supervisor._cas_transition(rec.session_id, rec.job_id, JobState.QUEUED, JobState.RUNNING)
+    non_term_run = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="yaml_poll_sess",
+        wait_max_s=0,
+    )
+    assert set(non_term_run.keys()) == POLL_NONTERMINAL_FIELDS
+    assert "harness_next_action" not in non_term_run
+    assert canonical_snapshot_bytes(non_term_run) <= MAX_NONTERMINAL_SNAPSHOT_BYTES
+
+    # 3. Terminal FAILED: preserves POLL_TERMINAL_FIELDS and does NOT consume stop_at='after_review'
+    update_runtime_mode(ws, stop_at="after_review", external_api_available=True)
+    rec_fail = supervisor.submit({"query": "q2", "session_id": "yaml_poll_sess"})
+    supervisor._cas_transition(
+        rec_fail.session_id,
+        rec_fail.job_id,
+        JobState.QUEUED,
+        JobState.FAILED,
+        updates={"degraded_reason": "network"},
+    )
+    term_fail = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec_fail.job_id,
+        session_id="yaml_poll_sess",
+    )
+    assert set(term_fail.keys()) == POLL_TERMINAL_FIELDS
+    assert term_fail["state"] == "FAILED"
+    assert load_runtime_mode(ws, True).autopilot.consumed is False
+
+    # 4. Terminal COMPLETED: preserves POLL_TERMINAL_FIELDS and consumes stop_at='after_review'
+    dev_tasks_propose(
+        ws,
+        "2026-11-26_poll_batch.md",
+        [
+            {
+                "id": "1.1",
+                "title": "Poll Review Target",
+                "affected_files": ["[MODIFY] src/a.py"],
+                "root_cause_and_goal": "Goal",
+                "type_contracts": "None",
+                "steps": ["1. Step"],
+                "defensive_checks": ["- Check"],
+                "dod_commands": ["pytest"],
+            }
+        ],
+    )
+    res_path = supervisor._get_result_path(rec.session_id, rec.job_id)
+    _durable_write_json(res_path, {"verdict": "PASS", "findings": "All good", "usage": {"total_tokens": 10}})
+    supervisor._cas_transition(
+        rec.session_id,
+        rec.job_id,
+        JobState.RUNNING,
+        JobState.COMPLETED,
+        updates={"result_ref": str(res_path)},
+    )
+    term_ok = await server.dev_reviewer_poll(
+        workspace_root=ws,
+        job_id=rec.job_id,
+        session_id="yaml_poll_sess",
+    )
+    assert set(term_ok.keys()) == POLL_TERMINAL_FIELDS
+    assert term_ok["state"] == "COMPLETED"
+    assert load_runtime_mode(ws, True).autopilot.consumed is True
+
+
 
 
 

@@ -3,6 +3,40 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-26] 2026-11-26_v1_36_batch6_1_shell_test_alignment.md
+
+- **Task 36.13**: 对齐 test_v1_36_batch2_scope_and_config.py:184 Shell 兜底保护断言与既有契约
+
+## [2026-11-26] 2026-11-26_v1_36_batch6_tier2_regression_closure.md
+
+- **Task 36.12**: 收口全量 Tier-2 回归发现的 Tier-1 采集耗时、Form C 非终态、SPDX 头与 Shell 兜底标记
+
+## [2026-11-26] 2026-11-26_v1_36_batch5_tooling_eager_ci_and_docs.md
+
+- **Task 36.10**: 修复 config_sync 16 个 Eager 工具同步、init_project 只读诊断与 CLI/门禁脚本加固
+- **Task 36.11**: 对齐配置模板/三端 AGENTS.md/架构协议文档，补齐打包依赖、CI 静态门禁与资产快照
+
+## [2026-11-26] 2026-11-26_v1_36_batch4_reviewer_jobs_and_engine.md
+
+- **Task 36.8**: 修复 reviewer_jobs 孤儿态回弹 RUNNING、on_prog 无锁漏刷墙钟与取消/恢复缺陷
+- **Task 36.9**: 打通流式引擎异常继承/断流、RotatingFileSink 线程锁与零 stat 日志/审计闭环
+
+## [2026-11-26] 2026-11-26_v1_36_batch3_state_machine_and_leases.md
+
+- **Task 36.6**: 统一 Markdown->Manifest 锁序，修复 reclaim 半提交、租约伪造与裸 ID 墓碑遮蔽
+- **Task 36.7**: 加固 state_machine 围栏/BOM 保全、normalize_status 词边界、task_writer 保态与原子写
+
+## [2026-11-26] 2026-11-26_v1_36_batch2_scope_guards_and_config_safety.md
+
+- **Task 36.4**: 封堵物理范围守卫（PreToolUse / PathGuard / Pre-Commit）逃逸并加固 Stop Hook 熔断精度
+- **Task 36.5**: 加固 project_config 本地覆盖单调防线/迁移锁与 code_explorer 软链接沙箱
+
+## [2026-11-26] 2026-11-26_v1_36_batch1_autopilot_and_gateway_contracts.md
+
+- **Task 36.1**: 修复 Autopilot CONFIRM 不可达、dev_reviewer_poll 非终态契约污染与归档/计数断路
+- **Task 36.2**: 加固 runtime_mode 锁重入/非字典容错与 response_compactor 阶梯钳制精度
+- **Task 36.3**: 收紧 server.py 任务路径工作区禁锢、DoD AST 断言检测与 UTC 时间标准
+
 ## [2026-11-22] 2026-11-22_pyright_pyrefly_dual_compat.md
 
 - **Task 1.1**: 在根与服务端 pyproject.toml 中同步补充 [tool.pyright] extraPaths 与 PEP 562 兼容配置

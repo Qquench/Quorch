@@ -3,17 +3,21 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+from contextlib import nullcontext
 from datetime import datetime, timezone, timedelta
 import glob
 import hashlib
 import json
+import logging
 import math
 import os
 import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import filelock
 import tempfile
 import time
@@ -121,7 +125,12 @@ from manifest import (
     capture_baseline,
     get_baseline_path,
 )
-from manifest_lease import reclaim_stale_task, probe_lease_health, HealthVerdict
+from manifest_lease import (
+    reclaim_stale_task,
+    probe_lease_health,
+    HealthVerdict,
+    extract_session_id_from_holder_token,
+)
 from runtime_mode import (
     load_runtime_mode,
     update_runtime_mode,
@@ -154,34 +163,65 @@ from task_writer import (
 )
 
 mcp = FastMCP("quench-dev-tasks")
+_logger = logging.getLogger("quench_dev_tasks.server")
+
+
+def _parse_utc_timestamp(raw_ts: str) -> datetime:
+    """Parse ISO-8601 timestamp string into timezone-aware UTC datetime (naive treated as UTC)."""
+    s = str(raw_ts).strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _resolve_task_file_path(workspace_root: str, task_file: str, config: Optional[Any] = None) -> str:
     """Resolve task file name or relative path to absolute path. / 辅助函数：将任务文件名或相对路径解析为绝对路径。"""
+    if not task_file or not str(task_file).strip() or "\x00" in str(task_file):
+        raise ValueError(f"Task file path escapes workspace_root: {task_file}")
+
     if config is None:
         try:
             config = load_project_config(workspace_root)
-        except Exception:
+        except Exception as e:
+            _logger.warning("load_project_config fallback in _resolve_task_file_path: %s", e)
             config = QuenchStackConfig(
                 workspace_root=workspace_root,
                 project_name=os.path.basename(workspace_root) or "default",
             )
-    dev_tasks_dir = config.resolve_path("dev_tasks_dir")
+
+    real_ws = os.path.realpath(os.path.abspath(workspace_root))
+
+    def _assert_within_ws(cand_path: str) -> str:
+        real_cand = os.path.realpath(os.path.abspath(cand_path))
+        try:
+            common = os.path.commonpath([real_ws, real_cand])
+        except ValueError as exc:
+            raise ValueError(f"Task file path escapes workspace_root: {task_file}") from exc
+        if os.path.normcase(common) != os.path.normcase(real_ws):
+            raise ValueError(f"Task file path escapes workspace_root: {task_file}")
+        return real_cand
 
     if os.path.isabs(task_file):
-        return os.path.normpath(task_file)
+        return _assert_within_ws(task_file)
+
+    dev_tasks_dir = config.resolve_path("dev_tasks_dir")
 
     # 优先在 dev_tasks_dir 下找
     cand = os.path.normpath(os.path.join(dev_tasks_dir, task_file))
-    if os.path.isfile(cand):
-        return cand
+    real_cand = _assert_within_ws(cand)
+    if os.path.isfile(real_cand):
+        return real_cand
 
     # 其次在 workspace_root 下找
     cand_root = os.path.normpath(os.path.join(config.workspace_root, task_file))
-    if os.path.isfile(cand_root):
-        return cand_root
+    real_root = _assert_within_ws(cand_root)
+    if os.path.isfile(real_root):
+        return real_root
 
-    return cand
+    return real_cand
 
 
 # _render_task_markdown is imported from task_writer above
@@ -223,6 +263,87 @@ _TEST_FILE_PATTERN = re.compile(r"(^|/)tests?/.*test_.*\.py$|(^|/).*_test\.py$")
 _ASSERTION_MARKERS = ("assert ", "assert(", "pytest.raises")
 
 
+def _extract_python_assertion_markers(source_text: str) -> list[str]:
+    """Extract real assertion markers from Python source via AST (with dedent & lexical comment-filtered fallback)."""
+    if not source_text or not source_text.strip():
+        return []
+
+    markers: list[str] = []
+
+    def _add_marker(m: str) -> None:
+        if m not in markers:
+            markers.append(m)
+
+    def _scan_ast(tree: ast.AST) -> None:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assert):
+                _add_marker("assert ")
+            elif isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    if func.id.startswith("assert_"):
+                        _add_marker(f"{func.id}(")
+                elif isinstance(func, ast.Attribute):
+                    if (
+                        isinstance(func.value, ast.Name)
+                        and func.value.id == "pytest"
+                        and func.attr in ("raises", "warns")
+                    ):
+                        _add_marker(f"pytest.{func.attr}")
+                    elif (
+                        isinstance(func.value, ast.Name)
+                        and func.value.id in ("self", "cls")
+                        and func.attr.startswith("assert")
+                    ):
+                        _add_marker(f"{func.value.id}.{func.attr}")
+                    elif func.attr.startswith("assert_"):
+                        _add_marker(f".{func.attr}(")
+
+    for candidate in (source_text, textwrap.dedent(source_text)):
+        try:
+            tree = ast.parse(candidate)
+            _scan_ast(tree)
+            return markers
+        except SyntaxError:
+            continue
+
+    non_comment_lines: list[str] = []
+    for raw_line in source_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith(('"""', "'''")) and (
+            stripped.endswith(('"""', "'''")) and len(stripped) >= 6
+        ):
+            continue
+        try:
+            line_tree = ast.parse(stripped)
+            _scan_ast(line_tree)
+            continue
+        except SyntaxError:
+            non_comment_lines.append(stripped)
+
+    if non_comment_lines:
+        for line in non_comment_lines:
+            cleaned = re.sub(r"(['\"])(?:\\.|(?!\1).)*\1", "", line)
+            cleaned = cleaned.split("#", 1)[0]
+            if re.search(r"\bassert\b", cleaned):
+                _add_marker("assert ")
+            if re.search(r"\bpytest\.(?:raises|warns)\s*\(", cleaned):
+                _add_marker("pytest.raises")
+            if re.search(r"\b(?:self|cls)\.assert\w*\s*\(", cleaned):
+                _add_marker("self.assert")
+            if re.search(r"\bassert_\w+\s*\(", cleaned):
+                _add_marker("assert_(")
+
+    return markers
+
+
+def _python_source_has_real_assertions(source_text: str) -> bool:
+    """Return True if Python source contains real assertions (ast.Assert, pytest.raises/warns, self.assert*, assert_*)."""
+    return bool(_extract_python_assertion_markers(source_text))
+
+
 def _append_hook_log(workspace_root: str, message: str) -> None:
     """向 .agents/.quench_hook.log 安全追加单条日志（多进程幂等安全）。"""
     try:
@@ -234,11 +355,11 @@ def _append_hook_log(workspace_root: str, message: str) -> None:
             agents_dir = os.path.join(workspace_root, ".agents")
             os.makedirs(agents_dir, exist_ok=True)
             log_file = os.path.join(agents_dir, ".quench_hook.log")
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{now_str} [INFO] {message}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("Failed to append hook log: %s", e)
 
 
 def check_shell_write_isolation(command: str, workspace_root: str, dev_tasks_dir: str = "docs/dev_tasks") -> Optional[str]:
@@ -261,10 +382,25 @@ def _audit_test_changes(
     degraded = False
     messages: list[str] = []
 
+    show_prefix = ""
+    try:
+        res_prefix = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "-C", workspace_root, "rev-parse", "--show-prefix"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            check=False,
+        )
+        if res_prefix.returncode == 0:
+            show_prefix = res_prefix.stdout.strip().replace("\\", "/")
+    except Exception as e:
+        _logger.warning("git rev-parse --show-prefix failed: %s", e)
+
     # 1. 运行 git status --porcelain -u 捕获所有变更与未跟踪文件（精确展开子文件）
     try:
         res_status = subprocess.run(
-            ["git", "-C", workspace_root, "status", "--porcelain", "-u"],
+            ["git", "-c", "core.quotepath=false", "-C", workspace_root, "status", "--porcelain", "-u", "--", "."],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -283,6 +419,10 @@ def _audit_test_changes(
                 if " -> " in filepath:
                     filepath = filepath.split(" -> ")[-1].strip().strip('"')
                 norm_p = filepath.replace("\\", "/")
+                if show_prefix and norm_p.startswith(show_prefix):
+                    norm_p = norm_p[len(show_prefix):]
+                if not norm_p:
+                    continue
                 if code == "??":
                     if norm_p.endswith("/"):
                         abs_dir = os.path.join(workspace_root, norm_p)
@@ -302,8 +442,8 @@ def _audit_test_changes(
     # 2. 补采 git diff --name-only 与 git diff --cached --name-only
     if not degraded:
         for diff_cmd in (
-            ["git", "-C", workspace_root, "diff", "--name-only"],
-            ["git", "-C", workspace_root, "diff", "--cached", "--name-only"],
+            ["git", "-c", "core.quotepath=false", "-C", workspace_root, "diff", "--relative", "--name-only"],
+            ["git", "-c", "core.quotepath=false", "-C", workspace_root, "diff", "--relative", "--cached", "--name-only"],
         ):
             try:
                 res_diff = subprocess.run(
@@ -334,7 +474,7 @@ def _audit_test_changes(
         elif hasattr(config, "is_path_governed") and config.is_path_governed(norm_f):
             governed_code_changed.append(norm_f)
 
-    # 4. 扫描测试文件中的断言标记
+    # 4. 扫描测试文件中的断言标记（AST 真实断言检查）
     assertions_found = False
     detected_markers: list[str] = []
 
@@ -347,18 +487,20 @@ def _audit_test_changes(
                     try:
                         with open(abs_tf, "r", encoding="utf-8", errors="ignore") as f:
                             content = f.read()
-                        for marker in _ASSERTION_MARKERS:
-                            if marker in content:
-                                assertions_found = True
+                        tf_markers = _extract_python_assertion_markers(content)
+                        if tf_markers:
+                            assertions_found = True
+                            for marker in tf_markers:
                                 if marker not in detected_markers:
                                     detected_markers.append(marker)
                     except Exception as e:
                         messages.append(f"Failed to read untracked test file {tf}: {e}")
             else:
                 # 已跟踪测试文件：仅扫描 diff 新增行 (--unified=0)
+                added_lines: list[str] = []
                 for diff_cmd in (
-                    ["git", "-C", workspace_root, "diff", "-U0", "--", tf],
-                    ["git", "-C", workspace_root, "diff", "--cached", "-U0", "--", tf],
+                    ["git", "-c", "core.quotepath=false", "-C", workspace_root, "diff", "--relative", "-U0", "--", tf],
+                    ["git", "-c", "core.quotepath=false", "-C", workspace_root, "diff", "--relative", "--cached", "-U0", "--", tf],
                 ):
                     try:
                         res = subprocess.run(
@@ -372,14 +514,16 @@ def _audit_test_changes(
                         if res.returncode == 0:
                             for line in res.stdout.splitlines():
                                 if line.startswith("+") and not line.startswith("+++"):
-                                    added_content = line[1:]
-                                    for marker in _ASSERTION_MARKERS:
-                                        if marker in added_content:
-                                            assertions_found = True
-                                            if marker not in detected_markers:
-                                                detected_markers.append(marker)
+                                    added_lines.append(line[1:])
                     except Exception as e:
                         messages.append(f"Failed to diff test file {tf}: {e}")
+                if added_lines:
+                    tf_markers = _extract_python_assertion_markers("\n".join(added_lines))
+                    if tf_markers:
+                        assertions_found = True
+                        for marker in tf_markers:
+                            if marker not in detected_markers:
+                                detected_markers.append(marker)
 
     # 5. 豁免判定
     exempted = False
@@ -684,11 +828,11 @@ def dev_tasks_status(
                 is_expired = False
                 if expires_at:
                     try:
-                        exp_dt = datetime.fromisoformat(expires_at)
-                        exp_dt_utc = exp_dt.astimezone(timezone.utc)
+                        exp_dt_utc = _parse_utc_timestamp(expires_at)
                         if datetime.now(timezone.utc) > exp_dt_utc:
                             is_expired = True
-                    except Exception:
+                    except Exception as e:
+                        _logger.warning("Invalid bypass expires_at in dev_tasks_status: %s", e)
                         is_expired = True
                 if not is_expired:
                     bypass_status = {
@@ -1155,9 +1299,13 @@ def _resolve_record_source(rec: Mapping[str, Any]) -> tuple[Optional[str], Optio
     source 缺失（key 不存在或 None）→ ("reviewer_client", None)。
     source 存在但非 str 或为空串 → (None, "record_unparsable")。
     """
-    if "source" not in rec or rec["source"] is None:
+    payload_map = rec.get("payload") if isinstance(rec.get("payload"), Mapping) else {}
+    if "source" in rec and rec["source"] is not None:
+        val = rec["source"]
+    elif "source" in payload_map and payload_map["source"] is not None:
+        val = payload_map["source"]
+    else:
         return ("reviewer_client", None)
-    val = rec["source"]
     if not isinstance(val, str) or not val.strip():
         return (None, "record_unparsable")
     return (val.strip(), None)
@@ -1193,15 +1341,19 @@ def _check_audit_gate(
                 managed_paths = config.governance_scope.get("managed_paths", [])
             task_scoped_files = _extract_task_scoped_files(task)
             if not task_scoped_files:
-                tf_abs = _resolve_task_file_path(workspace_root, task_file) if "_resolve_task_file_path" in globals() else os.path.join(workspace_root, task_file)
-                if os.path.isfile(tf_abs):
+                try:
+                    tf_abs = _resolve_task_file_path(workspace_root, task_file) if "_resolve_task_file_path" in globals() else os.path.join(workspace_root, task_file)
+                except ValueError as ve:
+                    _logger.warning("Unsafe task_file in _check_audit_gate: %s", ve)
+                    tf_abs = ""
+                if tf_abs and os.path.isfile(tf_abs):
                     try:
                         with open(tf_abs, "r", encoding="utf-8") as f:
                             c = f.read()
                         raw_wl = extract_task_whitelist(c, str(getattr(task, "id", "")))
                         task_scoped_files = _extract_task_scoped_files({"affected_files": raw_wl})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _logger.warning("Failed to extract task whitelist in _check_audit_gate: %s", e)
 
             if not any(_managed_path_matches(f, managed_paths) for f in task_scoped_files):
                 return {
@@ -1224,10 +1376,11 @@ def _check_audit_gate(
                         is_expired = False
                         if expires_at:
                             try:
-                                exp_dt = datetime.fromisoformat(expires_at).astimezone(timezone.utc)
+                                exp_dt = _parse_utc_timestamp(expires_at)
                                 if datetime.now(timezone.utc) > exp_dt:
                                     is_expired = True
-                            except Exception:
+                            except Exception as e:
+                                _logger.warning("Invalid bypass expires_at in _check_audit_gate: %s", e)
                                 is_expired = True
                         if not is_expired:
                             return {
@@ -1304,15 +1457,17 @@ def _check_audit_gate(
                 "parse_skipped_lines": parse_skipped_lines,
             }
 
-        # 逆序匹配（最新记录优先）
+        # 逆序匹配（最新记录优先；兼容顶层与 FileVerdictAuditSink 嵌套 payload 结构）
         matching_rec = None
         for rec in reversed(records):
             rec_refs = set()
-            if "artifact_ref" in rec and rec["artifact_ref"]:
-                rec_refs.add(str(rec["artifact_ref"]).strip())
-            if "context_files" in rec and isinstance(rec["context_files"], (list, tuple)):
-                for cf in rec["context_files"]:
-                    rec_refs.add(str(cf).strip())
+            payload_obj = rec.get("payload") if isinstance(rec.get("payload"), Mapping) else {}
+            for container in (rec, payload_obj):
+                if "artifact_ref" in container and container["artifact_ref"]:
+                    rec_refs.add(str(container["artifact_ref"]).strip())
+                if "context_files" in container and isinstance(container["context_files"], (list, tuple)):
+                    for cf in container["context_files"]:
+                        rec_refs.add(str(cf).strip())
             if target_ref in rec_refs:
                 matching_rec = rec
                 break
@@ -1320,13 +1475,20 @@ def _check_audit_gate(
         if matching_rec is not None:
             line_no = matching_rec.get("_line_no")
             audit_ref_val = f"{rel_log_path}#{line_no}" if line_no is not None else rel_log_path
+            payload_map = matching_rec.get("payload") if isinstance(matching_rec.get("payload"), Mapping) else {}
 
-            # 解析时间戳
+            # 解析时间戳（兼容顶层 ts 与嵌套 payload 字段）
             raw_ts = (
                 matching_rec.get("updated_wall_utc")
                 or matching_rec.get("created_wall_utc")
                 or matching_rec.get("timestamp")
                 or matching_rec.get("created_at")
+                or matching_rec.get("ts")
+                or payload_map.get("updated_wall_utc")
+                or payload_map.get("created_wall_utc")
+                or payload_map.get("timestamp")
+                or payload_map.get("created_at")
+                or payload_map.get("ts")
             )
             parsed_ts = None
             if raw_ts:
@@ -1398,7 +1560,11 @@ def _check_audit_gate(
                 }
 
             # auto_fallback 模式源硬门禁: auto_fallback 状态下的非 reviewer_client 凭据永不接受
-            effective_rec_mode_source = matching_rec.get("mode_source") or current_mode_source
+            effective_rec_mode_source = (
+                matching_rec.get("mode_source")
+                or payload_map.get("mode_source")
+                or current_mode_source
+            )
             if effective_rec_mode_source == "auto_fallback" and source != "reviewer_client":
                 return {
                     "allowed": False,
@@ -1409,7 +1575,8 @@ def _check_audit_gate(
                 }
 
             # verdict rework 硬拒绝
-            if matching_rec.get("verdict") == "rework":
+            rec_verdict = matching_rec.get("verdict") or payload_map.get("verdict")
+            if rec_verdict == "rework":
                 return {
                     "allowed": False,
                     "reason": "record_rework",
@@ -1419,7 +1586,10 @@ def _check_audit_gate(
                 }
 
             # 降级判断
-            is_degraded = bool(matching_rec.get("degraded_reason")) or matching_rec.get("status") == "degraded" or matching_rec.get("state") == "degraded"
+            rec_degraded_reason = matching_rec.get("degraded_reason") or payload_map.get("degraded_reason")
+            rec_status = matching_rec.get("status") or payload_map.get("status")
+            rec_state = matching_rec.get("state") or payload_map.get("state")
+            is_degraded = bool(rec_degraded_reason) or rec_status == "degraded" or rec_state == "degraded"
 
             # step 7: 命中 ∧ require_undegraded ∧ 有 degraded_reason ∧ ts 可解析 ∧ record_ts ≤ now + tolerance ∧ _freshness_ok is True → record_degraded [effective_on_degraded]
             if policy.require_undegraded_record and is_degraded:
@@ -1537,21 +1707,35 @@ def _inject_harness_next_action(
 
         resolved_task_file = task_file or snapshot.autopilot.task_file
         dev_tasks_dir = config.resolve_path("dev_tasks_dir")
-        if not resolved_task_file and os.path.isdir(dev_tasks_dir):
+        resolved_exists = False
+        if resolved_task_file:
+            try:
+                tf_check = _resolve_task_file_path(workspace_root, resolved_task_file, config=config)
+                resolved_exists = os.path.isfile(tf_check)
+            except Exception:
+                resolved_exists = False
+
+        if (not resolved_task_file or (not resolved_exists and tool_name != "dev_tasks_archive")) and os.path.isdir(dev_tasks_dir):
             md_files = [
                 f for f in glob.glob(os.path.join(dev_tasks_dir, "*.md"))
-                if "archive" not in f.replace("\\", "/").lower()
+                if "archive" not in os.path.relpath(f, dev_tasks_dir).replace("\\", "/").lower()
                 and is_task_file(os.path.relpath(f, workspace_root))
             ]
             if md_files:
                 md_files.sort(key=os.path.getmtime, reverse=True)
                 resolved_task_file = os.path.relpath(md_files[0], workspace_root).replace("\\", "/")
+            elif not resolved_exists:
+                resolved_task_file = None
 
         task_states: List[TaskStateSnapshot] = []
         curr_batch_files: List[str] = []
         if resolved_task_file:
-            tf_abs = _resolve_task_file_path(workspace_root, resolved_task_file, config=config)
-            if os.path.isfile(tf_abs):
+            try:
+                tf_abs = _resolve_task_file_path(workspace_root, resolved_task_file, config=config)
+            except ValueError as ve:
+                _logger.warning("Unsafe resolved_task_file in _inject_harness_next_action: %s", ve)
+                tf_abs = ""
+            if tf_abs and os.path.isfile(tf_abs):
                 try:
                     tasks = parse_task_file(tf_abs)
                     for pt in tasks:
@@ -1559,8 +1743,8 @@ def _inject_harness_next_action(
                             TaskStateSnapshot(task_id=str(pt.id), status=pt.status, title=pt.title)
                         )
                     curr_batch_files = _extract_batch_scoped_files(tf_abs, tasks)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.warning("Failed to parse task file in _inject_harness_next_action: %s", e)
 
         prev_batch_files: List[str] = []
         if snapshot.effective_mode == "inverted":
@@ -1604,6 +1788,7 @@ def _inject_harness_next_action(
             runner_subagent_model_hint=snapshot.runner_subagent_model_hint,
             prev_batch_files=prev_batch_files,
             curr_batch_files=curr_batch_files,
+            cumulative_runner_tasks=snapshot.autopilot.cumulative_runner_tasks,
         )
 
         if consume_stop_at:
@@ -1634,6 +1819,7 @@ def _inject_harness_next_action(
                     runner_subagent_model_hint=fresh_snap.runner_subagent_model_hint,
                     prev_batch_files=prev_batch_files,
                     curr_batch_files=curr_batch_files,
+                    cumulative_runner_tasks=fresh_snap.autopilot.cumulative_runner_tasks,
                 )
                 action = replace(
                     fresh_action,
@@ -1648,6 +1834,7 @@ def _inject_harness_next_action(
                     stop_at="none",
                     task_file="",
                     external_api_available=ext_available,
+                    cumulative_runner_tasks=0,
                 )
             except Exception:
                 pass
@@ -1677,7 +1864,10 @@ def dev_tasks_confirm(
         action: Target transition action ('confirm', 'rework', 'skip', 'revoke').
         session_id: Optional caller session ID for bypass verification.
     """
-    target_path = _resolve_task_file_path(workspace_root, task_file)
+    try:
+        target_path = _resolve_task_file_path(workspace_root, task_file)
+    except ValueError as ve:
+        return {"error": str(ve), "updated": [], "errors": [{"id": "*", "error": str(ve)}]}
     action_map = {
         "confirm": STATUS_CONFIRMED,
         "rework": STATUS_REWORK,
@@ -1752,12 +1942,18 @@ def dev_tasks_confirm(
                     "parse_skipped_lines": gate_res["parse_skipped_lines"],
                 }
 
-    # 2. 持锁段流转与重校验 (R11 契约)
+    # 2. 持锁段流转与重校验 (Markdown -> Manifest 严格锁序，防止与 reclaim_stale_task 发生 AB-BA 死锁)
+    md_parent = os.path.dirname(target_path)
+    md_lock_ctx = (
+        filelock.FileLock(target_path + ".lock", timeout=5.0, is_singleton=True)
+        if md_parent and os.path.isdir(md_parent)
+        else nullcontext()
+    )
     lock_path = os.path.join(workspace_root, MANIFEST_REL_PATH + ".lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     manifest_lock = filelock.FileLock(lock_path, timeout=5.0)
 
-    with manifest_lock:
+    with md_lock_ctx, manifest_lock:
         fresh_tasks = parse_task_file(target_path) if os.path.isfile(target_path) else []
         fresh_task_map = {str(t.id).strip(): t for t in fresh_tasks}
 
@@ -2006,27 +2202,21 @@ def _resolve_handoff_envelope(
 def _issue_checkout_lease(workspace_root: str, task_file: str, task_id: str, session_id: Optional[str] = None) -> tuple[str, int]:
     """签发独占 Fencing Token 租约并原子记录至 manifest.json。"""
     if session_id:
-        try:
-            clean_sid = _validate_session_id(session_id)
-            holder_token = f"token_{clean_sid}_{int(time.time()*1000)}_{os.getpid()}"
-        except Exception:
-            holder_token = f"token_{int(time.time()*1000)}_{os.getpid()}"
+        clean_sid = _validate_session_id(session_id)
+        holder_token = f"token_{clean_sid}_{int(time.time()*1000)}_{os.getpid()}"
     else:
         holder_token = f"token_{int(time.time()*1000)}_{os.getpid()}"
     namespaced_id = f"{Path(task_file).stem}::{task_id}"
     m = load_manifest(workspace_root)
     existing_rec = m.records.get(namespaced_id)
     expected_gen = existing_rec.generation if existing_rec else 0
-    try:
-        new_gen = commit_lease(
-            workspace_root,
-            task_id=namespaced_id,
-            holder_token=holder_token,
-            expected_generation=expected_gen,
-            md_path=task_file,
-        )
-    except Exception:
-        new_gen = expected_gen + 1
+    new_gen = commit_lease(
+        workspace_root,
+        task_id=namespaced_id,
+        holder_token=holder_token,
+        expected_generation=expected_gen,
+        md_path=task_file,
+    )
     return holder_token, new_gen
 
 
@@ -2095,7 +2285,10 @@ def dev_tasks_checkout(
 
     dev_tasks_dir = config.resolve_path("dev_tasks_dir")
     if task_file:
-        resolved_file = _resolve_task_file_path(workspace_root, task_file)
+        try:
+            resolved_file = _resolve_task_file_path(workspace_root, task_file)
+        except ValueError as ve:
+            return {"error": str(ve)}
         if not os.path.isfile(resolved_file):
             return {"error": f"Specified task file does not exist: {task_file} / 指定的任务文件不存在: {task_file}"}
         try:
@@ -2151,6 +2344,16 @@ def dev_tasks_checkout(
                             "note": "Task is already in progress; instructions re-extracted / 该任务已经在执行中，已重新提取指引下发。",
                         }
                         if existing_rec:
+                            bound_sid = extract_session_id_from_holder_token(existing_rec.holder_token)
+                            if bound_sid is not None and clean_session_id != bound_sid:
+                                return {
+                                    "error": (
+                                        f"Cross-session conflict: task '{t.id}' is currently in progress and bound to another session / "
+                                        f"跨会话冲突：任务 '{t.id}' 正在执行中且已绑定至其他会话，拒绝跨会话重入获取租约凭据。"
+                                    ),
+                                    "task_id": t.id,
+                                    "status": t.status,
+                                }
                             resp["holder_token"] = existing_rec.holder_token
                             resp["generation"] = existing_rec.generation
                         if clean_session_id:
@@ -2173,7 +2376,14 @@ def dev_tasks_checkout(
                             except Exception:
                                 pass
                             detail = _extract_task_detail(f_path, t.id)
-                            holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
+                            try:
+                                holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
+                            except Exception as lease_err:
+                                try:
+                                    transition_task(f_path, t.id, STATUS_CONFIRMED, workspace_root=workspace_root)
+                                except Exception as rb_err:
+                                    _logger.warning("Failed to rollback task '%s' to Confirmed after lease error: %s", t.id, rb_err)
+                                return {"error": f"Failed to issue checkout lease for task {t.id} / 签发任务 {t.id} 租约失败: {lease_err}"}
                             resp_data = {
                                 "task_file": f_path,
                                 "task_id": updated.id,
@@ -2194,6 +2404,20 @@ def dev_tasks_checkout(
                                 current_task_id=updated.id,
                                 config=config,
                             )
+                            harness_act = resp_data.get("harness_next_action")
+                            if (
+                                isinstance(harness_act, dict)
+                                and harness_act.get("action") == "DISPATCH_RUNNER"
+                                and harness_act.get("channel") == "spawn_fresh"
+                            ):
+                                try:
+                                    update_runtime_mode(
+                                        workspace_root=workspace_root,
+                                        cumulative_runner_tasks=0,
+                                        external_api_available=_is_external_api_available(workspace_root, config),
+                                    )
+                                except Exception:
+                                    pass
                             return resp_data
                         except Exception as e:
                             return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
@@ -2221,7 +2445,14 @@ def dev_tasks_checkout(
                     except Exception:
                         pass
                     detail = _extract_task_detail(f_path, t.id)
-                    holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
+                    try:
+                        holder_token, gen = _issue_checkout_lease(workspace_root, f_path, updated.id, session_id=clean_session_id)
+                    except Exception as lease_err:
+                        try:
+                            transition_task(f_path, t.id, STATUS_CONFIRMED, workspace_root=workspace_root)
+                        except Exception as rb_err:
+                            _logger.warning("Failed to rollback task '%s' to Confirmed after lease error: %s", t.id, rb_err)
+                        return {"error": f"Failed to issue checkout lease for task {t.id} / 签发任务 {t.id} 租约失败: {lease_err}"}
                     resp_data = {
                         "task_file": f_path,
                         "task_id": updated.id,
@@ -2242,6 +2473,20 @@ def dev_tasks_checkout(
                         current_task_id=updated.id,
                         config=config,
                     )
+                    harness_act = resp_data.get("harness_next_action")
+                    if (
+                        isinstance(harness_act, dict)
+                        and harness_act.get("action") == "DISPATCH_RUNNER"
+                        and harness_act.get("channel") == "spawn_fresh"
+                    ):
+                        try:
+                            update_runtime_mode(
+                                workspace_root=workspace_root,
+                                cumulative_runner_tasks=0,
+                                external_api_available=_is_external_api_available(workspace_root, config),
+                            )
+                        except Exception:
+                            pass
                     return resp_data
                 except Exception as e:
                     return {"error": f"Failed to transition task {t.id} to in_progress / 检出任务 {t.id} 状态流转失败: {e}"}
@@ -2398,7 +2643,10 @@ def dev_tasks_complete(
         holder_token: Fencing lease holder token.
         generation: Expected fencing generation.
     """
-    target_path = _resolve_task_file_path(workspace_root, task_file)
+    try:
+        target_path = _resolve_task_file_path(workspace_root, task_file)
+    except ValueError as ve:
+        return {"status": "rejected", "reason": str(ve)}
     try:
         config = load_project_config(workspace_root)
     except Exception as e:
@@ -2496,6 +2744,16 @@ def dev_tasks_complete(
         except OSError:
             pass
 
+        try:
+            ext_avail = _is_external_api_available(workspace_root, config)
+            update_runtime_mode(
+                workspace_root=workspace_root,
+                increment_runner_tasks=1,
+                external_api_available=ext_avail,
+            )
+        except Exception:
+            pass
+
         res_completed = {
             "status": "completed",
             "task_id": updated.id,
@@ -2575,7 +2833,12 @@ async def dev_tasks_heartbeat(
             namespaced_id = target_tid
         else:
             suffix = f"::{target_tid}"
-            namespaced_id = next((k for k in m.records if k == target_tid or k.endswith(suffix)), None)
+            candidates = [
+                (k, rec) for k, rec in m.records.items()
+                if k == target_tid or k.endswith(suffix)
+            ]
+            active_cand = next((k for k, rec in candidates if not rec.released), None)
+            namespaced_id = active_cand if active_cand is not None else (candidates[-1][0] if candidates else None)
             if not namespaced_id:
                 dev_tasks_dir = config.resolve_path("dev_tasks_dir")
                 if os.path.isdir(dev_tasks_dir):
@@ -2794,7 +3057,15 @@ def dev_tasks_promote_draft(
         task_file: Task file name or relative path.
         task_id: Task ID to promote (e.g. '3.1').
     """
-    f_path = _resolve_task_file_path(workspace_root, task_file)
+    try:
+        f_path = _resolve_task_file_path(workspace_root, task_file)
+    except ValueError as ve:
+        return {
+            "status": "rejected",
+            "task_id": task_id,
+            "error": str(ve),
+            "promoted": False,
+        }
     if not os.path.isfile(f_path):
         return {
             "status": "rejected",
@@ -2942,6 +3213,12 @@ async def dev_tasks_refine_spec(
         config = load_project_config(workspace_root)
     except Exception as e:
         return {"ok": False, "error": f"Failed to load project config / 加载项目配置失败: {e}"}
+
+    if persist and task_file:
+        try:
+            _resolve_task_file_path(workspace_root, task_file, config=config)
+        except ValueError as ve:
+            return {"ok": False, "error": str(ve), "task_id": task_id}
 
     # 1. 探索相关代码切片
     seeds = context_files if context_files is not None else draft_task.get("affected_files", [])
@@ -3200,20 +3477,23 @@ def dev_tasks_escalate(
         reason: Escalation rationale and core challenges.
         context_files: Optional list of relevant files for architectural context.
     """
-    target_path = _resolve_task_file_path(workspace_root, task_file)
+    try:
+        target_path = _resolve_task_file_path(workspace_root, task_file)
+    except ValueError as ve:
+        return {"status": "error", "task_id": task_id, "error": str(ve)}
     context_snippets = []
     if context_files:
         for cf in context_files:
-            cf_abs = os.path.normpath(os.path.join(workspace_root, cf))
-            if os.path.isfile(cf_abs):
-                try:
+            try:
+                cf_abs = sanitize_workspace_path(workspace_root, cf, must_exist=True)
+                if os.path.isfile(cf_abs):
                     with open(cf_abs, "r", encoding="utf-8", errors="ignore") as f:
                         lines = f.readlines()[:200]
                     context_snippets.append(
                         {"file": cf, "lines": len(lines), "content": "".join(lines)}
                     )
-                except Exception:
-                    pass
+            except (PathTraversalError, ValueError, OSError) as e:
+                _logger.warning("Skipped unsafe/unreadable context_file %r in dev_tasks_escalate: %s", cf, e)
 
     # 增量附加自动诊断建议（若 Reviewer 引擎就绪）
     auto_diagnostics = None
@@ -3374,11 +3654,16 @@ def dev_tasks_archive(workspace_root: str, task_file: str) -> Dict[str, Any]:
         workspace_root: Root path of the target workspace.
         task_file: Task file name or relative path to archive.
     """
-    target_path = _resolve_task_file_path(workspace_root, task_file)
     try:
         config = load_project_config(workspace_root)
     except Exception as e:
         return {"archived": False, "error": f"Configuration error / 配置错误: {e}"}
+    try:
+        target_path = _resolve_task_file_path(workspace_root, task_file, config=config)
+    except ValueError as ve:
+        return {"archived": False, "error": str(ve)}
+    if not os.path.isfile(target_path):
+        return {"archived": False, "error": f"Task file not found / 任务单文件不存在: {task_file}"}
 
     tasks = parse_task_file(target_path)
     unclosed = [
@@ -3418,11 +3703,21 @@ def dev_tasks_archive(workspace_root: str, task_file: str) -> Dict[str, Any]:
     target_archive_path = os.path.join(archive_dir, os.path.basename(target_path))
 
     if os.path.exists(target_archive_path):
-        ts = datetime.now().strftime("%H%M%S")
+        ts = datetime.now(timezone.utc).strftime("%H%M%S")
         name_no_ext, ext = os.path.splitext(os.path.basename(target_path))
         target_archive_path = os.path.join(archive_dir, f"{name_no_ext}_{ts}{ext}")
 
     shutil.move(target_path, target_archive_path)
+
+    try:
+        ext_avail = _is_external_api_available(workspace_root, config)
+        update_runtime_mode(
+            workspace_root=workspace_root,
+            task_file="",
+            external_api_available=ext_avail,
+        )
+    except Exception as e:
+        _logger.warning("Failed to clear autopilot task_file after archive: %s", e)
 
     res_success = {
         "archived": True,
@@ -3846,14 +4141,21 @@ async def dev_reviewer_poll(
         wait_max_s=timeout_s,
         bridge=bridge,
     )
-    if isinstance(res, dict) and res.get("status") != "error":
+    if isinstance(res, dict) and res.get("state") in ("COMPLETED", "FAILED", "CANCELLED", "ORPHANED"):
+        is_ok = (
+            res.get("state") == "COMPLETED"
+            and not (isinstance(res.get("result"), dict) and res["result"].get("status") == "degraded")
+        )
         try:
             cfg = load_project_config(workspace_root)
+            # Keep terminal snapshot strictly within POLL_TERMINAL_FIELDS whitelist:
+            # run harness on a shallow copy so runtime state updates without adding keys to res.
+            harness_scratch = dict(res)
             _inject_harness_next_action(
                 workspace_root,
                 "dev_reviewer_poll",
-                res,
-                last_success=True,
+                harness_scratch,
+                last_success=is_ok,
                 config=cfg,
             )
         except Exception:

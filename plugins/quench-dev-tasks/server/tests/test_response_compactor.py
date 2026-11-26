@@ -268,3 +268,47 @@ def test_assert_response_budget_all_tools() -> None:
     # dev_reviewer_poll terminal phase exemption
     assert_response_budget("dev_reviewer_poll", {"findings": "x" * 20000}, phase="terminal")
 
+
+def test_fit_to_budget_step3_preserves_business_keys_after_hna_shrink() -> None:
+    """Task 36.2: Step 3 re-measures after shrinking harness_next_action and keeps business keys if within budget."""
+    payload = {
+        "ok": True,
+        "task_id": "36.2",
+        "status": "checked_out",
+        "summary": "Short business summary preserved when harness_next_action shrink suffices.",
+        "harness_next_action": {
+            "action": "DISPATCH_RUNNER",
+            "instruction": "Verbose instruction " * 60,
+            "next_batch_tasks": ["Batch 2", "Batch 3", "Batch 4"],
+        },
+    }
+    budget = RESPONSE_BUDGET_BYTES["dev_tasks_checkout"]
+    assert measure_payload_bytes(payload) > budget
+
+    clamped = fit_to_budget("dev_tasks_checkout", payload)
+    assert measure_payload_bytes(clamped) <= budget
+    assert clamped["harness_next_action"] == {"action": "DISPATCH_RUNNER"}
+    assert clamped["summary"] == payload["summary"]
+    assert clamped["ok"] is True
+    assert clamped["task_id"] == "36.2"
+    assert clamped["status"] == "checked_out"
+    assert "harness_next_action" in clamped.get("truncated_sections", [])
+
+
+def test_fit_to_budget_non_status_default_always_keep_preserves_discriminators() -> None:
+    """Task 36.2: Non-status tools use TOOL_DEFAULT_ALWAYS_KEEP so core discriminators survive Step 3."""
+    payload = {
+        "ok": True,
+        "status": "checked_out",
+        "task_id": "36.2",
+        "reason_code": "PENDING_REVIEW",
+        "spec": "Huge spec body " * 200,
+    }
+    clamped = fit_to_budget("dev_tasks_checkout", payload)
+    assert measure_payload_bytes(clamped) <= RESPONSE_BUDGET_BYTES["dev_tasks_checkout"]
+    assert clamped["ok"] is True
+    assert clamped["status"] == "checked_out"
+    assert clamped["task_id"] == "36.2"
+    assert clamped["reason_code"] == "PENDING_REVIEW"
+    assert "spec" not in clamped
+

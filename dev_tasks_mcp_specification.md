@@ -23,7 +23,7 @@ Quench separates software development cognitive load into two complementary oper
 ### 1.3 Model Decoupling & Pluggable ReviewerClient Architecture
 The MCP server operates as an independent daemon (FastMCP over stdio JSON-RPC) with strict vendor neutrality:
 - **No Proprietary Vendor Literals**: Core modules contain zero hard-coded model strings (enforced by `test_no_vendor_literals_in_core.py` and `test_no_api_bypass.py`).
-- **Pluggable Engine Presets**: Upstream providers (`openai`, `deepseek`, `ollama`, `vllm`, `generic-openai`, `custom`) are configured declaratively in `.agents/quench_stack.yaml` and resolved via the `PROVIDER_PRESETS` registry (`ReviewerClient`).
+- **Declarative Engine Configuration (`PROVIDER_PRESETS`)**: `PROVIDER_PRESETS` is intentionally maintained as an empty registry (`MappingProxyType({})`) to preserve strict vendor neutrality; upstream OpenAI-compatible endpoints (`provider: "custom"`, local `Ollama` / `vLLM`, or `provider: "none"`) are configured declaratively in `.agents/quench_stack.yaml` / `.agents/quench_stack.local.yaml` and executed by `ReviewerClient`.
 - **Generic Protocol Support**: Standardized OpenAI-compatible `/chat/completions` streaming, generic CoT extraction (`delta.reasoning_content` / `delta.thought`), and local offline inference.
 - **Graceful Degraded Fallback**: Emits structured degraded cards with `findings == ""` when an external engine is unconfigured, preventing in-context hallucination or impersonation.
 
@@ -86,7 +86,7 @@ Every DevTask must adhere to the structured six core fields. The schema validato
 To maintain full visibility during long-running architectural reasoning without flooding FastMCP stdio transport:
 - **Low-Frequency MCP Heartbeats**: Context progress notifications are issued at a conservative ~1.0s interval, reporting estimated `progress_pct` and step counts.
 - **Zero Stdout Pollution**: Standard output (`sys.stdout`) is strictly reserved for JSON-RPC frame delivery; arbitrary print statements are prohibited.
-- **RotatingFileSink**: Real-time thinking and reasoning chunks are streamed directly into bounded log sinks (`.agents/.logs/reviewer_live.log`), enabling developers to inspect reasoning trajectories in real time via `tail -f` or terminal watchers.
+- **RotatingFileSink**: Real-time thinking and reasoning chunks are streamed directly into bounded log sinks (`.agents/logs/reviewer/YYYYMMDD_NNN_<slug>.log`), enabling developers to inspect reasoning trajectories in real time via `tail -f` or terminal watchers.
 - **Reasoning Loop Interruption**: Features a soft ceiling of 32,000 reasoning tokens and automated timeout interruption to guard against runaway hallucination loops.
 
 ### 2.4 Draft Task State & Physical Feasibility Lint Gate
@@ -118,12 +118,12 @@ The DevTasks state machine defines strict valid transitions enforced by `state_m
 | State | Canonical Marker | Entry Condition / Tool | Next Allowed States |
 | :--- | :--- | :--- | :--- |
 | **Draft** | `📝 草案` / `(草案)` | Spec drafting (`dev_tasks_refine_spec`) | `Pending` (via `dev_tasks_promote_draft`) |
-| **Pending** | `⬜ 待确认` / `[Pending]` | Propose task (`dev_tasks_propose`), or draft promotion | `Confirmed` (confirm), `Skipped` (skip) |
-| **Confirmed** | `🟦 已确认` / `[Confirmed]` | Developer approval (`dev_tasks_confirm action=confirm`) | `In_Progress` (via `dev_tasks_checkout`) |
-| **In Progress** | `🔨 进行中` / `[In Progress]` | Single task checkout (`dev_tasks_checkout`) [INV-1 locked] | `Completed` (`dev_tasks_complete`), `Rework` |
-| **Rework** | `🔄 需返工` / `[Rework]` | Verification failure / rejection (`dev_tasks_confirm action=rework`) | `In_Progress` (re-checkout) |
-| **Completed** | `✅ 已完成` / `[Completed]` | DoD commands pass 100% & scope clean (`dev_tasks_complete`) | `Archived` (via `dev_tasks_archive`) |
-| **Skipped** | `⏭️ 已跳过` / `[Skipped]` | Developer bypass / cancellation | `Archived` (via `dev_tasks_archive`) |
+| **Pending** | `⬜ 待确认` / `[Pending]` | Propose task (`dev_tasks_propose`), draft promotion, or `confirm action=revoke` | `Confirmed` (confirm), `Skipped` (skip) |
+| **Confirmed** | `✅ 已确认` / `[Confirmed]` | Developer approval (`dev_tasks_confirm action=confirm`) | `In_Progress` (via `dev_tasks_checkout`), `Pending` (revoke) |
+| **In Progress** | `🔨 执行中` / `[In Progress]` | Single task checkout (`dev_tasks_checkout`) [INV-1 locked] | `Completed` (`dev_tasks_complete`), `Rework`, `Pending` (revoke) |
+| **Rework** | `🔄 需返工` / `[Rework]` | Verification failure / rejection (`dev_tasks_confirm action=rework`) | `In_Progress` (re-checkout), `Pending` (revoke) |
+| **Completed** | `✔️ 已完成` / `[Completed]` | DoD commands pass 100% & scope clean (`dev_tasks_complete`) | `Archived` (via `dev_tasks_archive`) |
+| **Skipped** | `⏭️ 跳过` / `[Skipped]` | Developer bypass / cancellation (`dev_tasks_confirm action=skip`) | `Archived` (via `dev_tasks_archive`) |
 | **Archived** | `📦 已归档` / `[Archived]` | Milestone batch retirement (`dev_tasks_archive`) | *(Terminal)* |
 
 ---
@@ -132,7 +132,7 @@ The DevTasks state machine defines strict valid transitions enforced by `state_m
 
 The server exposes 16 atomic FastMCP tools (SSOT: `tool_surface_constants.TOOL_COUNT`; code is authoritative, JSON snapshot is derived mirror evidence):
 
-1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation. In v1.25+, supports dual-mode runtime configuration and Autopilot harness orchestration via optional arguments: `switch_mode` ('standard'|'inverted'), `switch_reviewer_channel` ('direct_api'|'subagent_delegate'), `stop_at` ('CONSUMED_ALL'|'CONSUMED_FILE'|'CONSUMED_TASK'|'NEVER'|'ALWAYS'), and `task_file` (scoped inspection). Returns an enriched snapshot containing the `autopilot` state and the `harness_next_action` baton. Across the server, 8 operational tools (`dev_tasks_status`, `dev_tasks_propose`, `dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_archive`, `dev_reviewer_poll`, `dev_tasks_refine_spec`) dynamically return `harness_next_action` to drive continuous relay without premature stops.
+1. **`dev_tasks_status`**: Scans the workspace task directory, returning structured queue metrics (active, confirmed, rework, pending, draft) with optional draft segregation. In v1.25+, supports dual-mode runtime configuration and Autopilot harness orchestration via optional arguments: `switch_mode` ('standard'|'inverted'), `switch_reviewer_channel` ('external_api'|'host_subagent'), `stop_at` ('none'|'after_propose'|'after_review'|'after_confirm'|'before_archive'|'after_batch'), and `task_file` (scoped inspection). Returns an enriched snapshot containing the `autopilot` state and the `harness_next_action` baton. Across the server, 8 operational tools (`dev_tasks_status`, `dev_tasks_propose`, `dev_tasks_confirm`, `dev_tasks_checkout`, `dev_tasks_complete`, `dev_tasks_archive`, `dev_reviewer_poll`, `dev_tasks_refine_spec`) dynamically return `harness_next_action` to drive continuous relay without premature stops.
 2. **`dev_tasks_propose`**: Validates the six core fields and proposes a new task in formal `[Pending]` status (supporting mode='append'|'overwrite'|'upsert').
 3. **`dev_tasks_confirm`**: Advances tasks to `[Confirmed]`, `[Skipped]`, or transitions them to `[Rework]`. Enforces Pre-Confirm audit gate policy on Tier-1 managed paths outside manifest lock, validating against verdicts ledger with exact 5-key blocking payload (`ok`, `reason`, `artifact_ref`, `audit_ref`, `parse_skipped_lines`) and lock-time `precondition_changed` re-validation.
 4. **`dev_tasks_checkout`**: Checks out the next confirmed task, sets its state to `[In Progress]`, captures a physical baseline snapshot, and provides step-by-step guidance.
@@ -246,7 +246,7 @@ To guarantee that language model interfaces, IDE prompt surfaces, documentation 
 
 > 📖 **Full Module Architecture & Topology**: For the complete 4-tier module mapping, call constraint hierarchy, and physical isolation layers, see [docs/architecture/README.md §5](docs/architecture/README.md#5-source-code-mapping-module-topology).
 
-All 16 FastMCP tools and 9 core invariants are verified across the codebase by the automated test suite (572+ tests):
+All 16 FastMCP tools and 10 core invariants are verified across the codebase by the automated test suite (1,300+ tests):
 
 | Verification Category | Primary Test Suites | Enforced Invariants & Key Mechanisms |
 | :--- | :--- | :--- |
@@ -256,6 +256,7 @@ All 16 FastMCP tools and 9 core invariants are verified across the codebase by t
 | **Physical Feasibility & Scope** | `server/tests/test_draft_lint.py`<br>`server/tests/test_path_guard.py`<br>`server/tests/test_server_tools.py` | **INV-6** (Review read-only), **INV-7** (Physical feasibility path & pytest dry-run) |
 | **Context Injection Budget** | `server/tests/test_consultation_context_guard.py` | **INV-8** (Declarative context budget ceiling enforcement) |
 | **Async Jobs, Heartbeat & Polling**| `server/tests/test_reviewer_jobs.py`<br>`server/tests/test_reviewer_consult.py` | Pull-model heartbeat SSOT (`format_heartbeat_line`), 1KB non-terminal snapshot whitelist |
-| **IDE Entry Card Synchronization** | `server/tests/test_agents_md_sync.py` | Parity between workspace `AGENTS.md` and template `templates/AGENTS.md` (INV-1 to INV-9) |
+| **Response Budget & Compaction** | `server/tests/test_response_budget_ssot.py`<br>`server/tests/test_response_compactor.py` | **INV-10** (Declared response byte budgets and deterministic compaction) |
+| **IDE Entry Card Synchronization** | `server/tests/test_agents_md_sync.py` | Parity across workspace, rules, and template `AGENTS.md` (INV-1 to INV-10) |
 
 

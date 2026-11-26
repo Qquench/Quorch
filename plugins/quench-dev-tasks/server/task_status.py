@@ -111,19 +111,19 @@ def normalize_status(raw: str) -> str:
         if key in s_clean:
             return standard
 
-    # English aliases check
+    # English aliases check (word-boundary regex to reject negations/compounds like unconfirmed, undone, skip_check)
     s_lower = s_clean.lower()
-    if "pending" in s_lower:
+    if re.search(r"\bpending\b", s_lower):
         return STATUS_PENDING
-    if "confirmed" in s_lower:
+    if re.search(r"\bconfirmed\b", s_lower):
         return STATUS_CONFIRMED
-    if "progress" in s_lower:
+    if re.search(r"\bin[-_\s]+progress\b", s_lower):
         return STATUS_IN_PROGRESS
-    if "completed" in s_lower or "done" in s_lower:
+    if re.search(r"\b(?:completed|done)\b", s_lower):
         return STATUS_COMPLETED
-    if "skipped" in s_lower or "skip" in s_lower:
+    if re.search(r"\b(?:skipped|skip)\b", s_lower):
         return STATUS_SKIPPED
-    if "rework" in s_lower:
+    if re.search(r"\brework\b", s_lower):
         return STATUS_REWORK
 
     return STATUS_UNKNOWN

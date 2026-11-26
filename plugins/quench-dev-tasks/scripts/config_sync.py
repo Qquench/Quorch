@@ -25,13 +25,14 @@ def json_escape_path(path_str: str) -> str:
 
 def atomic_write_file(target_path: str, content: str) -> None:
     """原子化写入文件：先写临时文件后原子替换"""
-    target_dir = os.path.dirname(target_path)
+    abs_target = os.path.abspath(target_path)
+    target_dir = os.path.dirname(abs_target)
     os.makedirs(target_dir, exist_ok=True)
-    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir, text=True)
+    temp_fd, temp_file = tempfile.mkstemp(dir=target_dir)
     try:
         with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
             f.write(content)
-        os.replace(temp_file, target_path)
+        os.replace(temp_file, abs_target)
     except Exception:
         if os.path.exists(temp_file):
             try:
@@ -184,6 +185,7 @@ def render_agents_mcp_config(
     server_script = os.path.normpath(os.path.join(p_dir, "server", "server.py"))
     mcp_template = os.path.join(p_dir, "mcp_config.json.template")
 
+    fallback_def = {"command": py_exe, "args": [server_script]}
     if os.path.isfile(mcp_template):
         esc_python = json_escape_path(py_exe)
         esc_server = json_escape_path(server_script)
@@ -194,13 +196,23 @@ def render_agents_mcp_config(
         )
         try:
             rendered_json = json.loads(rendered_str)
-            quench_def = rendered_json.get("mcpServers", {}).get(
-                "quench-dev-tasks", {"command": py_exe, "args": [server_script]}
-            )
+            servers_map = rendered_json.get("mcpServers", {})
+            quench_def = None
+            if isinstance(servers_map, dict):
+                if isinstance(servers_map.get("quench-dev-tasks"), dict):
+                    quench_def = servers_map["quench-dev-tasks"]
+                elif isinstance(servers_map.get("core"), dict):
+                    quench_def = servers_map["core"]
+                elif len(servers_map) == 1:
+                    only_val = next(iter(servers_map.values()))
+                    if isinstance(only_val, dict):
+                        quench_def = only_val
+            if quench_def is None:
+                quench_def = fallback_def
         except Exception:
-            quench_def = {"command": py_exe, "args": [server_script]}
+            quench_def = fallback_def
     else:
-        quench_def = {"command": py_exe, "args": [server_script]}
+        quench_def = fallback_def
 
     out_data = dict(existing_data) if isinstance(existing_data, dict) else {}
     mcp_servers = dict(out_data.get("mcpServers", {})) if isinstance(out_data.get("mcpServers"), dict) else {}
@@ -342,9 +354,11 @@ def auto_heal_configs(
                     if isinstance(m_data, dict):
                         servers = m_data.get("mcpServers")
                         mutated = False
-                        if isinstance(servers, dict) and "quench-dev-tasks" in servers:
-                            servers.pop("quench-dev-tasks")
-                            mutated = True
+                        if isinstance(servers, dict):
+                            for k in ("quench-dev-tasks", "core"):
+                                if k in servers:
+                                    servers.pop(k)
+                                    mutated = True
                         if mutated:
                             has_other = False
                             for k, v in m_data.items():
@@ -364,7 +378,36 @@ def auto_heal_configs(
             if force or not os.path.isfile(ws_hooks_target) or os.path.getmtime(hooks_template) > os.path.getmtime(ws_hooks_target):
                 affected.append(ws_hooks_target)
 
-            if force or not os.path.isfile(ws_mcp_target) or os.path.getmtime(mcp_template) > os.path.getmtime(ws_mcp_target):
+            needs_ws_mcp_heal = (
+                force
+                or not os.path.isfile(ws_mcp_target)
+                or os.path.getmtime(mcp_template) > os.path.getmtime(ws_mcp_target)
+            )
+            if not needs_ws_mcp_heal and os.path.isfile(ws_mcp_target):
+                try:
+                    with open(ws_mcp_target, "r", encoding="utf-8") as f:
+                        curr_ws_mcp = json.load(f)
+                    q_entry = (
+                        curr_ws_mcp.get("mcpServers", {}).get("quench-dev-tasks")
+                        if isinstance(curr_ws_mcp, dict) and isinstance(curr_ws_mcp.get("mcpServers"), dict)
+                        else None
+                    )
+                    if not isinstance(q_entry, dict):
+                        needs_ws_mcp_heal = True
+                    elif not isinstance(q_entry.get("tools"), dict) or not q_entry.get("tools"):
+                        py_exe_tmp = os.path.normpath(python_exe or detect_python_executable(p_dir))
+                        rendered_ws = render_agents_mcp_config(
+                            project_root=workspace_root,
+                            python_exe=py_exe_tmp,
+                            existing_data=curr_ws_mcp,
+                            plugin_dir=p_dir,
+                        )
+                        tmpl_tools = rendered_ws.get("mcpServers", {}).get("quench-dev-tasks", {}).get("tools")
+                        if isinstance(tmpl_tools, dict) and tmpl_tools and q_entry.get("tools") != tmpl_tools:
+                            needs_ws_mcp_heal = True
+                except Exception:
+                    needs_ws_mcp_heal = True
+            if needs_ws_mcp_heal:
                 affected.append(ws_mcp_target)
 
     if not affected:

@@ -29,6 +29,7 @@ def main() -> None:
         private_fd = os.dup(1)
     except OSError as e:
         sys.stderr.write(f"Failed to duplicate stdout fd: {e}\n")
+        sys.stderr.flush()
         os._exit(1)
 
     # 2. Redirect fd 1 to fd 2, and sys.stdout to sys.stderr to capture any import banners
@@ -37,6 +38,7 @@ def main() -> None:
         sys.stdout = sys.stderr
     except OSError as e:
         sys.stderr.write(f"Failed to redirect fd 1 to fd 2: {e}\n")
+        sys.stderr.flush()
         os._exit(1)
 
     try:
@@ -51,17 +53,25 @@ def main() -> None:
         import server
 
         tools = asyncio.run(server.mcp.list_tools())
+        live_tool_names = {tool.name for tool in tools}
+        expected_set = set(EXPECTED_TOOL_NAMES)
+        if live_tool_names != expected_set:
+            missing = sorted(expected_set - live_tool_names)
+            extra = sorted(live_tool_names - expected_set)
+            raise RuntimeError(
+                f"Live MCP tool set mismatch with EXPECTED_TOOL_NAMES. Missing: {missing}, Extra: {extra}"
+            )
+
         doc: dict[str, Any] = {
             SCHEMA_META_KEY: {
                 "schema_version": SNAPSHOT_SCHEMA_VERSION,
             }
         }
         for tool in tools:
-            if tool.name in EXPECTED_TOOL_NAMES:
-                doc[tool.name] = {
-                    "description": tool.description or "",
-                    "parameters": tool.parameters,
-                }
+            doc[tool.name] = {
+                "description": tool.description or "",
+                "parameters": tool.parameters,
+            }
 
         canonical_text = canonicalize_schemas(doc)
         envelope_output = f"{ENVELOPE_BEGIN}\n{canonical_text}{ENVELOPE_END}\n"
@@ -74,6 +84,7 @@ def main() -> None:
         sys.stderr.write(f"Child introspection error: {e}\n")
         import traceback
         traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         os._exit(1)
 
     os._exit(0)

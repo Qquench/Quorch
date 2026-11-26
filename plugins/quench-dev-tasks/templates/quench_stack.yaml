@@ -142,17 +142,13 @@ reviewer_engine:
   # ==============================================================================
 
   # L1 单跳传输超时（per-hop network timeout，非整体预算）
-  # 对旗舰推理模型 120s 更为合适；须满足 L1 × max_tool_hops ≤ soft_budget_cap_seconds
   timeout_seconds: 120
 
-  # L2 软预算（动态公式：base + per_hop × hops，上限 cap）
-  # 当前路径 A：所有值必须 < L4（≈180s），留 10s 余量
-  soft_budget_base_seconds: 90      # 基础预算 base（秒）
-  soft_budget_per_hop_seconds: 20   # 每跳增量（秒），使 L1 × hops 不超 L2
-  soft_budget_cap_seconds: 170      # L2 软上限 cap（须 ≤ hard_ceiling_seconds）
-
-  # L3 硬天花板（整体最大允许时长，须 < L4）
-  hard_ceiling_seconds: 175         # 留 5s 余量给序列化/收尾
+  # 注：以下 L2/L3 软硬预算分段字段为历史预留注释，运行期以 timeout_seconds 与异步作业预算为准：
+  # soft_budget_base_seconds: 90
+  # soft_budget_per_hop_seconds: 20
+  # soft_budget_cap_seconds: 170
+  # hard_ceiling_seconds: 175
 
   # Max retry attempts on network error / 瞬态网络故障最大重试次数
   max_retries: 2

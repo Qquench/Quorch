@@ -28,6 +28,9 @@ ENV_SCRUB_KEYS: Final[tuple[str, ...]] = (
     "PYTEST_CURRENT_TEST",
     "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
     "PYTEST_DEBUG",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONUSERBASE",
 )
 ENV_SCRUB_PREFIXES: Final[tuple[str, ...]] = ("PYTEST_XDIST_",)
 NEUTRALIZE_ARGS: Final[tuple[str, ...]] = ("-o", "addopts=", "-p", "no:cacheprovider")
@@ -40,6 +43,12 @@ TIER1_TARGET_MODULES: Final[tuple[str, ...]] = (
     "test_agents_md_sync.py",
     "test_anti_roleplay_discipline_contract.py",
     "test_forgery_prevention_contract.py",
+    "test_ide_schema_export.py",
+    "test_tool_surface_contract.py",
+    "test_spec_param_defaults_contract.py",
+    "test_snapshot_drift_gate_contract.py",
+    "test_missing_sentinel_singleton.py",
+    "test_file_scope_guard_status.py",
 )
 
 
@@ -86,6 +95,7 @@ def collect_selection(
         text=True,
         encoding="utf-8",
         errors="replace",
+        timeout=60,
     )
 
     if res.returncode != 0:

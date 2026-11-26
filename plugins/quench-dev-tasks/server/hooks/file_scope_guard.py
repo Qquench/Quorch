@@ -172,53 +172,62 @@ def matches_pattern(target_file: str, pattern: str, workspace_root: str) -> bool
     if not target_file or not pattern:
         return False
     pattern_str = pattern.strip()
-    if pattern_str == "*":
-        return True
 
-    norm_target = os.path.normpath(target_file).replace("\\", "/").lower()
-    norm_root = os.path.normpath(workspace_root).replace("\\", "/").lower() if workspace_root else ""
-
-    norm_root_clean = norm_root.rstrip("/")
-    if norm_root_clean and (norm_target == norm_root_clean or norm_target.startswith(norm_root_clean + "/")):
-        rel_path = norm_target[len(norm_root_clean):].lstrip("/")
+    raw_target = target_file.replace("\\", "/")
+    is_abs_target = (
+        os.path.isabs(target_file)
+        or raw_target.startswith("/")
+        or bool(re.match(r"^[a-zA-Z]:/", raw_target))
+    )
+    if not is_abs_target and workspace_root:
+        resolved_target = os.path.normpath(os.path.join(workspace_root, target_file))
     else:
+        resolved_target = os.path.normpath(target_file)
+
+    norm_target = resolved_target.replace("\\", "/").lower()
+    norm_root = os.path.normpath(workspace_root).replace("\\", "/").lower() if workspace_root else ""
+    norm_root_clean = norm_root.rstrip("/")
+
+    if norm_root_clean and (norm_target == norm_root_clean or norm_target.startswith(norm_root_clean + "/")):
+        is_inside_ws = True
+        rel_path = norm_target[len(norm_root_clean):].lstrip("/")
+    elif not workspace_root:
+        is_inside_ws = True
+        rel_path = norm_target
+    else:
+        is_inside_ws = False
         rel_path = norm_target
 
-    basename = os.path.basename(norm_target)
     norm_pattern = pattern_str.replace("\\", "/").lower()
+    while norm_pattern.startswith("./"):
+        norm_pattern = norm_pattern[2:]
 
-    # 文件名通配（如 *.vue, *.css, test_*.py）
-    if "/" not in norm_pattern:
-        if fnmatch.fnmatch(basename, norm_pattern):
-            return True
-        if fnmatch.fnmatch(rel_path, norm_pattern):
-            return True
+    # 工作区外部路径仅允许 **/ 前缀递归模式（100% 保留 **/brain/** 跨盘匹配）
+    if not is_inside_ws and workspace_root:
+        if not norm_pattern.startswith("**/"):
+            return False
 
-    # 含 ** 的多段递归路径段匹配（如 **/brain/**/*.md, frontend/src/**/*.vue）
-    if "**" in norm_pattern:
-        if _match_segmented_glob(rel_path, norm_pattern):
-            return True
-    elif fnmatch.fnmatch(rel_path, norm_pattern):
+    if norm_pattern == "*":
         return True
 
-    # 目录递归通配（如 docs/**, **/brain/**, frontend/src/assets/**）
+    basename = os.path.basename(norm_target)
+
+    # 无斜杠文件名通配仅在含通配符 (* 或 ?) 时按 basename 匹配
+    if "/" not in norm_pattern and ("*" in norm_pattern or "?" in norm_pattern):
+        if fnmatch.fnmatchcase(basename, norm_pattern):
+            return True
+
+    # 目录递归通配前缀快速判定（如 docs/**，严格要求路径段边界，禁止子串回退）
     if norm_pattern.endswith("/**"):
         prefix = norm_pattern[:-3].strip("/")
         while prefix.startswith("**/"):
             prefix = prefix[3:].strip("/")
         rel_clean = rel_path.strip("/")
-        if prefix and "**" not in prefix:
-            if rel_clean.startswith(prefix + "/") or rel_clean == prefix:
-                return True
-            if f"/{prefix}/" in f"/{rel_clean}/":
+        if prefix and "**" not in prefix and not norm_pattern.startswith("**/"):
+            if rel_clean == prefix or rel_clean.startswith(prefix + "/"):
                 return True
 
-    # 目录单层通配（如 docs/*）
-    if norm_pattern.endswith("/*"):
-        prefix = norm_pattern[:-2].strip("/")
-        if rel_path.startswith(prefix + "/"):
-            return True
-
+    # 分段 Glob 匹配（精确处理 docs/* 单层、frontend/src/**/*.vue、**/brain/**/*.md 等）
     if _match_segmented_glob(rel_path, norm_pattern):
         return True
 
@@ -372,14 +381,14 @@ SHELL_WRITE_PATTERN: Pattern[str] = re.compile(
     # 2. 管道传递至 tee
     \|\s*tee(?:\s+-[a-zA-Z]+)*\s+["']?(?P<tee_target>[^\s|;&"'>]+)["']?
     |
-    # 3. PowerShell 文件写入与创建 Cmdlets
-    (?:Out-File|Set-Content|Add-Content|New-Item)\s+(?:.*?-(?:FilePath|Path)\s+)?["']?(?P<ps_target>[^\s|;&"'>]+)["']?
+    # 3. PowerShell 文件写入、创建、删除、移动与重命名 Cmdlets
+    (?:Out-File|Set-Content|Add-Content|New-Item|Remove-Item|Move-Item|Rename-Item)\s+(?:.*?-(?:FilePath|Path|LiteralPath|Destination)\s+)?["']?(?P<ps_target>[^\s|;&"'>]+)["']?
     |
     # 4. .NET 物理写文件调用
-    \[(?:System\.)?IO\.File\]::(?:WriteAllText|WriteAllLines|AppendAllText|Create)\s*\(\s*["'](?P<dotnet_target>[^"']+)["']
+    \[(?:System\.)?IO\.File\]::(?:WriteAllText|WriteAllLines|AppendAllText|Create|Delete|Move)\s*\(\s*["'](?P<dotnet_target>[^"']+)["']
     |
-    # 5. Linux / Unix 复制、移动与修改命令 (cp, mv, touch, install, rsync, sed -i)
-    \b(?:cp|copy|mv|move|install|rsync|touch)\b.*?["']?(?P<cp_target>[^\s|;&"'>]+)["']?\s*(?:$|[|;&])
+    # 5. 复制、移动、删除与就地修改命令 (cp, mv, rm, del, erase, rmdir, touch, install, rsync, sed -i)
+    \b(?:cp|copy|mv|move|install|rsync|touch|rm|del|erase|rmdir)\b.*?["']?(?P<cp_target>[^\s|;&"'>]+)["']?\s*(?:$|[|;&])
     |
     \bsed\b\s+-[a-zA-Z]*i[a-zA-Z]*\s+(?:-[eE]\s+)?(?:'[^']*'|"[^"]*"|\S+)\s+["']?(?P<sed_target>[^\s|;&"'>]+)["']?
     """,
@@ -394,27 +403,37 @@ def _is_task_dir_token(token: str, clean_dir: str) -> bool:
     norm_val = token.replace("\\", "/").strip("\"'").strip().lower()
     if not norm_val:
         return False
-    return (
-        norm_val == clean_dir
-        or norm_val.startswith(clean_dir + "/")
-        or f"/{clean_dir}/" in norm_val
-        or norm_val.endswith("/" + clean_dir)
-        or bool(re.search(r"(?:^|[/\\])dev_tasks(?:$|[/\\])", norm_val))
-    )
+    base_dir = os.path.basename(clean_dir.rstrip("/"))
+    for d in dict.fromkeys(d for d in (clean_dir, base_dir, "dev_tasks") if d):
+        escaped_d = re.escape(d)
+        if (
+            norm_val == d
+            or norm_val.startswith(d + "/")
+            or f"/{d}/" in norm_val
+            or norm_val.endswith("/" + d)
+            or bool(re.search(rf"(?:^|/){escaped_d}(?:$|/)", norm_val))
+        ):
+            return True
+    return False
 
 
 def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: str = "docs/dev_tasks") -> Optional[str]:
-    """保守检测 Shell 命令是否包含对受管任务目录的写入尝试（>、>>、tee、Out-File、Set-Content 等）。
+    """保守检测 Shell 命令是否包含对受管任务目录的写入或删除/移动尝试（>、>>、tee、Out-File、rm、mv 等）。
     命中返回检测到的相对路径，未命中返回 None。
     """
     if not command or not isinstance(command, str):
         return None
 
     clean_dir = (dev_tasks_dir or "docs/dev_tasks").replace("\\", "/").strip("/").lower()
+    base_dir = os.path.basename(clean_dir.rstrip("/"))
+    dir_candidates = list(dict.fromkeys(d for d in (clean_dir, base_dir, "dev_tasks") if d))
+    dir_alt = "|".join(re.escape(d) for d in dir_candidates)
     cmd_lower = command.replace("\\", "/").lower()
 
-    # 快速短路：若命令中根本不包含任务目录关键字，平滑放行
-    if clean_dir not in cmd_lower and not re.search(r"(?:^|[\s\"'/\\])dev_tasks(?:$|[\s\"'/\\])", cmd_lower):
+    # 快速短路：若命令中根本不包含受管任务目录路径，平滑放行
+    if not any(d in cmd_lower for d in dir_candidates) and not re.search(
+        rf"(?:^|[\s\"'/])(?:{dir_alt})(?:$|[\s\"'/])", cmd_lower
+    ):
         return None
 
     # 1. 正则精确提取与判定
@@ -426,12 +445,19 @@ def detect_shell_write_bypass(command: str, workspace_root: str, dev_tasks_dir: 
             if _is_task_dir_token(norm_val, clean_dir):
                 return norm_val
 
-    # 2. Fail-Closed 兜底判定：包含任务目录关键字，且包含明显的写入重定向/覆盖原语
+    # 2. Fail-Closed 兜底判定：包含任务目录关键字，且包含明显的写入/删除/移动原语
     has_write_indicator = bool(re.search(r"(?<![-\w=])>{1,2}(?!=)", cmd_lower)) or any(
-        ind in cmd_lower for ind in ("tee", "out-file", "set-content", "add-content", "[io.file]::", "new-item")
-    )
+        ind in cmd_lower for ind in (
+            "tee", "out-file", "set-content", "add-content", "[io.file]::",
+            "new-item", "remove-item", "move-item", "rename-item",
+        )
+    ) or bool(re.search(r"\b(?:rm|del|erase|rmdir|mv|move|cp|copy|touch|sed)\b", cmd_lower))
     if has_write_indicator:
-        tokens = re.findall(r"[\"']?([^\s|;&\"'>]*dev_tasks[^\s|;&\"']*)[\"']?", command, re.IGNORECASE)
+        tokens = re.findall(
+            rf"[\"']?([^\s|;&\"'>]*(?:{dir_alt})[^\s|;&\"']*)[\"']?",
+            command.replace("\\", "/"),
+            re.IGNORECASE,
+        )
         for tok in tokens:
             if _is_task_dir_token(tok, clean_dir):
                 return tok.strip("\"'")
@@ -677,7 +703,7 @@ def check_task_status_guard(target_file: str, tool_name: str, args: dict) -> Opt
         try:
             with open(target_file, "r", encoding="utf-8") as f:
                 old_content = f.read()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             # fail-open
             return None
 
@@ -742,12 +768,12 @@ def is_meta_file(target_file: str, workspace_root: str, config) -> bool:
         return False
 
     norm_target = resolved.replace("\\", "/").lower()
-    norm_root = _strip_long_path_prefix(os.path.realpath(workspace_root)).replace("\\", "/").lower()
+    norm_root = _strip_long_path_prefix(os.path.realpath(workspace_root)).replace("\\", "/").lower().rstrip("/")
 
-    if norm_target.startswith(norm_root):
+    if norm_target == norm_root or norm_target.startswith(norm_root + "/"):
         rel_path = norm_target[len(norm_root):].lstrip("/")
     else:
-        rel_path = norm_target
+        return False
 
     # .agents 目录内的所有元文件
     if rel_path.startswith(".agents/") or rel_path == ".agents":
@@ -760,8 +786,8 @@ def is_meta_file(target_file: str, workspace_root: str, config) -> bool:
 
     # dev_tasks 目录内的规范说明文件（如 README.md）
     if os.path.basename(norm_target).lower() == "readme.md":
-        dev_tasks_dir = config.resolve_path("dev_tasks_dir").replace("\\", "/").lower()
-        if norm_target.startswith(dev_tasks_dir):
+        dev_tasks_dir = _strip_long_path_prefix(os.path.realpath(config.resolve_path("dev_tasks_dir"))).replace("\\", "/").lower().rstrip("/")
+        if norm_target.startswith(dev_tasks_dir + "/"):
             return True
 
     return False
@@ -815,8 +841,10 @@ def verify_session_integrity(
 
     # 物理会话锁核验 (Session Lock Check)
     locked_session = bypass_data.get("session_id")
-    if locked_session and incoming_conversation_id:
-        if locked_session.strip().lower() != incoming_conversation_id.strip().lower():
+    if locked_session:
+        if not incoming_conversation_id or not str(incoming_conversation_id).strip():
+            return False, f"缺失当前会话 ID，无法校验会话锁 (锁定会话: {locked_session})"
+        if str(locked_session).strip().lower() != str(incoming_conversation_id).strip().lower():
             return False, f"跨会话冲突: 锁定会话 {locked_session} != 当前会话 {incoming_conversation_id}"
 
     # 过期失效检查（统一 UTC 时间戳比对与 aware/naive 兼容）
@@ -824,6 +852,8 @@ def verify_session_integrity(
     if expires_at:
         try:
             exp_dt = datetime.fromisoformat(expires_at)
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
             exp_dt_utc = exp_dt.astimezone(timezone.utc)
             if datetime.now(timezone.utc) > exp_dt_utc:
                 return False, f"会话租约已超时过期 ({expires_at})"
@@ -848,12 +878,6 @@ def safe_clean_corrupted_bypass(bypass_path: str, logger: Optional[logging.Logge
     except Exception as e:
         if logger:
             logger.warning(f"获取旁路文件锁失败 {lock_file}: {e}", exc_info=True)
-        if os.path.isfile(bypass_path):
-            try:
-                os.remove(bypass_path)
-            except Exception as e2:
-                if logger:
-                    logger.warning(f"降级删除旁路文件失败 {bypass_path}: {e2}", exc_info=True)
 
 
 def is_session_bypass_matched(
@@ -929,6 +953,112 @@ def is_session_bypass_matched(
     return False
 
 
+def _extract_task_affected_files(content: str, task_id: str) -> List[str]:
+    """Fence-aware extraction of affected file entries strictly within the target task section."""
+    if not content or not task_id:
+        return []
+
+    header_re = re.compile(
+        rf"^###\s+(?:任务|Task)\s+{re.escape(task_id)}(?:\s|$|:|—|-)",
+        re.IGNORECASE,
+    )
+    in_fence_char: Optional[str] = None
+    in_fence_len = 0
+    in_target_task = False
+    section_lines: List[str] = []
+
+    for line in content.splitlines():
+        stripped_left = line.lstrip(" ")
+        indent = len(line) - len(stripped_left)
+
+        if indent <= 3 and (stripped_left.startswith("```") or stripped_left.startswith("~~~")):
+            fence_char = stripped_left[0]
+            flen = len(stripped_left) - len(stripped_left.lstrip(fence_char))
+            if in_fence_char is None:
+                in_fence_char = fence_char
+                in_fence_len = flen
+            elif in_fence_char == fence_char and flen >= in_fence_len:
+                in_fence_char = None
+                in_fence_len = 0
+            if in_target_task:
+                section_lines.append(line)
+            continue
+
+        if in_fence_char is not None:
+            if in_target_task:
+                section_lines.append(line)
+            continue
+
+        if stripped_left.startswith(">"):
+            if in_target_task:
+                section_lines.append(line)
+            continue
+
+        if stripped_left.startswith("###") and not stripped_left.startswith("####"):
+            if in_target_task:
+                break
+            if header_re.match(stripped_left):
+                in_target_task = True
+                continue
+
+        if in_target_task:
+            section_lines.append(line)
+
+    if not section_lines:
+        return []
+
+    allowed_entries: List[str] = []
+    in_fence_char = None
+    in_fence_len = 0
+    found_heading = False
+    in_affected_fence = False
+
+    for line in section_lines:
+        stripped_left = line.lstrip(" ")
+        indent = len(line) - len(stripped_left)
+
+        if indent <= 3 and (stripped_left.startswith("```") or stripped_left.startswith("~~~")):
+            fence_char = stripped_left[0]
+            flen = len(stripped_left) - len(stripped_left.lstrip(fence_char))
+            if in_fence_char is None:
+                in_fence_char = fence_char
+                in_fence_len = flen
+                if found_heading:
+                    in_affected_fence = True
+                continue
+            elif in_fence_char == fence_char and flen >= in_fence_len:
+                in_fence_char = None
+                in_fence_len = 0
+                if in_affected_fence:
+                    break
+                continue
+
+        if in_affected_fence:
+            item = line.strip()
+            if not item:
+                continue
+            item = re.sub(r"^(?:[-*+]\s+)+", "", item).strip()
+            item = re.sub(r"^\[(?:MODIFY|NEW|DELETE|RENAME)\]\s*", "", item, flags=re.IGNORECASE).strip()
+            item = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", item).strip()
+            for part in re.split(r"\s*(?:->|➔)\s*", item):
+                cleaned = part.strip().strip("`").strip().replace("\\", "/")
+                while cleaned.startswith("./"):
+                    cleaned = cleaned[2:]
+                if cleaned:
+                    allowed_entries.append(cleaned)
+            continue
+
+        if in_fence_char is not None:
+            continue
+
+        if re.match(r"^####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*$", stripped_left, re.IGNORECASE):
+            found_heading = True
+        elif found_heading and stripped_left.startswith("####"):
+            break
+
+    return allowed_entries
+
+
 def main():
     logger = None
     target_file = ""
@@ -995,6 +1125,11 @@ def main():
                 if decision in ("deny", "ask") and not adapter.supports_interactive_ask():
                     sys.exit(1)
 
+        # 快速短路 1：只读工具无条件放行（保障 <50ms 预算，不加载 yaml/state_machine）
+        if tool_name in READ_ONLY_TOOLS:
+            emit_decision("allow", "Read-only tool fast-path allow / 只读工具快速放行")
+            return
+
         # 专属分支：Shell 命令直接写入/重定向受管任务目录检测（废除“空 TargetFile 即盲目放行”漏洞）
         if tool_name in SHELL_TOOL_NAMES:
             command = args.get("CommandLine") or args.get("command") or args.get("cmd") or ""
@@ -1037,14 +1172,19 @@ def main():
             emit_decision("allow", "非Quench项目放行")
             return
 
+        # 0. 物理路径归一原语解析（消解软链接、junction 与跨驱动器/相对路径逃逸）
+        resolved_target = resolve_realpath_under(workspace_root, target_file)
+
+        # 快速短路 2：工作区外部 Agent brain 会话制品白名单免加载 yaml 直接放行
+        if resolved_target is None and is_agent_brain_artifact(target_file, workspace_root):
+            emit_decision("allow", "Agent brain runtime artifact whitelist / Agent 运行期 brain 制品白名单豁免放行")
+            return
+
         from project_config import load_project_config
         from state_machine import STATUS_IN_PROGRESS, parse_task_file
 
         config = load_project_config(workspace_root)
         dev_tasks_dir = config.resolve_path("dev_tasks_dir")
-
-        # 0. 物理路径归一原语解析（消解软链接、junction 与跨驱动器/相对路径逃逸）
-        resolved_target = resolve_realpath_under(workspace_root, target_file)
 
         # 检查是否发生任务单物理逃逸攻击（以任务目录为跳板逃逸出受管任务单）
         rel_dev_tasks = (config.dev_tasks_dir or "docs/dev_tasks").replace("\\", "/").lower().strip("/")
@@ -1119,36 +1259,21 @@ def main():
             with open(active_file_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
 
-            task_id_pattern = re.escape(active_task.id)
-            pattern = re.compile(
-                rf"###\s+(?:任务|Task)\s+{task_id_pattern}\s+.*?####\s+(?:【涉及文件】|\[Affected Files\]|【Affected Files】)\s*```(.*?)```",
-                re.DOTALL | re.IGNORECASE,
-            )
-            m = pattern.search(content)
-
-            allowed_files = set()
-            if m:
-                raw_files_block = m.group(1).strip()
-                for line in raw_files_block.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    cleaned = re.sub(r"^\[(MODIFY|NEW|DELETE|RENAME)\]\s*", "", line).strip()
-                    cleaned = cleaned.split("（")[0].split("(")[0].strip()
-                    if cleaned:
-                        norm_path = os.path.normpath(os.path.join(workspace_root, cleaned)).lower()
-                        allowed_files.add(norm_path)
-                        allowed_files.add(os.path.normpath(cleaned).lower())
-
-            target_norm = os.path.normpath(effective_target).lower()
-            target_basename = os.path.basename(target_norm)
-
+            allowed_entries = _extract_task_affected_files(content, str(active_task.id))
             is_in_allowed_scope = False
-            if target_norm in allowed_files:
-                is_in_allowed_scope = True
-            else:
-                for af in allowed_files:
-                    if target_norm.endswith(af) or af.endswith(target_norm) or os.path.basename(af) == target_basename:
+
+            for entry in allowed_entries:
+                if "*" in entry or "?" in entry:
+                    if matches_pattern(effective_target, entry, workspace_root):
+                        is_in_allowed_scope = True
+                        break
+                else:
+                    allowed_phys = resolve_realpath_under(workspace_root, entry)
+                    if (
+                        allowed_phys
+                        and resolved_target
+                        and os.path.normcase(allowed_phys) == os.path.normcase(resolved_target)
+                    ):
                         is_in_allowed_scope = True
                         break
 

@@ -37,9 +37,13 @@ from reviewer_engine import (
     CoalescingTextSink,
     CONSULT_MODE_INSTRUCTIONS,
     PromptAssembler,
+    ReviewerAuthError,
     ReviewerBadRequestError,
     ReviewerClient,
     ReviewerEngineError,
+    ReviewerError,
+    ReviewerNotConfiguredError,
+    ReviewerTimeoutError,
     RollingJsonlTelemetrySink,
     RotatingFileSink,
     compute_prompt_hash,
@@ -811,12 +815,12 @@ def build_static_prefix(workspace_root: str, config: Any) -> str:
     arch_doc_rel = getattr(config, "architecture_doc", None)
     arch_mtime = 0.0
     if arch_doc_rel:
-        arch_abs = os.path.normpath(os.path.join(real_ws, arch_doc_rel))
-        if os.path.isfile(arch_abs):
-            try:
+        try:
+            arch_abs = sanitize_workspace_path(real_ws, arch_doc_rel, must_exist=True)
+            if os.path.isfile(arch_abs):
                 arch_mtime = os.path.getmtime(arch_abs)
-            except OSError:
-                pass
+        except (PathTraversalError, ValueError, OSError):
+            pass
 
     rules_path = os.path.normpath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rules", "dev-tasks-discipline.md")
@@ -1066,7 +1070,18 @@ async def _execute_consultation(
                     try:
                         accumulated_reasoning_chars = 0
                         last_usage = None
-                        async for chunk in client.stream_chat(engine_messages):
+                        stream_kwargs: dict[str, Any] = {}
+                        if abort_handle is not None:
+                            try:
+                                sig = inspect.signature(client.stream_chat)
+                                if "abort_handle" in sig.parameters or any(
+                                    p.kind == inspect.Parameter.VAR_KEYWORD
+                                    for p in sig.parameters.values()
+                                ):
+                                    stream_kwargs["abort_handle"] = abort_handle
+                            except (TypeError, ValueError):
+                                pass
+                        async for chunk in client.stream_chat(engine_messages, **stream_kwargs):
                             # 取消与打断检查
                             if cancel_event is not None and cancel_event.is_set():
                                 if abort_handle is not None:
@@ -1245,14 +1260,24 @@ async def _execute_consultation(
                             },
                             self_verification_warning=self_verification_warning,
                         )
-                except ReviewerEngineError as ee:
+                except (
+                    ReviewerAuthError,
+                    ReviewerTimeoutError,
+                    ReviewerNotConfiguredError,
+                    ReviewerEngineError,
+                    ReviewerError,
+                ) as ee:
                     err_msg = str(ee)
                     sink.write_chunk_text(
-                        f"\n{datetime.now(timezone.utc).isoformat()} [error] ReviewerEngineError: {err_msg}\n"
+                        f"\n{datetime.now(timezone.utc).isoformat()} [error] {type(ee).__name__}: {err_msg}\n"
                     )
                     sink.flush()
-                    if "401" in err_msg or "鉴权" in err_msg:
+                    if isinstance(ee, ReviewerAuthError) or "401" in err_msg or "鉴权" in err_msg:
                         deg_reason = "auth_401"
+                    elif isinstance(ee, ReviewerTimeoutError):
+                        deg_reason = "timeout"
+                    elif isinstance(ee, ReviewerNotConfiguredError):
+                        deg_reason = "reviewer_not_configured"
                     elif "connection" in err_msg.lower() or "unavailable" in err_msg.lower() or "refused" in err_msg.lower():
                         deg_reason = "connect_error"
                     else:

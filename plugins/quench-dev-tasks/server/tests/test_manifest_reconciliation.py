@@ -305,3 +305,39 @@ def test_dev_tasks_propose_auto_registers_in_manifest(reconcile_workspace_fixtur
 
     assert rel_path in report.matched_queue
     assert rel_path not in report.bypass_queue
+
+
+def test_reconcile_and_resolve_prefer_active_record_over_tombstone(reconcile_workspace_fixture):
+    """验证裸 task_id 解析优先命中活跃记录，不被历史已释放墓碑遮蔽。"""
+    from manifest import Manifest, TaskRecord, _resolve_namespaced_id, atomic_replace_manifest
+
+    ws, _ = reconcile_workspace_fixture
+    m = Manifest(
+        schema_version="1.0",
+        records={
+            "2026-01-01_old::1.1": TaskRecord(
+                task_id="2026-01-01_old::1.1",
+                md_sha256="a" * 64,
+                generation=2,
+                holder_token="tok_old",
+                last_heartbeat_monotonic_ns=1,
+                last_heartbeat_wall_utc="2026-01-01T00:00:00Z",
+                git_head_sha="sha",
+                git_index_mtime=1.0,
+                released=True,
+            ),
+            "2026-09-24_cur::1.1": TaskRecord(
+                task_id="2026-09-24_cur::1.1",
+                md_sha256="b" * 64,
+                generation=1,
+                holder_token="tok_cur",
+                last_heartbeat_monotonic_ns=2,
+                last_heartbeat_wall_utc="2026-09-24T00:00:00Z",
+                git_head_sha="sha",
+                git_index_mtime=2.0,
+                released=False,
+            ),
+        },
+    )
+    atomic_replace_manifest(str(ws), m)
+    assert _resolve_namespaced_id(m, "1.1") == "2026-09-24_cur::1.1"

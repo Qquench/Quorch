@@ -68,6 +68,44 @@ ALLOWED_PROVIDER_EGRESS_FILES = frozenset(
     }
 )
 
+ALLOWED_PROVIDER_EGRESS_REL_PATHS = frozenset(
+    {
+        "plugins/quench-dev-tasks/server/reviewer_engine.py",
+        "plugins/quench-dev-tasks/server/project_config.py",
+        "plugins/quench-dev-tasks/scripts/check_no_api_bypass.py",
+        "plugins/quench-dev-tasks/server/tests/test_no_api_bypass.py",
+    }
+)
+
+ALLOWED_ENV_READ_REL_PATHS = frozenset(
+    {
+        "plugins/quench-dev-tasks/server/project_config.py",
+        "plugins/quench-dev-tasks/server/reviewer_engine.py",
+        "plugins/quench-dev-tasks/scripts/check_no_api_bypass.py",
+    }
+)
+
+ALLOWED_CLIENT_IMPORT_REL_PATHS = frozenset(
+    {
+        "plugins/quench-dev-tasks/server/reviewer_engine.py",
+    }
+)
+
+
+def _compute_rel_posix(file_path: str, workspace_root: Optional[str]) -> Optional[str]:
+    """Compute POSIX relative path within workspace_root, or None if outside / unset."""
+    if not workspace_root:
+        return None
+    try:
+        real_ws = os.path.realpath(os.path.abspath(workspace_root))
+        real_fp = os.path.realpath(os.path.abspath(file_path))
+        common = os.path.commonpath([real_ws, real_fp])
+        if os.path.normcase(common) != os.path.normcase(real_ws):
+            return None
+        return os.path.relpath(real_fp, real_ws).replace("\\", "/")
+    except (ValueError, OSError):
+        return None
+
 
 @dataclass(frozen=True)
 class Violation:
@@ -80,13 +118,37 @@ class Violation:
 
 
 class ApiBypassAstVisitor(ast.NodeVisitor):
-    def __init__(self, file_path: str, source_lines: Sequence[str]) -> None:
+    def __init__(
+        self,
+        file_path: str,
+        source_lines: Sequence[str],
+        workspace_root: Optional[str] = None,
+    ) -> None:
         self.file_path = file_path
         self.source_lines = source_lines
         self.violations: List[Violation] = []
         self._basename = os.path.basename(file_path)
-        parts = Path(file_path).parts
-        self._is_test_seam = "tests" in parts or self._basename in ("conftest.py", "test_no_api_bypass.py")
+        self._rel_posix = _compute_rel_posix(file_path, workspace_root)
+        if self._rel_posix is not None:
+            rel_parts = Path(self._rel_posix).parts
+            self._is_test_seam = ("tests" in rel_parts) or self._basename in ("conftest.py", "test_no_api_bypass.py")
+        else:
+            self._is_test_seam = self._basename in ("conftest.py", "test_no_api_bypass.py")
+
+    def _is_allowed_provider_egress(self) -> bool:
+        if self._rel_posix is not None:
+            return self._rel_posix in ALLOWED_PROVIDER_EGRESS_REL_PATHS
+        return False
+
+    def _is_allowed_env_read(self) -> bool:
+        if self._rel_posix is not None:
+            return self._rel_posix in ALLOWED_ENV_READ_REL_PATHS
+        return False
+
+    def _is_allowed_client_import(self) -> bool:
+        if self._rel_posix is not None:
+            return self._rel_posix in ALLOWED_CLIENT_IMPORT_REL_PATHS
+        return False
 
     def _get_snippet(self, lineno: int) -> str:
         if 1 <= lineno <= len(self.source_lines):
@@ -112,7 +174,7 @@ class ApiBypassAstVisitor(ast.NodeVisitor):
         for alias in node.names:
             top_mod = alias.name.split(".")[0]
             if alias.name in FORBIDDEN_PROVIDER_MODULES or top_mod in FORBIDDEN_PROVIDER_MODULES:
-                if self._basename not in ALLOWED_PROVIDER_EGRESS_FILES:
+                if not self._is_allowed_provider_egress():
                     self._add_violation(
                         node,
                         "FORBIDDEN_PROVIDER_IMPORT",
@@ -123,16 +185,30 @@ class ApiBypassAstVisitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module:
             top_mod = node.module.split(".")[0]
-            if node.module in FORBIDDEN_PROVIDER_MODULES or top_mod in FORBIDDEN_PROVIDER_MODULES:
-                if self._basename not in ALLOWED_PROVIDER_EGRESS_FILES:
+            module_hit = node.module in FORBIDDEN_PROVIDER_MODULES or top_mod in FORBIDDEN_PROVIDER_MODULES
+            if module_hit:
+                if not self._is_allowed_provider_egress():
                     self._add_violation(
                         node,
                         "FORBIDDEN_PROVIDER_IMPORT",
                         f"Direct import from provider SDK '{node.module}' is prohibited outside reviewer_engine.py.",
                     )
+            else:
+                for alias in node.names:
+                    full_name = f"{node.module}.{alias.name}"
+                    if full_name in FORBIDDEN_PROVIDER_MODULES or any(
+                        full_name.startswith(mod + ".") for mod in FORBIDDEN_PROVIDER_MODULES
+                    ):
+                        if not self._is_allowed_provider_egress():
+                            self._add_violation(
+                                node,
+                                "FORBIDDEN_PROVIDER_IMPORT",
+                                f"Direct import from provider SDK '{full_name}' is prohibited outside reviewer_engine.py.",
+                            )
+                            break
             # Check direct import of DeepSeekClient outside reviewer_engine and authorized tests
             if "DeepSeekClient" in [a.name for a in node.names]:
-                if not self._is_test_seam and self._basename not in ("reviewer_engine.py",):
+                if not self._is_test_seam and not self._is_allowed_client_import():
                     self._add_violation(
                         node,
                         "FORBIDDEN_PROVIDER_CLIENT_IMPORT",
@@ -145,7 +221,7 @@ class ApiBypassAstVisitor(ast.NodeVisitor):
             val = node.value
             for pat in FORBIDDEN_PROVIDER_ENDPOINTS:
                 if pat.search(val):
-                    if not self._is_test_seam and self._basename not in ALLOWED_PROVIDER_EGRESS_FILES:
+                    if not self._is_test_seam and not self._is_allowed_provider_egress():
                         self._add_violation(
                             node,
                             "FORBIDDEN_ENDPOINT_LITERAL",
@@ -154,23 +230,30 @@ class ApiBypassAstVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        # Check direct os.environ.get("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+        # Check direct os.environ.get("DEEPSEEK_API_KEY") or os.getenv(key="OPENAI_API_KEY")
         fn_name = ""
         if isinstance(node.func, ast.Attribute):
             fn_name = node.func.attr
         elif isinstance(node.func, ast.Name):
             fn_name = node.func.id
 
-        if fn_name in ("get", "getenv") and node.args:
-            first_arg = node.args[0]
-            if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
-                if first_arg.value.upper() in FORBIDDEN_PROVIDER_ENV_VARS:
-                    if not self._is_test_seam and self._basename not in ("project_config.py", "reviewer_engine.py", "check_no_api_bypass.py"):
-                        self._add_violation(
-                            node,
-                            "FORBIDDEN_ENV_KEY_READ",
-                            f"Direct access to provider API key env var '{first_arg.value}' is prohibited. Use project_config.load_project_config().",
-                        )
+        if fn_name in ("get", "getenv"):
+            cand_nodes: List[ast.expr] = []
+            if node.args:
+                cand_nodes.append(node.args[0])
+            for kw in node.keywords:
+                if kw.arg in ("key", "k") or kw.arg is not None:
+                    cand_nodes.append(kw.value)
+            for arg_node in cand_nodes:
+                if isinstance(arg_node, ast.Constant) and isinstance(arg_node.value, str):
+                    if arg_node.value.upper() in FORBIDDEN_PROVIDER_ENV_VARS:
+                        if not self._is_test_seam and not self._is_allowed_env_read():
+                            self._add_violation(
+                                node,
+                                "FORBIDDEN_ENV_KEY_READ",
+                                f"Direct access to provider API key env var '{arg_node.value}' is prohibited. Use project_config.load_project_config().",
+                            )
+                            break
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
@@ -178,7 +261,7 @@ class ApiBypassAstVisitor(ast.NodeVisitor):
         slice_node = node.slice
         if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str):
             if slice_node.value.upper() in FORBIDDEN_PROVIDER_ENV_VARS:
-                if not self._is_test_seam and self._basename not in ("project_config.py", "reviewer_engine.py", "check_no_api_bypass.py"):
+                if not self._is_test_seam and not self._is_allowed_env_read():
                     self._add_violation(
                         node,
                         "FORBIDDEN_ENV_KEY_READ",
@@ -187,7 +270,10 @@ class ApiBypassAstVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def scan_file_for_bypass(file_path: str) -> List[Violation]:
+def scan_file_for_bypass(
+    file_path: str,
+    workspace_root: Optional[str] = None,
+) -> List[Violation]:
     """Scan a single Python file for reviewer API bypasses via AST analysis."""
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -201,7 +287,7 @@ def scan_file_for_bypass(file_path: str) -> List[Violation]:
         return []
 
     lines = content.splitlines()
-    visitor = ApiBypassAstVisitor(file_path, lines)
+    visitor = ApiBypassAstVisitor(file_path, lines, workspace_root=workspace_root)
     visitor.visit(tree)
     return visitor.violations
 
@@ -224,7 +310,7 @@ def scan_workspace_for_bypass(
             continue
 
         if os.path.isfile(abs_d) and abs_d.endswith(".py"):
-            violations.extend(scan_file_for_bypass(abs_d))
+            violations.extend(scan_file_for_bypass(abs_d, workspace_root=real_ws))
             continue
 
         for root, dirs, files in os.walk(abs_d):
@@ -232,7 +318,7 @@ def scan_workspace_for_bypass(
             for f in files:
                 if f.endswith(".py"):
                     full_p = os.path.join(root, f)
-                    violations.extend(scan_file_for_bypass(full_p))
+                    violations.extend(scan_file_for_bypass(full_p, workspace_root=real_ws))
 
     return violations
 
@@ -266,7 +352,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     violations: List[Violation] = []
     if args.files:
         for f in args.files:
-            violations.extend(scan_file_for_bypass(f))
+            violations.extend(scan_file_for_bypass(f, workspace_root=ws))
     else:
         violations = scan_workspace_for_bypass(ws)
 

@@ -61,7 +61,7 @@ All non-trivial changes should be planned using standard DevTasks containing the
 > Quench natively supports bilingual field headings (e.g., `#### [Affected Files]` and `#### 【涉及文件】` are completely interchangeable).
 
 ### 2. Test-Driven Development (TDD)
-- **Zero Regression**: All existing 105+ tests must continue to pass 100%.
+- **Zero Regression**: All existing 1,300+ tests must continue to pass 100%.
 - **Assertion Coverage**: Any bug fix or new feature must include accompanying unit test assertions in `plugins/quench-dev-tasks/server/tests/`.
 - **Zero Local Hardcoded Paths**: Never commit personal absolute file paths (such as `C:\Users\...` or `D:\Work\...`). Always resolve paths dynamically using `os.path.dirname(os.path.abspath(__file__))`.
 

@@ -11,6 +11,7 @@ import asyncio
 import codecs
 import functools
 import hashlib
+import http.client
 import inspect
 import io
 import json
@@ -52,6 +53,7 @@ from typing import (
 import anyio
 from filelock import FileLock
 
+from path_guard import PathTraversalError, sanitize_workspace_path
 from project_config import QuenchStackConfig, ReviewerEngineConfig
 from observability_policy import (
     MAX_RECORD_BYTES,
@@ -86,24 +88,24 @@ class ReviewerError(RuntimeError):
     pass
 
 
-class ReviewerAuthError(ReviewerError):
+# 向后兼容别名与继承（保证现有捕获语句 100% 兼容）
+class ReviewerEngineError(ReviewerError):
+    """Reviewer Engine 基础异常 (向后兼容别名)。"""
+    pass
+
+
+class ReviewerAuthError(ReviewerEngineError):
     """身份鉴权或访问受限异常 (HTTP 401 / 403)。不可重试。"""
     pass
 
 
-class ReviewerTimeoutError(ReviewerError):
+class ReviewerTimeoutError(ReviewerEngineError):
     """通信或执行超时异常。"""
     pass
 
 
-class ReviewerNotConfiguredError(ReviewerError):
+class ReviewerNotConfiguredError(ReviewerEngineError):
     """Reviewer 引擎未配置或不可用。不可重试。"""
-    pass
-
-
-# 向后兼容别名与继承（保证现有捕获语句 100% 兼容）
-class ReviewerEngineError(ReviewerError):
-    """Reviewer Engine 基础异常 (向后兼容别名)。"""
     pass
 
 
@@ -336,10 +338,10 @@ def _iter_sse_payloads(response: Any) -> Iterator[Mapping[str, Any]]:
                 raw_chunk = response.read(8192)
             else:
                 raw_chunk = next(response)
-        except (StopIteration, ValueError, OSError):
+        except StopIteration:
             break
-        except Exception:
-            break
+        except (ValueError, http.client.IncompleteRead, http.client.HTTPException, OSError):
+            raise
 
         if not raw_chunk:
             break
@@ -564,92 +566,98 @@ class RotatingFileSink:
 
         self._carry_over = ""
         self._last_flush = time.monotonic()
+        self._lock = threading.RLock()
         self._fp = open(self.log_file, mode, encoding="utf-8", errors="replace")
         self._is_closed = False
 
     def _rotate_if_needed(self, incoming_bytes: int) -> None:
-        if self._written_bytes + incoming_bytes > self.max_bytes:
-            if not self._fp.closed:
-                self._fp.flush()
-                self._fp.close()
-            try:
-                if os.path.exists(self.rot_file):
-                    os.remove(self.rot_file)
-                if os.path.exists(self.log_file):
-                    os.replace(self.log_file, self.rot_file)
-            except Exception:
-                pass
-            self._fp = open(self.log_file, "w", encoding="utf-8", errors="replace")
-            marker = f"[... ROTATED AT {self.max_bytes // 1024}KB ...]\n"
-            self._fp.write(marker)
-            self._written_bytes = len(marker.encode("utf-8"))
+        with self._lock:
+            if self._written_bytes + incoming_bytes > self.max_bytes:
+                if not self._fp.closed:
+                    self._fp.flush()
+                    self._fp.close()
+                try:
+                    if os.path.exists(self.rot_file):
+                        os.remove(self.rot_file)
+                    if os.path.exists(self.log_file):
+                        os.replace(self.log_file, self.rot_file)
+                except Exception:
+                    pass
+                self._fp = open(self.log_file, "w", encoding="utf-8", errors="replace")
+                marker = f"[... ROTATED AT {self.max_bytes // 1024}KB ...]\n"
+                self._fp.write(marker)
+                self._written_bytes = len(marker.encode("utf-8"))
 
     def write_chunk_text(self, text: str) -> None:
-        if self._is_closed:
-            return
-        combined = self._carry_over + text
-        redacted = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", combined)
+        with self._lock:
+            if self._is_closed:
+                return
+            combined = self._carry_over + text
+            redacted = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", combined)
 
-        if len(redacted) > self.carry_over_bytes:
-            to_write = redacted[: -self.carry_over_bytes]
-            self._carry_over = redacted[-self.carry_over_bytes :]
-        else:
-            to_write = ""
-            self._carry_over = redacted
+            if len(redacted) > self.carry_over_bytes:
+                to_write = redacted[: -self.carry_over_bytes]
+                self._carry_over = redacted[-self.carry_over_bytes :]
+            else:
+                to_write = ""
+                self._carry_over = redacted
 
-        if to_write:
-            data_bytes = to_write.encode("utf-8")
-            self._rotate_if_needed(len(data_bytes))
-            self._fp.write(to_write)
-            self._written_bytes += len(data_bytes)
+            if to_write:
+                data_bytes = to_write.encode("utf-8")
+                self._rotate_if_needed(len(data_bytes))
+                self._fp.write(to_write)
+                self._written_bytes += len(data_bytes)
 
-            now = time.monotonic()
-            if now - self._last_flush >= self.flush_interval_s:
-                self._fp.flush()
-                self._last_flush = now
+                now = time.monotonic()
+                if now - self._last_flush >= self.flush_interval_s:
+                    self._fp.flush()
+                    self._last_flush = now
 
     def on_chunk(self, chunk: ThoughtChunk) -> None:
         self.write_chunk_text(chunk.content)
 
     def on_heartbeat(self, tokens_so_far: int, elapsed_s: float) -> None:
-        if not self._is_closed and not self._fp.closed:
-            self._fp.flush()
+        with self._lock:
+            if not self._is_closed and not self._fp.closed:
+                self._fp.flush()
 
     def on_finish(self, reason: str, meta: Dict[str, Any]) -> None:
         self.close()
 
     def flush(self) -> None:
         """显式刷新写缓冲区至底层磁盘文件。"""
-        if not self._is_closed and not self._fp.closed:
-            try:
-                self._fp.flush()
-                self._last_flush = time.monotonic()
-            except Exception:
-                pass
-
-    def close(self) -> None:
-        if not self._is_closed:
-            self._is_closed = True
-            try:
-                if self._carry_over:
-                    final_text = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", self._carry_over)
-                    self._carry_over = ""
-                    data_bytes = final_text.encode("utf-8")
-                    self._rotate_if_needed(len(data_bytes))
-                    self._fp.write(final_text)
-                    self._written_bytes += len(data_bytes)
-                if not self._fp.closed:
-                    self._fp.flush()
-                    self._fp.close()
-                # Update latest.log mirror
+        with self._lock:
+            if not self._is_closed and not self._fp.closed:
                 try:
-                    latest_ptr = os.path.join(self.log_dir, "latest.log")
-                    if os.path.exists(self.log_file):
-                        shutil.copyfile(self.log_file, latest_ptr)
+                    self._fp.flush()
+                    self._last_flush = time.monotonic()
                 except Exception:
                     pass
-            except Exception:
-                pass
+
+    def close(self) -> None:
+        with self._lock:
+            if not self._is_closed:
+                self._is_closed = True
+                try:
+                    if self._carry_over:
+                        final_text = _SECRET_REDACTION_PATTERN.sub("[REDACTED]", self._carry_over)
+                        self._carry_over = ""
+                        data_bytes = final_text.encode("utf-8")
+                        self._rotate_if_needed(len(data_bytes))
+                        self._fp.write(final_text)
+                        self._written_bytes += len(data_bytes)
+                    if not self._fp.closed:
+                        self._fp.flush()
+                        self._fp.close()
+                    # Update latest.log mirror
+                    try:
+                        latest_ptr = os.path.join(self.log_dir, "latest.log")
+                        if os.path.exists(self.log_file):
+                            shutil.copyfile(self.log_file, latest_ptr)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
 
 
 @dataclass(frozen=True)
@@ -952,7 +960,8 @@ class AdaptiveHeartbeatSink:
                         coro = res if asyncio.iscoroutine(res) else _run_awaitable(res)
                         loop.create_task(coro)
                     except RuntimeError:
-                        pass
+                        if asyncio.iscoroutine(res):
+                            res.close()
             except Exception:
                 pass
 
@@ -1214,11 +1223,14 @@ class PromptAssembler:
             "and formulate rigorous Six-Core-Field DevTasks with mandatory test assertions for execution models.\n\n",
         ]
 
-        # 1. 挂载全局架构设计文档（若配置）
+        # 1. 挂载全局架构设计文档（若配置，受工作区路径禁锢）
         arch_doc_rel = config.architecture_doc
         if arch_doc_rel:
-            arch_doc_abs = os.path.normpath(os.path.join(workspace_root, arch_doc_rel))
-            if os.path.isfile(arch_doc_abs):
+            try:
+                arch_doc_abs = sanitize_workspace_path(workspace_root, arch_doc_rel, must_exist=True)
+            except (PathTraversalError, ValueError, OSError):
+                arch_doc_abs = ""
+            if arch_doc_abs and os.path.isfile(arch_doc_abs):
                 try:
                     with open(arch_doc_abs, "r", encoding="utf-8", errors="ignore") as f:
                         arch_content = f.read().strip()
@@ -1521,6 +1533,7 @@ class ReviewerClient:
         log_dir: Optional[str] = None,
         soft_token_ceiling: int = 64000,
         soft_time_ceiling_s: float = 600.0,
+        abort_handle: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """向 Reviewer API 发起同步请求，具备精细化重试、有界读取、实时思考流落盘、心跳与总耗时预算熔断。"""
         if not self.is_available():
@@ -1595,6 +1608,8 @@ class ReviewerClient:
 
                 try:
                     with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
+                        if abort_handle is not None and hasattr(abort_handle, "set_target"):
+                            abort_handle.set_target(resp)
                         if stream:
                             full_content: List[str] = []
                             full_reasoning: List[str] = []
@@ -1604,8 +1619,22 @@ class ReviewerClient:
                             truncated = False
                             last_rep_check_tokens = 0
                             stream_usage: Optional[Dict[str, Any]] = None
+                            total_stream_bytes = 0
 
                             for raw_line in resp:
+                                raw_len = len(
+                                    raw_line.encode("utf-8") if isinstance(raw_line, str) else raw_line
+                                )
+                                total_stream_bytes += raw_len
+                                if total_stream_bytes > MAX_RESPONSE_BYTES:
+                                    raise ReviewerEngineError(
+                                        f"[Payload Too Large] 审查服务端流式响应超出体积安全上限 ({MAX_RESPONSE_BYTES}B)"
+                                    )
+                                if time.monotonic() > deadline:
+                                    raise ReviewerTimeoutError(
+                                        f"[Deadline Exceeded] 审查引擎总耗时预算耗尽 ({deadline_budget:.1f}s)，已熔断"
+                                    )
+
                                 line = raw_line.decode("utf-8", errors="replace").strip()
                                 if not line or line.startswith(":"):
                                     continue
@@ -1880,7 +1909,9 @@ class ReviewerClient:
                             base = 1.0 * (2 ** attempt)
                             backoff_sec = random.uniform(0.75, 1.25) * base
 
-                        time.sleep(backoff_sec)
+                        sleep_s = min(backoff_sec, max(0.0, deadline - time.monotonic()))
+                        if sleep_s > 0:
+                            time.sleep(sleep_s)
                         continue
 
                     raise ReviewerEngineError(f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 超过最大重试次数: {err_body}")
@@ -1893,7 +1924,9 @@ class ReviewerClient:
                     if attempt < max_attempts - 1:
                         base = 1.0 * (2 ** attempt)
                         backoff_sec = random.uniform(0.75, 1.25) * base
-                        time.sleep(backoff_sec)
+                        sleep_s = min(backoff_sec, max(0.0, deadline - time.monotonic()))
+                        if sleep_s > 0:
+                            time.sleep(sleep_s)
                         continue
 
                     raise ReviewerEngineError(f"[Network Error] 网络通信超时或异常: {e}")
@@ -1915,6 +1948,7 @@ class ReviewerClient:
         user_prompt: Optional[str] = None,
         *,
         session_id: str | None = None,
+        abort_handle: Optional[Any] = None,
     ) -> AsyncIterator[StreamChunk]:
         """异步消费通用 /chat/completions SSE 推理与思考流。
         基于探针提取 reasoning 与跨厂商 usage，单行 JSON 容错，带 1MB 单行截断防护与连接释放。
@@ -1961,6 +1995,15 @@ class ReviewerClient:
         stop_event = threading.Event()
         resp_holder: Dict[str, Any] = {"resp": None}
 
+        def _safe_put(item: Any) -> bool:
+            while not stop_event.is_set():
+                try:
+                    chunk_queue.put(item, timeout=0.2)
+                    return True
+                except queue.Full:
+                    continue
+            return False
+
         def _stream_worker() -> None:
             for attempt in range(max_attempts):
                 if stop_event.is_set():
@@ -1969,6 +2012,8 @@ class ReviewerClient:
                 try:
                     resp = _open_sse_response(endpoint, data_bytes, headers, float(self.timeout_seconds))
                     resp_holder["resp"] = resp
+                    if abort_handle is not None and hasattr(abort_handle, "set_target"):
+                        abort_handle.set_target(resp)
                     if stop_event.is_set():
                         try:
                             resp.close()
@@ -1990,15 +2035,16 @@ class ReviewerClient:
                             usage_snapshot = extract_usage(chunk_json, provider_label=self.provider_label)
 
                         if r_chunk or c_chunk or usage_snapshot:
-                            chunk_queue.put(
+                            if not _safe_put(
                                 StreamChunk(
                                     text=c_chunk,
                                     reasoning=r_chunk,
                                     usage=usage_snapshot,
                                     done=False,
                                 )
-                            )
-                    chunk_queue.put(StreamChunk(done=True))
+                            ):
+                                return
+                    _safe_put(StreamChunk(done=True))
                     return
 
                 except urllib.error.HTTPError as e:
@@ -2016,14 +2062,14 @@ class ReviewerClient:
 
                     if e.code in (401, 403):
                         key_display = self.api_key_env or "API_KEY"
-                        chunk_queue.put(
+                        _safe_put(
                             ReviewerAuthError(
                                 f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 鉴权失败：请检查环境变量 {key_display} 是否已导出: {err_body}"
                             )
                         )
                         return
                     if e.code in (400, 422):
-                        chunk_queue.put(
+                        _safe_put(
                             ReviewerBadRequestError(
                                 f"[HTTP {e.code} Bad Request] Reviewer API ({self.provider_label}) 请求被拒: {err_body}"
                             )
@@ -2034,19 +2080,26 @@ class ReviewerClient:
                         time.sleep(1.0 * (2 ** attempt))
                         continue
 
-                    chunk_queue.put(ReviewerError(f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 请求失败: {err_body}"))
+                    _safe_put(ReviewerError(f"[HTTP {e.code}] Reviewer API ({self.provider_label}) 请求失败: {err_body}"))
                     return
 
-                except (TimeoutError, urllib.error.URLError, OSError) as e:
+                except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError) as e:
+                    if stop_event.is_set():
+                        return
                     if isinstance(e, TimeoutError) or "timed out" in str(e).lower():
                         if attempt >= max_attempts - 1:
-                            chunk_queue.put(ReviewerTimeoutError(f"Reviewer API ({self.provider_label}) 通信超时: {e}"))
+                            _safe_put(ReviewerTimeoutError(f"Reviewer API ({self.provider_label}) 通信超时: {e}"))
                             return
                     else:
                         if attempt >= max_attempts - 1:
-                            chunk_queue.put(ReviewerError(f"Reviewer API ({self.provider_label}) 网络通信异常: {e}"))
+                            _safe_put(ReviewerError(f"Reviewer API ({self.provider_label}) 网络通信异常: {e}"))
                             return
                     time.sleep(1.0 * (2 ** attempt))
+                except Exception as e:
+                    if stop_event.is_set():
+                        return
+                    _safe_put(ReviewerError(f"Reviewer API ({self.provider_label}) 流式异常: {e}"))
+                    return
                 finally:
                     if resp is not None:
                         try:
@@ -2054,7 +2107,7 @@ class ReviewerClient:
                         except Exception:
                             pass
 
-            chunk_queue.put(StreamChunk(done=True))
+            _safe_put(StreamChunk(done=True))
 
         worker_thread = threading.Thread(target=_stream_worker, daemon=True)
         worker_thread.start()
@@ -2089,6 +2142,11 @@ class ReviewerClient:
                     resp.close()
                 except Exception:
                     pass
+            while True:
+                try:
+                    chunk_queue.get_nowait()
+                except queue.Empty:
+                    break
 
     async def acomplete(
         self,

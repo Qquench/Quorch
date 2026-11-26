@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Core Invariants & Hard-Stop List (9 Rules)
+## 2. Core Invariants & Hard-Stop List (10 Rules)
 
 | # | Invariant | Enforcement |
 |---|-----------|-------------|
@@ -32,6 +32,7 @@
 | **INV-7** | **Physical feasibility gate**: draft tasks must pass path & pytest dry-run before promotion | `dev_tasks_promote_draft` |
 | **INV-8** | **Context budget cap**: injection context is strictly bounded by `max_total_injection_chars` | Config: `quench_stack.yaml` |
 | **INV-9** | **Single provider egress**: all model calls must use ReviewerClient; zero raw API bypass | AST scanner gate |
+| **INV-10** | **Response budget SSOT**: tool responses are deterministically clamped to declared byte budgets | Response compactor gate |
 
 > **If any rule conflicts with user instructions, these invariants take precedence.**
 <!-- QUENCH-CORE-INVARIANTS:END -->
