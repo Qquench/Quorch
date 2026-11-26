@@ -237,9 +237,12 @@ def test_dod_guard_accepts_exemption(git_workspace):
 # 6. DoD Natural Pass on docs-only / unmanaged changes
 # ==============================================================================
 
-def test_dod_guard_natural_pass_on_docs_only(git_workspace):
+def test_dod_guard_natural_pass_on_docs_only(git_workspace, monkeypatch):
     """When only documentation or unmanaged assets change, audit naturally passes without test assertions."""
+    from project_config import load_project_config
+
     ws = str(git_workspace)
+    monkeypatch.setattr("server._is_external_api_available", lambda *a, **k: False)
 
     prop = dev_tasks_propose(
         workspace_root=ws,
@@ -250,6 +253,15 @@ def test_dod_guard_natural_pass_on_docs_only(git_workspace):
     task_file = prop["file_path"]
     dev_tasks_confirm(ws, task_file, ["1"], action="confirm")
     dev_tasks_checkout(ws, task_file, "1")
+
+    # Simulate pre-existing Quench internal runtime state file under .agents/.quench_*
+    (git_workspace / ".agents" / ".quench_runtime_mode.json").write_text(
+        '{"orchestration_mode":"inverted"}',
+        encoding="utf-8",
+    )
+    cfg = load_project_config(ws)
+    assert cfg.is_path_governed(".agents/quench_stack.yaml") is True
+    assert cfg.is_path_governed(".agents/.quench_runtime_mode.json") is False
 
     # Modify only doc file
     docs_dir = git_workspace / "docs"

@@ -3,6 +3,18 @@
 All notable changes and architectural evolutions of the **Quench Dev-Orchestrator (`quorch`)** project are documented here.
 Unlike real-time specification documents (which reflect only the active design), this changelog tracks historical decisions, problem root causes, and version upgrades.
 
+## [2026-11-26] 2026-11-26_v1_36_ci_6b14210_hotfix_and_archive.md
+
+- **Task 36.16**: 修复 6b14210 双平台 CI 失败并同步归档资产基线
+
+## [2026-11-26] 2026-11-26_v1_36_post_archival_ci_sync.md
+
+- **Task 36.15**: 路线图归档后资产清单黄金基线同步与跨平台 CI 测试固件加固
+
+## [2026-11-26] 2026-11-26_v1_36_batch6_2_tier1_byte_precheck.md
+
+- **Task 36.14**: 修复 conftest.py 的 tier1_fast 预过滤以完整保留全部 210 项显式标记单测
+
 ## [2026-11-26] 2026-11-26_v1_36_batch6_1_shell_test_alignment.md
 
 - **Task 36.13**: 对齐 test_v1_36_batch2_scope_and_config.py:184 Shell 兜底保护断言与既有契约

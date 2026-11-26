@@ -955,6 +955,10 @@ class QuenchStackConfig:
             if rel_path.startswith(u_dir) or f"/{u_dir}" in f"/{rel_path}":
                 return False
 
+        # Quench 内部瞬态运行状态文件（如 .agents/.quench_runtime_mode.json / .quench_bypass.json 等；绝不匹配 quench_stack*.yaml）
+        if rel_path.startswith(".agents/.quench_"):
+            return False
+
         # 默认为生产代码/核心配置
         return True
 

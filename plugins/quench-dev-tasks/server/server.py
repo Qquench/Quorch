@@ -2411,11 +2411,13 @@ def dev_tasks_checkout(
                                 and harness_act.get("channel") == "spawn_fresh"
                             ):
                                 try:
-                                    update_runtime_mode(
-                                        workspace_root=workspace_root,
-                                        cumulative_runner_tasks=0,
-                                        external_api_available=_is_external_api_available(workspace_root, config),
-                                    )
+                                    ext_avail = _is_external_api_available(workspace_root, config)
+                                    if load_runtime_mode(workspace_root, ext_avail).autopilot.cumulative_runner_tasks > 0:
+                                        update_runtime_mode(
+                                            workspace_root=workspace_root,
+                                            cumulative_runner_tasks=0,
+                                            external_api_available=ext_avail,
+                                        )
                                 except Exception:
                                     pass
                             return resp_data
@@ -2480,11 +2482,13 @@ def dev_tasks_checkout(
                         and harness_act.get("channel") == "spawn_fresh"
                     ):
                         try:
-                            update_runtime_mode(
-                                workspace_root=workspace_root,
-                                cumulative_runner_tasks=0,
-                                external_api_available=_is_external_api_available(workspace_root, config),
-                            )
+                            ext_avail = _is_external_api_available(workspace_root, config)
+                            if load_runtime_mode(workspace_root, ext_avail).autopilot.cumulative_runner_tasks > 0:
+                                update_runtime_mode(
+                                    workspace_root=workspace_root,
+                                    cumulative_runner_tasks=0,
+                                    external_api_available=ext_avail,
+                                )
                         except Exception:
                             pass
                     return resp_data

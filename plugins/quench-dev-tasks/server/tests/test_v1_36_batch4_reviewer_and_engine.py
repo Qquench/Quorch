@@ -370,7 +370,7 @@ def test_architecture_doc_path_traversal_confined(tmp_path):
     from project_config import QuenchStackConfig
     from reviewer_engine import PromptAssembler
 
-    outside = tmp_path.parent / "outside_secret_arch.md"
+    outside = tmp_path / "outside_secret_arch.md"
     outside.write_text("TOP_SECRET_OUTSIDE_CONTENT", encoding="utf-8")
     ws = tmp_path / "ws"
     ws.mkdir()

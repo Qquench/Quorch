@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Final
 import pytest
 
@@ -28,6 +29,22 @@ def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
     config.addinivalue_line("markers", "slow: heavy cross-platform CLI integration cases")
     config.addinivalue_line("markers", "tier1_fast: fast gate Tier-1 tests")
+    config.addinivalue_line("markers", "concurrent_moat: heavy concurrency and CAS race moat tests")
+    config.addinivalue_line("markers", "heavy: heavyweight integration or stress tests")
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """Skip collecting non-Tier-1 test modules when running `-m tier1_fast` to stay within cold-start budget."""
+    markexpr = (getattr(config.option, "markexpr", "") or "").strip()
+    if markexpr == "tier1_fast" and collection_path.suffix == ".py" and collection_path.name.startswith("test_"):
+        if collection_path.name not in TIER1_TARGET_REL_FILES:
+            try:
+                if b"mark.tier1_fast" in collection_path.read_bytes():
+                    return None
+            except OSError:
+                return None
+            return True
+    return None
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -40,10 +57,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(tier1_marker)
 
 
+@pytest.fixture(scope="session")
+def _global_config_isolation_sentinel(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """Session-scoped non-existent sentinel path avoiding per-test mktemp disk I/O."""
+    return str(tmp_path_factory.mktemp("no_global_config") / "__non_existent_global_config__.yaml")
+
+
 @pytest.fixture(autouse=True)
-def _isolate_user_global_config(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
-    """自动隔离用户全局配置 (~/.quorch/config.yaml)，确保本地开发与 CI 单测执行环境确定性。"""
-    dummy_path = tmp_path_factory.mktemp("no_global_config") / "__non_existent_global_config__.yaml"
-    monkeypatch.setenv("QUORCH_GLOBAL_CONFIG", str(dummy_path))
+def _isolate_user_global_config(monkeypatch: pytest.MonkeyPatch, _global_config_isolation_sentinel: str) -> None:
+    """自动隔离用户全局配置 (~/.quorch/config.yaml) 及真仓本地私有覆盖，确保单测确定性。"""
+    monkeypatch.setenv("QUORCH_GLOBAL_CONFIG", _global_config_isolation_sentinel)
     monkeypatch.delenv("QUORCH_DISABLE_GLOBAL_CONFIG", raising=False)
+    monkeypatch.setenv("QUORCH_IGNORE_REPO_ROOT_LOCAL_OVERRIDE", "1")
 

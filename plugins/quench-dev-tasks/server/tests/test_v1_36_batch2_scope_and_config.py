@@ -133,24 +133,28 @@ def test_path_guard_literal_basename_and_canonicalize_hardening(tmp_path: Path):
 
 def test_file_scope_guard_pattern_and_section_boundaries(tmp_path: Path):
     """docs/** 与 docs/* 段边界隔离、外部路径拒绝非 **/ 模式、brain 跨盘豁免及跨任务头隔离。"""
-    ws = str(tmp_path)
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    ws = str(ws_dir)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
 
     # docs/** 不得匹配 backend/docs/secret.py
-    assert matches_pattern(str(tmp_path / "docs" / "guide.md"), "docs/**", ws) is True
-    assert matches_pattern(str(tmp_path / "backend" / "docs" / "secret.py"), "docs/**", ws) is False
+    assert matches_pattern(str(ws_dir / "docs" / "guide.md"), "docs/**", ws) is True
+    assert matches_pattern(str(ws_dir / "backend" / "docs" / "secret.py"), "docs/**", ws) is False
 
     # docs/* 仅匹配直接子文件，不匹配多级嵌套
-    assert matches_pattern(str(tmp_path / "docs" / "a.md"), "docs/*", ws) is True
-    assert matches_pattern(str(tmp_path / "docs" / "a" / "b" / "c.md"), "docs/*", ws) is False
+    assert matches_pattern(str(ws_dir / "docs" / "a.md"), "docs/*", ws) is True
+    assert matches_pattern(str(ws_dir / "docs" / "a" / "b" / "c.md"), "docs/*", ws) is False
 
     # 字面量文件名不按 basename 跨目录匹配
-    assert matches_pattern(str(tmp_path / "backend" / "main.py"), "main.py", ws) is False
+    assert matches_pattern(str(ws_dir / "backend" / "main.py"), "main.py", ws) is False
 
     # 工作区外部路径拒绝 docs/** / *.css / *，但保留 **/brain/**
-    assert matches_pattern("C:/outside/style.css", "*.css", ws) is False
-    assert matches_pattern("C:/outside/docs/a.md", "docs/**", ws) is False
-    assert matches_pattern("C:/outside/secret.py", "*", ws) is False
-    assert is_agent_brain_artifact("C:/Users/u/app/brain/conv-1/walkthrough.md", ws) is True
+    assert matches_pattern(str(outside_dir / "style.css"), "*.css", ws) is False
+    assert matches_pattern(str(outside_dir / "docs" / "a.md"), "docs/**", ws) is False
+    assert matches_pattern(str(outside_dir / "secret.py"), "*", ws) is False
+    assert is_agent_brain_artifact(str(outside_dir / "brain" / "conv-1" / "walkthrough.md"), ws) is True
 
     # _extract_task_affected_files 不跨任务头吞入后续白名单
     md_doc = """### 任务 36.4 🔨 执行中 — 当前任务
@@ -180,7 +184,7 @@ def test_file_scope_guard_session_lock_missing_id_and_shell_delete(tmp_path: Pat
 
     ws = str(tmp_path)
     assert detect_shell_write_bypass("rm -f custom_tasks/2026_a.md", ws, dev_tasks_dir="custom_tasks") is not None
-    assert detect_shell_write_bypass("mv custom_tasks/a.md /tmp/b.md", ws, dev_tasks_dir="custom_tasks") is not None
+    assert detect_shell_write_bypass("mv custom_tasks/a.md moved_b.md", ws, dev_tasks_dir="custom_tasks") is not None
     assert detect_shell_write_bypass("echo hi > docs/dev_tasks/a.md", ws, dev_tasks_dir="custom_tasks") is not None
     assert detect_shell_write_bypass("echo hi > docs/notes/a.md", ws, dev_tasks_dir="custom_tasks") is None
 
@@ -365,9 +369,9 @@ def test_project_config_bom_migration_protected_backslash_cross_drive_and_review
     assert is_protected_config_path("sub\\quench_stack.local.yaml") is True
 
     # 3. 跨盘 canonical_artifact_ref 抛出 ConfigError
-    with patch("os.path.relpath", side_effect=ValueError("path is on mount 'Z:', start on mount 'D:'")):
+    with patch("os.path.relpath", side_effect=ValueError("cross-mount path")):
         with pytest.raises(ConfigError):
-            canonical_artifact_ref(str(tmp_path), "Z:/tasks/a.md", "1.1")
+            canonical_artifact_ref(str(tmp_path / "ws"), str(tmp_path / "other" / "a.md"), "1.1")
 
     # 4. reviewer_jobs 纳入 KNOWN_TOP_LEVEL_KEYS 无 UNKNOWN_KEY 告警，真未知键仍告警
     cfg, faults = migrate_and_validate({"project_name": "p", "reviewer_jobs": {"timeout": 10}})

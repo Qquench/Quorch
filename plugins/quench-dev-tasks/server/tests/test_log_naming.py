@@ -486,15 +486,18 @@ def test_gc_with_active_registry_zero_stat(tmp_path: Path, monkeypatch: pytest.M
             raise RuntimeError(f"realpath called on {base}")
         return real_realpath(path, *a, **k)
 
-    monkeypatch.setattr(os, "stat", _boom_stat)
-    monkeypatch.setattr(os, "lstat", _boom_lstat)
-    monkeypatch.setattr(os.path, "realpath", _boom_realpath)
+    with monkeypatch.context() as mp:
+        mp.setattr(os, "stat", _boom_stat)
+        mp.setattr(os, "lstat", _boom_lstat)
+        mp.setattr(os.path, "realpath", _boom_realpath)
 
-    pruned = gc_by_filename_order(tmp_path, keep=2, registry=reg)
-    assert os.path.exists(pinned_path)
-    assert len(pruned) >= 1
+        pruned = gc_by_filename_order(tmp_path, keep=2, registry=reg)
+        assert os.path.basename(pinned_path) in os.listdir(tmp_path)
+        assert len(pruned) >= 1
 
-    enforce_unified_log_quota(tmp_path, keep=1, registry=reg)
+        enforce_unified_log_quota(tmp_path, keep=1, registry=reg)
+        assert os.path.basename(pinned_path) in os.listdir(tmp_path)
+
     assert os.path.exists(pinned_path)
 
 

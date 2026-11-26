@@ -2079,6 +2079,28 @@
       "git_head_sha": "287802aa500b575442ef1564b562afe7c420b520",
       "git_index_mtime": 1795268872.9648364,
       "released": true
+    },
+    "2026-11-26_v1_36_post_archival_ci_sync::36.15": {
+      "task_id": "2026-11-26_v1_36_post_archival_ci_sync::36.15",
+      "md_sha256": "c6fba4ade3cbcb426011295230785f763207dbe99647940e9e2d6a3fb1cae2b3",
+      "generation": 1,
+      "holder_token": "token_1795695302530_17760",
+      "last_heartbeat_monotonic_ns": 293668484000000,
+      "last_heartbeat_wall_utc": "2026-11-26T12:16:28.727841+00:00",
+      "git_head_sha": "6b14210be45ea132b6799ea7ec10e4e17702fcf2",
+      "git_index_mtime": 1795682679.8353324,
+      "released": true
+    },
+    "2026-11-26_v1_36_ci_6b14210_hotfix_and_archive::36.16": {
+      "task_id": "2026-11-26_v1_36_ci_6b14210_hotfix_and_archive::36.16",
+      "md_sha256": "11fdd75295ccc55e9df3f15c1e4618702fc9ed4cebd52cf8210cad4fbfe6742b",
+      "generation": 1,
+      "holder_token": "token_1795696557490_17760",
+      "last_heartbeat_monotonic_ns": 294956796000000,
+      "last_heartbeat_wall_utc": "2026-11-26T12:37:57.039356+00:00",
+      "git_head_sha": "6b14210be45ea132b6799ea7ec10e4e17702fcf2",
+      "git_index_mtime": 1795682679.8353324,
+      "released": true
     }
   }
 }

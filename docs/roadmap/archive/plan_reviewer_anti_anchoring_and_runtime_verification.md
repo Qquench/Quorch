@@ -2,8 +2,14 @@
 # (Reviewer 防锚定与运行时反向探针治理蓝图)
 
 > **版本**: v1.29-approved / Architecture Roadmap & Implementation Blueprint  
-> **状态**: ✅ Approved Roadmap / 已通过评审（经外部 Reviewer 模型审查仲裁）  
-> **上下文与触发场景**:  
+> **归档状态**: 📦 **ARCHIVED — Partially Graduated (`v1.29`) & Remainder Superseded (`2026-11-26`)**  
+> **归档裁决与演进说明 (2026-11-26 Audit Disposition)**:
+> - **Phase 0（咨询遥测基线 `consultation_telemetry.jsonl`）& Phase 1（Epic C 前提审计契约 `<<<PREMISES>>>` / `parse_premises`）**：**✔️ 已于 `v1.29` (`dad6191`) 完整落地交付**，单测 `test_consultation_telemetry.py` 与 `test_premises_parsing.py` 持续守护。
+> - **Phase 2（Epic A 输入双平面 `observations` / `caller_hypotheses` 入参扩展）**：**🚀 已被后续双轨架构与独立 `advisor` MCP 超越替代**——(1) `v1.25`/`v1.35` `Inverted` 模式下旗舰推理模型直接在主会话读取真实文件与测试输出并完成自审，从拓扑根源消除了“敏捷模型压缩主观 `query` 投喂盲审模型”的锚定链路；(2) 独立 `advisor` MCP 已原生提供完整的反锚定多平面接口（`observations` 原始证据 / `question` 中立决策问题 / `problem` 待证假说 / `attempted` 已试死路），与任务状态机解耦；(3) `v1.31` 确立了单工具 Schema `<600B` 防截断硬门禁，不再向 `dev_reviewer_submit` / `dev_tasks_refine_spec` 堆叠大体积提示字段。
+> - **Phase 3（Epic B `<<<NEED-FILES>>>` 私有 `log:` / `status:` DSL）**：**🚀 已被 `v1.30–v1.32` 渐进式探索沙箱替代**——`code_explorer.py` 已落地多根目录沙箱（`resolve_within_roots`）、游标分页（`build_line_window`）与确定性直方图 `grep`，无需维护专用日志 DSL。
+> - **Phase 4（`require_premise_audit` 自动翻转阻断）& Phase 5（内嵌 `probe_runner.py` 快照子进程探针）**：**🛑 按 `v1.20–v1.23` 去工业化原则与 `future_roadmap_ideas.md §1.2` 克制边界裁撤**——避免在同步审查链路引入非确定性自然语言判真或高延迟/易触发 Windows 句柄锁的子进程沙箱（只读探查已由宿主原生 `research` 子代理与终端沙箱覆盖）。
+>
+> **原始背景**:  
 > Quorch 最初是为辅助精密制造执行系统（MES）开发而设计的治理框架。但在多 Agent 协同演化中，发现主 Agent（敏捷执行模型，如轻量级快速模型）在向评审模型（Reviewer）或外部推理引擎咨询时，存在普遍的“事实-推断坍缩”与“预设性提问注入”。  
 > 本规划经外部架构评审（Reviewer）深度论证与多轮推演，明确了核心治理不变量（INV-4、INV-6、INV-8）的保护与正交解耦方案，并为 Quorch 确立了分阶段演进实施路线。
 
@@ -69,10 +75,10 @@
 ```mermaid
 flowchart TD
     P0["Phase 0: 遥测埋点基线 (✔️ 已完成 - v1.29)\n(consultation_telemetry.jsonl)"] --> P1["Phase 1: Epic C 前提审计契约 (✔️ 已完成 - v1.29)\n(<<<PREMISES>>> 纯增量解析与持久化)"]
-    P1 --> P2["Phase 2: Epic A 双平面输入\n(observations / caller_hypotheses A2 布局)"]
-    P2 --> P3["Phase 3: Epic B 物化制品读取\n(<<<NEED-FILES>>> log: 与 status: 扩展)"]
-    P3 --> P4["Phase 4: Epic C 门禁收紧\n(audit_gate 校验 premise falsified)"]
-    P4 -.-> P5["Phase 5: 受限隔离沙箱探针 (可选)\n(仅 audit 模式 & 严格只读白名单)"]
+    P1 --> P2["Phase 2: Epic A 双平面输入 (📦 已替代)\n(observations / caller_hypotheses A2 布局)"]
+    P2 --> P3["Phase 3: Epic B 物化制品读取 (📦 已替代)\n(<<<NEED-FILES>>> log: 与 status: 扩展)"]
+    P3 --> P4["Phase 4: Epic C 门禁收紧 (🛑 已裁撤)\n(audit_gate 校验 premise falsified)"]
+    P4 -.-> P5["Phase 5: 受限隔离沙箱探针 (🛑 已裁撤)\n(仅 audit 模式 & 严格只读白名单)"]
 ```
 
 ### Phase 0: 咨询遥测基线 (Consultation Telemetry Baseline) (✔️ 已完成 - v1.29)
@@ -96,14 +102,14 @@ flowchart TD
   - 建立严格覆盖矩阵：2048/2049 悬崖双锚、覆写优先级高于 token、三布尔 presence 8 组合、Windows 句柄回收防御。
 - **交付状态**：已由任务 29.1 交付，单测 `test_premises_parsing.py` (12 passed) 与 `test_consultation_telemetry.py` (19 passed) 全量绿灯。
 
-### Phase 2: Epic A 输入双平面解耦 (Epistemic Input Plane A2 Layout)
+### Phase 2: Epic A 输入双平面解耦 (Epistemic Input Plane A2 Layout) (📦 已替代 — Inverted 模式 + 独立 advisor MCP + v1.31 `<600B` Schema 门禁)
 - **目标**：解耦主 Agent 事实输入与推测假说，同时保证 Prompt Cache 极高命中率。
 - **改动**：
   - `dev_reviewer_submit` 与 `dev_tasks_refine_spec` 增加可选入参 `observations: str | None = None`、`caller_hypotheses: str | None = None`；
   - **A2 尾置布局**：在静态系统前缀（含工作区文件树与模式锚点）后、`<<<NEED-FILES>>>` 之前插入动态双平面块，保持前缀哈希一致；
   - 纳入 `HopBudget` 统一配额（各限 16,000 字符）。
 
-### Phase 3: Epic B 物化制品只读读取 (Materialized Artifact Reads)
+### Phase 3: Epic B 物化制品只读读取 (Materialized Artifact Reads) (📦 已替代 — v1.30–v1.32 多根沙箱与游标探索)
 - **目标**：在零进程执行风险下，为 Reviewer 提供运行时物理证据。
 - **改动**：
   - 扩展 `<<<NEED-FILES>>>` 语法，支持提取 Runner 已物化的测试日志与退出状态：
@@ -116,12 +122,12 @@ flowchart TD
     ```
   - 调优多跳门控：将 `MIN_TELEMETRY_SAMPLES`（原硬编码 20）开放为配置项（如默认降为 8），并支持工作区首查快速通道（first-consult fast path）。
 
-### Phase 4: Epic C 门禁收紧与翻转核查 (Audit Gate Enforcement)
+### Phase 4: Epic C 门禁收紧与翻转核查 (Audit Gate Enforcement) (🛑 已裁撤)
 - **目标**：让前提假定在任务流转中产生约束力。
 - **改动**：
   - 在 `.agents/quench_stack.yaml` 引入 `audit_gate.require_premise_audit: false`（默认关闭）；
   - 开启后，若 review 记录中存在 `falsifiable: true` 且存在反向证据，触发任务确认阻断。
 
-### Phase 5: 隔离受限探针执行器 (Guarded Sandbox Probe Supervisor, 可选)
+### Phase 5: 隔离受限探针执行器 (Guarded Sandbox Probe Supervisor, 可选) (🛑 已裁撤)
 - **目标**：在深层架构排障（`audit` 模式）下提供受控探针。
 - **改动**：基于 `quench_stack.yaml` 的命令白名单与专用子进程 supervisor（`probe_runner.py`），在隔离快照目录中受限运行，执行前后严格比对工作区指纹，产生任何写修改一律 fail-closed 阻断。
